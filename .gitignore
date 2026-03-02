@@ -1,0 +1,24 @@
+/ref/
+/useless/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# Virtual env
+.venv/
+
+# Simulation/build outputs
+sim_build/
+build/
+syn/
+logs/
+*.vcd
+*.vvp
+*.fst
+
+# OS/editor
+.DS_Store
+.vscode/
