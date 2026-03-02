@@ -1,1 +1,1 @@
-MODULES := fa_mul_sat_q8_8 fa_exp_pwl_8seg_q1_15 fa_recip_nr_q16_16 fa_online_softmax_update
+MODULES := fa_mul_sat_q8_8 fa_exp_pwl_8seg_q1_15 fa_recip_nr_q16_16 fa_online_softmax_update fa_attention_ip_top

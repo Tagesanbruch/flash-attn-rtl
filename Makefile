@@ -1,11 +1,11 @@
-.PHONY: setup-py test regress list clean lint
+.PHONY: setup-py test regress list clean lint compare-torch
 
 MODULE ?= fa_mul_sat_q8_8
 LINT_FLAGS := --lint-only -Wall -Wno-UNUSEDSIGNAL
 
 setup-py:
 	uv venv .venv
-	uv pip install --python .venv/bin/python 'cocotb==1.9.2' pytest
+	uv pip install --python .venv/bin/python 'cocotb==1.9.2' pytest numpy
 
 test:
 	VIRTUAL_ENV=$(PWD)/.venv PATH=$(PWD)/.venv/bin:$$PATH $(MAKE) -C dv/cocotb MODULE=$(MODULE) test
@@ -31,6 +31,17 @@ lint:
 		rtl/softmax/fa_recip_nr_q16_16.sv \
 		rtl/softmax/fa_online_softmax_update.sv \
 		rtl/core/fa_row_reduction_core.sv
+	verilator $(LINT_FLAGS) --top-module fa_axi_lite_regs \
+		rtl/bus/fa_axi_lite_regs.sv
+	verilator $(LINT_FLAGS) --top-module fa_core_controller \
+		rtl/core/fa_core_controller.sv
+	verilator $(LINT_FLAGS) --top-module fa_attention_ip_top \
+		rtl/bus/fa_axi_lite_regs.sv \
+		rtl/core/fa_core_controller.sv \
+		rtl/top/fa_attention_ip_top.sv
+
+compare-torch:
+	VIRTUAL_ENV=$(PWD)/.venv PATH=$(PWD)/.venv/bin:$$PATH python dv/python/torch_compare.py --s 64 --d 64 --causal
 
 clean:
 	$(MAKE) -C dv/cocotb clean

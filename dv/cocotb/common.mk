@@ -41,8 +41,17 @@ VERILOG_SOURCES := \
 	$(RTL_SOFTMAX_DIR)/fa_online_softmax_update.sv
 endif
 
+ifeq ($(SELECTED_MODULE),fa_attention_ip_top)
+TOPLEVEL := fa_attention_ip_top
+MODULE_PY := test_fa_attention_ip_top_regs
+VERILOG_SOURCES := \
+	$(RTL_BUS_DIR)/fa_axi_lite_regs.sv \
+	$(RTL_CORE_DIR)/fa_core_controller.sv \
+	$(RTL_TOP_DIR)/fa_attention_ip_top.sv
+endif
+
 ifeq ($(strip $(TOPLEVEL)),)
-$(error Unsupported MODULE=$(SELECTED_MODULE), use one of: fa_mul_sat_q8_8 fa_exp_pwl_8seg_q1_15 fa_recip_nr_q16_16 fa_online_softmax_update)
+$(error Unsupported MODULE=$(SELECTED_MODULE), use one of: fa_mul_sat_q8_8 fa_exp_pwl_8seg_q1_15 fa_recip_nr_q16_16 fa_online_softmax_update fa_attention_ip_top)
 endif
 
 SIM_BUILD ?= sim_build/$(MODULE)
