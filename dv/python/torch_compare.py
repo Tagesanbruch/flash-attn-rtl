@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import csv
 import numpy as np
 
 from ref_attention import online_row_attention_q8_8
@@ -24,6 +25,15 @@ def calc_metrics(ref: np.ndarray, torch_out: np.ndarray):
     }
 
 
+def vec_preview(arr: np.ndarray, row: int = 0, n: int = 8) -> str:
+    clipped = arr[row, :n]
+    return np.array2string(clipped, precision=5, suppress_small=False)
+
+
+def zero_ratio(arr: np.ndarray, eps: float = 1e-12) -> float:
+    return float(np.mean(np.abs(arr) <= eps))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--s", type=int, default=64)
@@ -33,6 +43,7 @@ def main():
     parser.add_argument("--causal", action="store_true")
     parser.add_argument("--mae-thres", type=float, default=0.03)
     parser.add_argument("--maxe-thres", type=float, default=0.10)
+    parser.add_argument("--csv-out", type=str, default="")
     args = parser.parse_args()
 
     try:
@@ -43,6 +54,7 @@ def main():
         return
 
     all_metrics = []
+    csv_rows = []
 
     print(f"S={args.s}, d={args.d}, causal={args.causal}, n_seeds={args.n_seeds}")
     for idx in range(args.n_seeds):
@@ -67,6 +79,14 @@ def main():
         metrics = calc_metrics(ref, torch_out)
         all_metrics.append(metrics)
 
+        ref_zero = zero_ratio(ref)
+        torch_zero = zero_ratio(torch_out)
+        diff_zero = zero_ratio(ref - torch_out)
+        ref_mean_abs = float(np.mean(np.abs(ref)))
+        torch_mean_abs = float(np.mean(np.abs(torch_out)))
+        ref_std = float(np.std(ref))
+        torch_std = float(np.std(torch_out))
+
         print(
             f"seed={seed} "
             f"MAE={metrics['mae']:.6f} "
@@ -75,6 +95,37 @@ def main():
             f"P95={metrics['p95']:.6f} "
             f"P99={metrics['p99']:.6f} "
             f"RelMAE={metrics['rel_mae']:.6f}"
+        )
+        print(
+            f"  ref_mean_abs={ref_mean_abs:.6f}, torch_mean_abs={torch_mean_abs:.6f}, "
+            f"ref_std={ref_std:.6f}, torch_std={torch_std:.6f}"
+        )
+        print(
+            f"  zero_ratio(ref/torch/diff)={ref_zero:.6f}/{torch_zero:.6f}/{diff_zero:.6f}"
+        )
+        print(f"  ref_row0[:8]   = {vec_preview(ref, row=0, n=8)}")
+        print(f"  torch_row0[:8] = {vec_preview(torch_out, row=0, n=8)}")
+
+        csv_rows.append(
+            {
+                "seed": seed,
+                "s": args.s,
+                "d": args.d,
+                "causal": int(args.causal),
+                "mae": metrics["mae"],
+                "maxe": metrics["maxe"],
+                "rmse": metrics["rmse"],
+                "p95": metrics["p95"],
+                "p99": metrics["p99"],
+                "rel_mae": metrics["rel_mae"],
+                "ref_mean_abs": ref_mean_abs,
+                "torch_mean_abs": torch_mean_abs,
+                "ref_std": ref_std,
+                "torch_std": torch_std,
+                "ref_zero_ratio": ref_zero,
+                "torch_zero_ratio": torch_zero,
+                "diff_zero_ratio": diff_zero,
+            }
         )
 
     mae_list = np.array([m["mae"] for m in all_metrics], dtype=np.float64)
@@ -95,6 +146,13 @@ def main():
         f"MAE<={args.mae_thres} -> {pass_mae}, "
         f"MaxAE<={args.maxe_thres} -> {pass_maxe}"
     )
+
+    if args.csv_out:
+        with open(args.csv_out, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(csv_rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(csv_rows)
+        print(f"CSV written: {args.csv_out}")
 
 
 if __name__ == "__main__":
