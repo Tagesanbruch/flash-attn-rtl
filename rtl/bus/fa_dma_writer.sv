@@ -103,7 +103,7 @@ module fa_dma_writer #(
   assign m_axi_awid    = '0;
   assign m_axi_awaddr  = aw_addr_r;
   assign m_axi_awlen   = aw_len_r;
-  assign m_axi_awsize  = $clog2(AXI_DATA_W / 8);
+  assign m_axi_awsize  = 3'($clog2(AXI_DATA_W / 8));
   assign m_axi_awburst = 2'b01;  // INCR
   assign m_axi_awvalid = (w_state == W_ADDR);
 

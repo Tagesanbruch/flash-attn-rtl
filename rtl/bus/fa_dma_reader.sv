@@ -83,7 +83,7 @@ module fa_dma_reader #(
   assign m_axi_arid     = '0;
   assign m_axi_araddr   = ar_addr_r;
   assign m_axi_arlen    = ar_len_r;
-  assign m_axi_arsize   = $clog2(AXI_DATA_W / 8);  // e.g. 4 for 16 bytes
+  assign m_axi_arsize   = 3'($clog2(AXI_DATA_W / 8));
   assign m_axi_arburst  = 2'b01;  // INCR
   assign m_axi_arvalid  = (ar_state == AR_SEND);
 

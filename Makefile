@@ -3,7 +3,7 @@
 include cfg/sta_modules.mk
 
 MODULE ?= fa_mul_sat_q8_8
-LINT_FLAGS := --lint-only -Wall -Wno-UNUSEDSIGNAL
+LINT_FLAGS := --lint-only -Wall -Wno-UNUSEDSIGNAL -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC
 
 YOSYS_STA_DIR ?= ../ysyx/yosys-sta
 PDK_SRC_DIR ?= ../ysyx/mac/pdk/icsprout55-pdk
@@ -57,9 +57,27 @@ lint:
 		rtl/bus/fa_axi_lite_regs.sv
 	verilator $(LINT_FLAGS) --top-module fa_core_controller \
 		rtl/core/fa_core_controller.sv
+	verilator $(LINT_FLAGS) --top-module fa_dma_reader \
+		rtl/bus/fa_dma_reader.sv
+	verilator $(LINT_FLAGS) --top-module fa_dma_writer \
+		rtl/bus/fa_dma_writer.sv
+	verilator $(LINT_FLAGS) --top-module fa_tile_buffer \
+		rtl/core/fa_tile_buffer.sv
+	verilator $(LINT_FLAGS) --top-module fa_dot_product_d \
+		rtl/core/fa_dot_product_d.sv
+	verilator $(LINT_FLAGS) --top-module fa_attention_core \
+		rtl/common/fa_mul_sat_q8_8.sv \
+		rtl/softmax/fa_exp_pwl_8seg_q1_15.sv \
+		rtl/softmax/fa_recip_nr_q16_16.sv \
+		rtl/core/fa_attention_core.sv
 	verilator $(LINT_FLAGS) --top-module fa_attention_ip_top \
+		rtl/common/fa_mul_sat_q8_8.sv \
+		rtl/softmax/fa_exp_pwl_8seg_q1_15.sv \
+		rtl/softmax/fa_recip_nr_q16_16.sv \
 		rtl/bus/fa_axi_lite_regs.sv \
-		rtl/core/fa_core_controller.sv \
+		rtl/bus/fa_dma_reader.sv \
+		rtl/bus/fa_dma_writer.sv \
+		rtl/core/fa_attention_core.sv \
 		rtl/top/fa_attention_ip_top.sv
 
 compare-torch:

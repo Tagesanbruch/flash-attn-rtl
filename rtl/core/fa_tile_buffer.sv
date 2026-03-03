@@ -69,7 +69,7 @@ module fa_tile_buffer #(
 
   // Read port (combinational for low latency)
   logic [ADDR_W-1:0] rd_addr;
-  assign rd_addr = rd_row * D + rd_col;
+  assign rd_addr = ADDR_W'(rd_row * D) + ADDR_W'(rd_col);
 
   always_comb begin
     if (active_bank == 1'b0)

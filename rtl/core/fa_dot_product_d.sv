@@ -20,6 +20,7 @@ module fa_dot_product_d #(
   logic signed [31:0] product;     // Q16.16
   logic signed [ACC_W-1:0] acc;
   logic [$clog2(D):0] count;
+  localparam int COUNT_MAX = D - 1;
 
   always_comb begin
     product = i_a_q8_8 * i_b_q8_8;  // 16x16 -> 32 bit, Q16.16
@@ -42,7 +43,7 @@ module fa_dot_product_d #(
         acc   <= acc + ACC_W'(product);
         count <= count + 1'b1;
 
-        if (count == D - 1) begin
+        if (count == COUNT_MAX) begin
           o_done <= 1'b1;
         end
       end
