@@ -1,0 +1,136 @@
+\section{\MSAGA{} Kernel Programming Model}
+
+The AWS Neuron Kernel Interface (NKI)~\cite{aws_neuron_nki} provides an expressive 
+Python interface that allows users to write custom kernels for AWS Neuron 
+devices. It enables instruction-level control with the convenience of 
+Python APIs.
+Inspired by AWS NKI, we design a similar but simplified Python library 
+for writing custom \MSAGA{} kernels. The library consists of three main 
+components: type-safe tensors, a Python API for the \MSAGA{} instruction set, 
+and a lightweight JIT compiler.
+
+\subsection{Type-Safe Tensors}
+
+The \MSAGA{} Python library implements a PyTorch-like~\cite{pytorch,pytorch2} tensor abstraction 
+for representing multi-dimensional arrays. Because the memory hierarchy 
+is fully user-managed, tensors can be allocated in one of three memory 
+spaces: main memory, scratchpad SRAM, or accumulation SRAM. Accordingly, 
+we define three tensor types:
+
+\begin{itemize}
+  \item \texttt{MTile} — tensor allocated in main memory,
+  \item \texttt{STile} — tensor allocated in scratchpad SRAM,
+  \item \texttt{ATile} — tensor allocated in accumulation SRAM.
+\end{itemize}
+
+All tensor types support a subset of the PyTorch API, including 
+\texttt{shape}, \texttt{dtype}, \texttt{split}, and \texttt{reverse}. 
+By explicitly distinguishing tensor types, users can write custom 
+kernel functions that clearly declare the expected memory scope of input and output 
+tensors.
+
+\subsection{Python API for \MSAGA{} Instructions}
+
+Each \MSAGA{} instruction is exposed through a corresponding Python API. 
+These APIs are designed to be type-safe, ensuring correct usage of 
+tensor types. The complete set of supported APIs is shown in 
+\autoref{lst:msaga_api}.
+Internally, these functions construct hardware instructions using the 
+metadata of the input tensors, such as shape, stride, and data type. 
+This abstraction allows users to write high-level kernels without 
+managing low-level hardware details.
+
+\begin{listing}
+\begin{mintedpython}
+# DMA Instructions
+def store_tile(src: ATile, dst: MTile, ...)
+def load_tile(src: MTile, dst: STile, ...)
+# Compute Instructions
+def load_stationary(tile: STile, ...)
+def attn_score(K: STile, l: ATile, ...)
+def attn_value(V: STile, O: ATile, ...)
+def reciprocal(l: ATile, ...)
+def attn_lse_norm(O: ATile, ...)
+\end{mintedpython}
+\caption{\MSAGA{} Python instructions.}
+\label{lst:msaga_api}
+\end{listing}
+
+\subsection{JIT Kernel Compiler}
+
+The JIT compiler takes a kernel function written with the \MSAGA{} Python 
+library and compiles all internally constructed \MSAGA{} instructions into a 
+binary program that can be directly submitted to the \MSAGA{} accelerator.
+It processes Python functions decorated with \texttt{@F.kernel}, which also
+allow users to specify the target device for execution: either a simulated device using 
+Verilator~\cite{verilator} or a real device running on Xilinx Alveo U55C FPGA.
+Device-host communication is also handled automatically by the compiler.
+
+
+\autoref{lst:msaga_fa_kernel} shows a complete implementation of the \SA{} kernel using the Python library.
+In this example, the device is simulated by Verilator, while the host compiles the entire kernel into a binary program,
+loads input tensors into the main memory simulated by DRAMSim2~\cite{dramsim2},
+submits the compiled program to the device, and retrieves the output tensors back from DRAMSim2 after the computation is done.
+As \MSAGA{} currently does not support matrix transposition,
+the host transposes the input matrix $V$ and the output matrix $O$.
+On commercial hardware, such transpositions can be performed by the DMA engine 
+during memory transfers~\cite{aws_neuron_nki}, and therefore should not incur 
+significant overhead.
+
+\begin{listing}
+\begin{mintedpython}
+import asa as F
+
+@F.kernel(device="verilator_sim")
+def attention(Q: MTile, K: MTile, Vt: MTile):
+  # allocate output tensor
+  Ot: MTile = F.alloc_mem(..)
+  # split large tensors into tiles
+  Ot_MTiles = Ot.split(br, dim=-1) # [d, br]
+  Q_MTiles = Q.split(br, dim=-2)   # [br, d]
+  K_MTiles = K.split(bc, dim=-2)   # [br, d]
+  Vt_MTiles = Vt.split(bc, dim=-1) # [d, bc]
+  # double buffering for Q, K, Vt
+  K_STiles = (F.alloc_spad(..),
+              F.alloc_spad(..))
+  Vt_STiles = (F.alloc_spad(..),
+               F.alloc_spad(..))
+  # allocate space for accumulation results
+  log_expsum = F.alloc_accum(..)   # [1, br]
+  Ot_ATile = F.alloc_accum(..)     # [d, br]
+
+  for i, Q_i in enumerate(Q_MTiles):
+    F.load_tile(Q_i, Q_STiles[i % 2])
+    for j, (K_j, Vt_j) in \
+        enumerate(zip(K_MTiles, Vt_MTiles)):
+      F.load_stationary(Q_STiles[i % 2])
+      F.load_tile(K_j, K_STiles[j % 2])
+      F.attn_score(K_STiles[j % 2], log_expsum)
+      F.load_tile(Vt_j, Vt_STiles[j % 2])
+      F.attn_value(Vt_STiles[j % 2], Ot_ATile)
+    F.reciprocal(log_expsum)
+    F.attn_lse_norm(Ot_ATile)
+    F.store_tile(Ot_ATile, Ot_MTiles[i])
+
+# Run simulation and return result
+Ot = attention(Q, K, Vt)
+O = Ot.to_numpy().T  # Host-side transpose
+\end{mintedpython}
+\caption{\MSAGA{} \FA{} kernel.}
+\label{lst:msaga_fa_kernel}
+\end{listing}
+
+% The JIT compiler processes Python functions decorated with 
+% \texttt{@F.kernel}. The decorator also specifies the target device 
+% (e.g., a Verilator-based simulator~\cite{verilator}), and handles device-host 
+% communication automatically.
+
+% In the example above, the host loads input tensors into device memory using 
+% DRAMSim2~\cite{dramsim2}, dispatches the compiled instructions to the \MSAGA{} device, 
+% and retrieves the output tensors upon completion. 
+% Because \MSAGA{} does not currently support hardware matrix transposition, 
+% the input matrix $V$ is transposed in advance, and the output matrix $O$ 
+% is converted to NumPy~\cite{numpy} arrays for post-processing. 
+% On commercial hardware, such transpositions can be performed by the DMA engine 
+% during memory transfers~\cite{aws_neuron_nki}, and therefore should not incur 
+% significant overhead.

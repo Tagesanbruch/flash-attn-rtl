@@ -1,0 +1,44 @@
+\setlength{\textfloatsep}{0pt}
+
+\begin{algorithm}[!t]
+\footnotesize{
+\SetKwInOut{Input}{Input}
+    \SetAlgoLined
+    \textbf{Input:} 
+    Number of heads: $h$;\\
+    Token pruning ratio: $p_{t}$; Head pruning ratio: $p_{h}$;\\
+    $attention\_prob \in \mathbb{R}^{ h \times L_0 \times L_1}$, 
+    $attention\_out \in \mathbb{R}^{L_0 \times D_{in}}$; \\
+    Previous cumulative token importance score: $s_{t} \in L_1;$ \\
+    Previous cumulative head importance score: $s_{h} \in h;$
+    
+    Reshape $attention\_out$ by head, get $E \in \mathbb{R}^{ h \times L_0 \times D}$;
+    \tcc{accumulate the token importance}
+    \For{$token_{id} = 0 \mathbf{ \ to \ } L_1$}{
+        \For{$l_{0} = 0 \mathbf{ \ to \ } L_0$}{
+            \For{$head_{id} = 0 \mathbf{ \ to \ } h$}{
+                $s_{t}[token_{id}] \mathrel{{+}{=}} attention\_prob[head_{id}][l_0][token_{id}]$
+            }
+        }
+    }
+    \tcc{accumulate the head importance}
+    \For{$head_{id} = 0 \mathbf{ \ to \ } h$}{
+        \For{$l_{0} = 0 \mathbf{ \ to \ } L_0$}{
+            \For{$d = 0 \mathbf{ \ to \ } D$}{
+                $s_{h}[head_{id}] \mathrel{{+}{=}} abs(E[head_{id}][l_0][d] )$
+            }
+        }
+    }
+    
+    $remained\_token\_id = $ top-k($s_t, L_1 \times (1-p_t)$) \\
+    $remained\_head\_id = $ top-k($s_h, h \times (1-p_h)$) \\
+    
+    \textbf{Output:} $remained\_token\_id, remained\_head\_id, s_t, s_h$
+    
+    \caption{Token and Head Pruning (one layer)}
+}
+    \label{algo:cascade}
+\afterpage{\global\setlength{\textfloatsep}{\oldtextfloatsep}}
+\end{algorithm}
+
+

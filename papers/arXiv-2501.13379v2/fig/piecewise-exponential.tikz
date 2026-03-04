@@ -1,0 +1,26 @@
+\begin{tikzpicture}
+
+        \begin{axis}[
+%            ticks=none,
+            xtick distance=0.5,
+            ytick distance=0.5,
+            axis equal image=true,
+%            grid,
+%            grid style={gray!50},
+%            grid=both,
+            xlabel={$x$},
+            ylabel={$e^x$},
+            axis lines=middle,
+            xmin=-1, xmax=1,
+            ymin=0, ymax=3,
+            axis x line=center,
+            axis y line=center,
+            height=9cm,
+		    width=9cm
+        ]
+            \addplot[color=red, mark=square] table [x=x, y=ex, col sep=comma] {fig/exp.data.csv};
+            \addlegendentry{\(\hat{e^x}\)}
+            \addplot[color=blue, dashed] {exp(x)};
+            \addlegendentry{\(e^x\)}
+        \end{axis}
+\end{tikzpicture}

@@ -1,0 +1,71 @@
+\ifreview
+\title[]{\MSAGA{}: Fusing \FA{} \\ within a Single Systolic Array}
+\else
+\title[]{\SA{}: Fusing \FA{} within a Single Systolic Array}
+\fi
+
+
+\author{Jiawei Lin}
+\email{jiawei.lin@epfl.ch}
+\affiliation{%
+  \institution{EPFL}
+  \city{Lausanne}
+  \country{Switzerland}
+}
+
+\author{Yuanlong Li}
+\email{yuanlong.li@epfl.ch}
+\affiliation{%
+  \institution{EPFL}
+  \city{Lausanne}
+  \country{Switzerland}
+}
+
+\author{Guokai Chen}
+\email{guokai.chen@epfl.ch}
+\affiliation{%
+  \institution{EPFL}
+  \city{Lausanne}
+  \country{Switzerland}
+}
+
+\author{Thomas Bourgeat}
+\email{thomas.bourgeat@epfl.ch}
+\affiliation{%
+  \institution{EPFL}
+  \city{Lausanne}
+  \country{Switzerland}
+}
+
+\renewcommand{\shortauthors}{Jiawei et al.}
+
+\begin{abstract}
+
+Transformer models rely heavily on the scaled dot-product attention (SDPA) operation,
+typically implemented as \FA{}.
+Characterized by its frequent interleaving of matrix multiplications and softmax operations,
+\FA{} fails to fully utilize the compute resources of modern systolic-array-based accelerators
+designed for consecutive and large matrix multiplications.
+
+To fully unleash the performance potential of systolic arrays for \FA{},
+we propose \MSAGA{}, an enhanced systolic array architecture that runs the entire \FA{}
+on the array without external vector units.
+Combined with \SA{}, an optimized kernel for \MSAGA{} that achieves fine-grained and element-wise
+overlapping of \FA{} operations, \MSAGA{} maximizes array utilization while preserving the
+original floating-point operation order of \FA{}.
+We implement \MSAGA{} in synthesizable RTL and evaluate its performance against state-of-the-art
+systolic-array-based accelerators.
+Our results show that \MSAGA{} achieves 1.77$\times$ and 4.83$\times$ higher attention \FLOPs{} utilization
+compared to AWS Neuron-v2 and Google TPUv5e, respectively.
+We synthesize \MSAGA{} in a 16\,nm technology at 1.5\,GHz, and results indicate
+only a 12\% area overhead compared to a standard weight-stationary systolic array.
+\end{abstract}
+
+
+
+
+
+
+
+
+\maketitle

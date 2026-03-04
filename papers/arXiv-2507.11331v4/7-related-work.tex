@@ -1,0 +1,40 @@
+\section{Related Work}
+
+
+\emph{Systolic Arrays and Spatial Accelerators.}
+Extensive work has explored the automatic generation of spatial accelerators for
+target applications~\cite{polysa,autosa,dsagen,soda,interstellar,lego}.
+These approaches require the application to be written in a specific form and
+generate application-specific hardware accelerators.
+In contrast, \MSAGA{} is compatible with existing general-purpose systolic arrays
+for matrix multiplication.
+Stellar~\cite{stellar} and Gemmini~\cite{ucb-gemmini} expose ISAs for
+programmability, but they do not support the \FA{} algorithm.
+PICACHU~\cite{picachu} proposes a CGRA-based solution to accelerate nonlinear
+operations in Transformer models, including the \texttt{exp} in \FA{}.
+However, it instantiates a separate array alongside the main MAC systolic array,
+increasing area and incurring additional data movement overhead.
+
+
+\emph{Fusing \FA{} on Systolic Arrays.}
+Significant efforts have been made to fuse \FA{} on hardware accelerators. 
+COSA~\cite{COSA} and COSA Plus~\cite{COSAPlus} fuse \FA{} into two 
+cooperative systolic arrays, where data from the first array must pass 
+through a special function unit (SFU) for softmax. Matching the throughput of SFU 
+and large systolic arrays can increase hardware cost.  
+\FuseMax{}~\cite{fusemax} builds on the cascade Einsum abstraction 
+introduced in TeAAL~\cite{teaal} to describe the \FA{} algorithm 
+and map it onto spatial accelerator models. 
+\FuseMax{} uses a different dataflow than ours: by employing an output-stationary dataflow,
+it overlaps four \FA{} 
+iterations on the systolic array to obtain high hardware utilization.
+However, the overlapping of iterations necessitates storing multiple input tiles in SRAM and
+maintaining intermediate results within the array, leading to higher storage overhead 
+and control complexity.
+Additionally, \FuseMax{} assumes all \FA{} operations are performed in 
+\texttt{fp16} format. By contrast, the original \FA{} algorithm uses 
+\texttt{fp16} for matrix multiplications but \texttt{fp32} for accumulations. 
+Reconciling this difference may require intermediate results to be stored in 
+\texttt{fp32}, which can further increase register usage.
+ExpMul~\cite{expmul} fuses \texttt{exp} and the second matrix multiplication in \FA{}.
+Its approach is orthogonal to ours and could be integrated into \MSAGA{}.

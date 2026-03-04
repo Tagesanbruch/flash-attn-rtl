@@ -1,0 +1,7 @@
+\section{Conclusion}
+
+ We propose \name, a software-architecture \codesign to enable efficient sparse and quantized attention inference.
+ We first propose cascade token and head pruning to remove the computation and memory access of inessential tokens and heads. 
+ A novel \topk engine is designed to support on-the-fly token and head importance ranking with $O(n)$ time complexity. Moreover, we propose progressive \lowprec to allow different \bitwidths across layers. 
+ \name achieves orders of magnitude speedup and energy savings over traditional platforms, and is \perfoverathree\x and \perfovermnnfast\x faster than \athree and \mnnfast. We also provide detailed performance analysis, breakdown of each technique, and design space explorations, offering insights to future NLP accelerator designs.
+ 

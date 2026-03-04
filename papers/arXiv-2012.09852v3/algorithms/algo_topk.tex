@@ -1,0 +1,61 @@
+\begin{algorithm}[!t]
+\footnotesize{
+\SetKwInOut{Input}{Input}
+    \textbf{Input:} Top-k $k$, Data vector $inputs$; \\
+    FIFO\_L, FIFO\_R depth: 64; FIFO $=$ [FIFO\_L, FIFO\_R]; \\
+    Initialize FIFO\_L with $inputs$, FIFO\_R $= \phi$; \\
+    $target = k$, $num\_eq\_pivot = 0$;\\
+    \SetAlgoLined
+    \textbf{START:} \\
+    \uIf{ $\mathrm{size(FIFO\_R)} + num\_eq\_pivot \le target$ }{
+    \tcc{ the selected pivot is too large}
+    $target = target - \mathrm{size(FIFO\_R)}-num\_eq\_pivot$; \\
+    FIFO\_R $ =\phi$; $select = 0$; $pivot = $ FIFO\_L[rand]; \\
+    Goto \textbf{STATE\_RUN};\\
+    
+    }
+    
+    \uElseIf{$\mathrm{size(FIFO\_R)} > target$}{
+    \tcc{ the selected pivot is too small}
+    FIFO\_L $=\phi$; $select = 1$; $pivot = $ FIFO\_R[rand]; \\
+    Goto \textbf{STATE\_RUN}; \\
+    }
+    
+    \Else{ \tcc{
+    $\mathrm{size(FIFO\_R)} \le target$
+    $\mathrm{size(FIFO\_R)} + num\_eq\_pivot > target $
+    }
+    $k\_th\_largest = pivot$; \\ $num\_eq\_k\_th\_largest = target$-size(FIFO\_R); \\
+    \textbf{Output:} [$k\_th\_largest, num\_eq\_k\_th\_largest$]; \\
+    }
+    
+    \colorbox{topkcolor}{\vbox{
+    \textbf{STATE\_RUN:} (Figure \ref{fig:topk} Right) \\
+    \tcc{items smaller than pivot $\rightarrow$ FIFO\_L \\
+    items larger than pivot $\rightarrow$ FIFO\_R}
+     $num\_eq\_pivot = 0$; \\
+    \For{$i = 0 \mathbf{ \ to \ } \mathrm{size(FIFO} [select])-1$}{
+    Pop FIFO[$select$] as $item$;\\
+    \uIf{$item < pivot$}{
+    Push $item$ to FIFO\_L;\\
+    }
+    
+    \uElseIf{$item > pivot$}{Push $item$ to FIFO\_R;\\}
+    \Else{ \tcc{$item == pivot$}
+    $num\_eq\_pivot = num\_eq\_pivot + 1$;\\}
+    }
+    Goto \textbf{START};
+    }}
+    
+    
+    
+    
+    \caption{\topk Engine}
+    }
+    \label{algorithm:topk}
+
+\afterpage{\global\setlength{\textfloatsep}{\oldtextfloatsep}}
+
+\end{algorithm}
+
+

@@ -1,0 +1,73 @@
+{
+   "sources" : [
+      {
+         "usage" : "toplevel",
+         "filename" : "main.tex"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "8-discussion.tex"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "ACM-Reference-Format.bst"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "acmauthoryear.bbx"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "acmauthoryear.cbx"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "acmdatamodel.dbx"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "acmnumeric.bbx"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "acmnumeric.cbx"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "appendix.tex"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "mcache/34FE628172AD0EF3B0D5DE9E0A474A59.highlight.minted"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "mcache/579CE330F53315E15DEC9987C602163C.highlight.minted"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "mcache/64A01D97C1A0FA10A43F3086D2107DD7.highlight.minted"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "mcache/_FAD58DE7366495DB4650CFEFAC2FCD61.index.minted"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "mcache/vs.style.minted"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "minted1.sty"
+      },
+      {
+         "usage" : "ignore",
+         "filename" : "minted2.sty"
+      }
+   ],
+   "spec_version" : 1,
+   "texlive_version" : "2025",
+   "process" : {
+      "compiler" : "pdflatex"
+   }
+}

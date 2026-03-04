@@ -1,0 +1,24 @@
+\begin{table}[t]
+\renewcommand*{\arraystretch}{0.5}
+\setlength{\tabcolsep}{8pt}
+\footnotesize
+\centering
+\caption{Architectural Setups of \spattenfull.}
+\vspace{-5pt}
+\begin{tabular}{l|l}
+\toprule
+  \multirow{2}{*}{Q-K-V Fetcher} & A 32$\times$16 address crossbar and a 16$\times$32 \\
+   & data crossbar; each port has a 64-depth FIFO. \\ \midrule
+ \multirow{2}{*}{Q $\times$ K} & 196KB Key SRAM; 512$\times$12-bit multipliers; \\
+ & Adder tree outputs at most 8 items/cycle. \\ \midrule
+ Softmax & FIFO depth for softmax: 128; Parallelism: 8. \\ \midrule
+ Attention\_Prob $\times$ V & 196KB Value SRAM; 512$\times$12-bit multipliers.  \\ \midrule
+ \multirow{3}{*}{HBM} & HBM2, 16$\times$128-bit HBM channels @ 2GHz;\\
+ & each channel has 2$\times$64-bit pseudo-channels \\
+ & and provides 32GB/s bandwidth. \\
+ \bottomrule
+\end{tabular}
+\vspace{-10pt}
+\label{tab:setup}
+\end{table}
+

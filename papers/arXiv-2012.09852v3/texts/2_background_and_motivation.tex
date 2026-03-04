@@ -1,0 +1,32 @@
+\section{Background and Motivation}
+
+\input{figtex/fig_background}
+\input{algorithms/algo_attention}
+\subsection{Background}
+\textbf{Attention-Based NLP Models.}
+NLP tasks can be categorized into two types: discriminative and generative. For discriminative ones, the models need to summarize the input information and make predictions. Discriminative tasks include token-level classification\cite{tjong-kim-sang-de-meulder-2003-introduction}, sentence-level classification and regression~\cite{socher-etal-2013-recursive} \etc 
+Meanwhile, models for generative tasks need first to summarize the input information and then generate new tokens. Exemplary generation tasks include Language Modeling (LM)~\cite{radford2019language} and machine translation~\cite{46201}.
+
+\bert for discriminative and \gpttwo for generative tasks are the most widely-used models as illustrated in  Figure~\ref{fig:background}. \bert only contains the summarization stage, while \gpttwo contains summarization and generation stages. In summarization (Figure~\ref{fig:background} left), the input tokens are first embedded into vectors and processed by blocks. Inside each block, $block\_in$ are first multiplied with three matrices to get Query (Q), Key (K) and, Value (V). Then QKV are processed by attention to get the intermediate features $attention\_out$. A residual layer adds the $attention\_out$ with $block\_in$ and conducts layer normalization. There will be an additional FC on $attention\_out$ if there is more than one head. Furthermore, a Feed-Forward Network (FFN) layer containing two Fully-Connected (FC) layers is applied. Finally, another residual operation is conducted and outputs $block\_out$.
+The same block is repeated multiple times such as 12 times for \bert-Base. The last block is followed by one classification layer in \bert to get the \emph{final result}. In contrast, \gpttwo applies an LM head to generate one new token and enters the generation stage.
+
+Generation stage (Figure~\ref{fig:background} right) has two main differences from summarization: 1) Each iteration only processes \emph {one single token} instead of the whole sentence. 2) Ks and Vs from the summarization stage are concatenated with current K and V, and sent to attention \emph{in batch}, while the query is still \emph{one single vector}. After the last block, another new token will be generated. Generation stage ends when \texttt{end\_of\_sentence} token is generated, or the sentence length reaches a pre-defined limit. One generation iteration's runtime is similar to the whole summarization stage on GPU, because the summarization is processed in batch.
+
+\input{figtex/fig_methodology}
+\input{algorithms/algo_cascade}
+
+
+
+\textbf{Attention Mechanism.} The attention mechanism~\cite{46201} is shown in Algorithm~\ref{algo:attention}. In the summarization stage, Q, K, and V are matrices with the same dimension, while in the generation stage, Q is one single vector, and K, V are matrices. 
+
+Attention has multiple \textit{heads}, each processing a chunk of Q, K, and V. Different heads capture various dependencies between tokens, some for long-term, some for short-term. Inside each head, $\mathrm{Q} \times \mathrm{K}^{T} / \mathrm{sqrt}(D)$ gives attention scores, which indicate whether two tokens are related. For instance in Figure~\ref{fig:heatmap_bert}, the score for `more' attending to `than' is large. After that, a row-wise softmax computes the attention probabilities. The exponential of softmax further enlarges the score for highly-related token pairs. The head's feature is then computed with $attention\_prob \times$V. This step lets each token fetch information from their cared tokens. Finally, multiple heads are concatenated together as the attention output. In \bert-Base and \gpttwo-Small, there are 12 blocks, and each attention layer has 12 heads. There are 24 blocks and 16 heads for each attention layer in \bert-Large and \gpttwo-Medium.
+
+
+
+\subsection{Motivation}
+\label{sec:motivation}
+We profile the end-to-end latency of a \gpttwo model on multiple hardware platforms in Figure~\ref{fig:latency_breakdown}. Attention typically accounts for over 50\% latency, even though it only has around 10\% of overall \flops. In Figure~\ref{fig:latency_breakdown} right, around 73\% of the time is spent on data movements such as splitting heads, K and V concatenations, reshape, and transpose. 
+GPUs and CPUs are well-optimized for matrix multiplications but are poor on the complex memory operations, thus slowing down attention. Therefore, it is necessary to build an accelerator to solve the attention bottleneck as a co-processor. The FC layers of NLP models are processed by GPUs, CPUs, or tensor algebra accelerators as they are highly-optimized for FC, and our \name co-processor handles all attention layers.
+
+\input{figtex/fig_heatmap_bert}
+

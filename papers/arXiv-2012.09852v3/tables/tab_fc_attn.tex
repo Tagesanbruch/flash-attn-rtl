@@ -1,0 +1,21 @@
+\begin{table}[t]
+\centering
+\caption{FC \& Attention FLOPs \& Latency Breakdown on \gpttwo-Medium.}
+\vspace{-5pt}
+\setlength{\tabcolsep}{1pt}
+\footnotesize
+\centering
+\begin{tabular}{l|c|c|c|c}
+\toprule
+& FC \gflops & Attn \gflops & FC Latency (ms) & Attn Latency (ms) \\
+\midrule
+GPU & 19.3 (85.6\%) & 3.3 (14.4\%) & 388.3 (51.4\%) & 366.7 (48.6\%) \\
+\midrule
+\textbf{\spattenfc} & 19.3 (95.5\%) & 0.9 (4.5\%) & 25.75 (92.4\%) & 2.13 (7.6\%)\\
+\bottomrule
+
+\end{tabular}
+\label{tab:fc_attn}
+\vspace{-10pt}
+\end{table}
+
