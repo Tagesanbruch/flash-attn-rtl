@@ -1,9 +1,13 @@
-.PHONY: setup-py test regress list clean lint compare-torch audit-algo sta-list sta-syn sta-run sta sta-module sta-check-paths
+.PHONY: setup-py test regress list clean lint compare-torch audit-algo sta-list sta-syn sta-run sta sta-module sta-check-paths cpp-sdpa-build cpp-sdpa-compare check-sdpa-cpp verilator-cpp-build verilator-cpp-run check-sdpa-verilator-cpp
 
 include cfg/sta_modules.mk
 
 MODULE ?= fa_mul_sat_q8_8
 LINT_FLAGS := --lint-only -Wall -Wno-UNUSEDSIGNAL -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC
+CPP_SDPA_BIN ?= build/sdpa_compare
+RTL_DUMP_DIR ?= /tmp/fa_rtl_dump
+VERILATOR_CPP_DIR ?= build/verilator_cpp
+VERILATOR_CPP_BIN ?= fa_attention_core_tb
 
 YOSYS_STA_DIR ?= ../ysyx/yosys-sta
 PDK_SRC_DIR ?= ../ysyx/mac/pdk/icsprout55-pdk
@@ -135,3 +139,40 @@ sta-module: sta-run
 
 clean:
 	$(MAKE) -C dv/cocotb clean
+
+cpp-sdpa-build:
+	@mkdir -p build
+	g++ -O2 -std=c++17 dv/verilator_cpp/sdpa_compare.cpp -o $(CPP_SDPA_BIN)
+
+cpp-sdpa-compare: cpp-sdpa-build
+	$(CPP_SDPA_BIN) $(RTL_DUMP_DIR)
+
+check-sdpa-cpp:
+	@echo "[INFO] Using Verilator: $$(verilator --version)"
+	@echo "[INFO] Running full-parameter RTL simulation (fa_attention_core_full) and dumping vectors to $(RTL_DUMP_DIR)"
+	rm -rf $(RTL_DUMP_DIR)
+	VIRTUAL_ENV=$(PWD)/.venv PATH=$(PWD)/.venv/bin:$$PATH RTL_DUMP_DIR=$(RTL_DUMP_DIR) $(MAKE) -C dv/cocotb MODULE=fa_attention_core_full test
+	@echo "[INFO] Running independent C++ SDPA comparator"
+	$(MAKE) cpp-sdpa-compare RTL_DUMP_DIR=$(RTL_DUMP_DIR)
+
+verilator-cpp-build:
+	@mkdir -p $(VERILATOR_CPP_DIR)
+	verilator -cc --exe --build \
+		--Mdir $(VERILATOR_CPP_DIR) \
+		--top-module fa_attention_core \
+		-O3 -CFLAGS "-O3 -std=c++17" \
+		-Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-UNUSEDSIGNAL \
+		rtl/common/fa_mul_sat_q8_8.sv \
+		rtl/softmax/fa_exp_pwl_8seg_q1_15.sv \
+		rtl/softmax/fa_recip_nr_q16_16.sv \
+		rtl/core/fa_attention_core.sv \
+		dv/verilator_cpp/fa_attention_core_tb.cpp \
+		-o $(VERILATOR_CPP_BIN)
+
+verilator-cpp-run: verilator-cpp-build
+	$(VERILATOR_CPP_DIR)/$(VERILATOR_CPP_BIN)
+
+check-sdpa-verilator-cpp:
+	@echo "[INFO] Using Verilator: $$(verilator --version)"
+	@echo "[INFO] Running direct C++ Verilator testbench (no cocotb)"
+	$(MAKE) verilator-cpp-run

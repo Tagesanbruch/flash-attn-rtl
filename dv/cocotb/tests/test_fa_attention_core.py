@@ -7,6 +7,7 @@ Emulates DMA memory through signal-level read/write handshakes.
 import math
 import os
 import random
+import csv
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge
@@ -26,6 +27,12 @@ ELEMS_PER_BEAT = BUS_W // 16  # 8
 BEATS_PER_ROW  = D // ELEMS_PER_BEAT
 NUM_Q_TILES    = SEQ_LEN // TQ
 NUM_K_TILES    = SEQ_LEN // TK
+
+
+def dump_matrix_csv(path, mat):
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerows(mat)
 
 
 def q8_8_float(x):
@@ -302,6 +309,24 @@ async def test_attention_core_small(dut):
 
     # Read output O from memory
     O_result = mem.load_matrix_q8_8(O_BASE, S, D, stride_bytes)
+
+    dump_dir = os.environ.get("RTL_DUMP_DIR", "").strip()
+    if dump_dir:
+        os.makedirs(dump_dir, exist_ok=True)
+        dump_matrix_csv(os.path.join(dump_dir, "Q_q8_8.csv"), Q)
+        dump_matrix_csv(os.path.join(dump_dir, "K_q8_8.csv"), K)
+        dump_matrix_csv(os.path.join(dump_dir, "V_q8_8.csv"), V)
+        dump_matrix_csv(os.path.join(dump_dir, "O_rtl_q8_8.csv"), O_result)
+        with open(os.path.join(dump_dir, "meta.txt"), "w") as f:
+            f.write(f"S={S}\n")
+            f.write(f"D={D}\n")
+            f.write(f"TQ={TQ}\n")
+            f.write(f"TK={TK}\n")
+            f.write(f"scale_q8_8={scale}\n")
+            f.write(f"neg_large_q8_8={neg_large}\n")
+            f.write("causal=0\n")
+            f.write("seed=2025\n")
+        dut._log.info(f"Dumped RTL vectors to: {dump_dir}")
 
     # Compare
     max_err = 0
