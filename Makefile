@@ -1,4 +1,4 @@
-.PHONY: setup-py test regress list clean lint compare-torch audit-algo sta-list sta-syn sta-run sta sta-module sta-check-paths cpp-sdpa-build cpp-sdpa-compare check-sdpa-cpp verilator-cpp-build verilator-cpp-run check-sdpa-verilator-cpp
+.PHONY: setup-py test regress list clean lint compare-torch audit-algo sta-list sta-syn sta-run sta sta-module sta-check-paths cpp-sdpa-build cpp-sdpa-compare check-sdpa-cpp verilator-cpp-build verilator-cpp-run check-sdpa-verilator-cpp cmodel-sweep cmodel-mask-sweep
 
 include cfg/sta_modules.mk
 
@@ -176,3 +176,9 @@ check-sdpa-verilator-cpp:
 	@echo "[INFO] Using Verilator: $$(verilator --version)"
 	@echo "[INFO] Running direct C++ Verilator testbench (no cocotb)"
 	$(MAKE) verilator-cpp-run
+
+cmodel-sweep:
+	$(MAKE) -C cmodel sweep
+
+cmodel-mask-sweep:
+	$(MAKE) -C cmodel run-mask-sweep
