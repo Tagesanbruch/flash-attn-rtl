@@ -145,6 +145,26 @@ int run_cmodel(int argc, char** argv) {
             }
         }
 
+        if (cfg.run_compute_cycle_model || !cfg.cycle_csv_out.empty()) {
+            auto cycles = attn::run_compute_cycle_models(cfg);
+            std::cout << "[compute-cycle-model] S=" << cfg.S << " D=" << cfg.D
+                      << " (compute-only, no DMA, no multiplier/Fmax modeling)\n";
+            for (const auto& c : cycles) {
+                std::cout << "  " << c.name
+                          << " pair_total=" << c.pair_total
+                          << " compute=" << c.compute_cycles
+                          << " norm=" << c.norm_cycles
+                          << " noc=" << c.noc_cycles
+                          << " total=" << c.total_compute_only_cycles
+                          << " pair_cyc=" << std::fixed << std::setprecision(4) << c.pair_throughput_cycles
+                          << " target<300k=" << ((c.total_compute_only_cycles < 300000) ? "PASS" : "FAIL")
+                          << "\n";
+            }
+            if (!cfg.cycle_csv_out.empty()) {
+                std::cout << "[compute-cycle-model] csv written: " << cfg.cycle_csv_out << "\n";
+            }
+        }
+
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "[ERR] " << e.what() << "\n";

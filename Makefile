@@ -1,4 +1,4 @@
-.PHONY: setup-py test regress list clean lint compare-torch audit-algo sta-list sta-syn sta-run sta sta-module sta-check-paths cpp-sdpa-build cpp-sdpa-compare check-sdpa-cpp verilator-cpp-build verilator-cpp-run check-sdpa-verilator-cpp cmodel-sweep cmodel-mask-sweep
+.PHONY: setup-py test regress list clean lint compare-torch audit-algo sta-list sta-syn sta-run sta sta-module sta-check-paths cpp-sdpa-build cpp-sdpa-compare check-sdpa-cpp verilator-cpp-build verilator-cpp-run check-sdpa-verilator-cpp cmodel-sweep cmodel-mask-sweep rtl-latency-profile cmodel-compute-adv rtl-cmodel-compare
 
 include cfg/sta_modules.mk
 
@@ -182,3 +182,41 @@ cmodel-sweep:
 
 cmodel-mask-sweep:
 	$(MAKE) -C cmodel run-mask-sweep
+
+rtl-latency-profile:
+	@mkdir -p docs/data docs/report
+	$(MAKE) verilator-cpp-build
+	$(VERILATOR_CPP_DIR)/$(VERILATOR_CPP_BIN) \
+		--timeline-csv docs/data/20260304_rtl_timeline.csv \
+		--summary-csv docs/data/20260304_rtl_summary.csv
+	python3 utils/analyze_latency_breakdown.py \
+		--summary docs/data/20260304_rtl_summary.csv \
+		--timeline docs/data/20260304_rtl_timeline.csv \
+		--out-csv docs/data/20260304_rtl_latency_breakdown.csv \
+		--out-compute-csv docs/data/20260304_rtl_compute_breakdown.csv
+	python3 utils/plot_latency_breakdown.py \
+		--input docs/data/20260304_rtl_latency_breakdown.csv \
+		--title "RTL Latency Breakdown" \
+		--output docs/report/20260304_rtl_latency_breakdown.png
+	python3 utils/plot_latency_breakdown.py \
+		--input docs/data/20260304_rtl_compute_breakdown.csv \
+		--title "RTL Compute Fine Breakdown" \
+		--output docs/report/20260304_rtl_compute_breakdown.png
+
+cmodel-compute-adv:
+	@mkdir -p docs/data
+	$(MAKE) -C cmodel run-compute-cycles
+
+rtl-cmodel-compare: rtl-latency-profile cmodel-compute-adv
+	python3 utils/analyze_latency_breakdown.py \
+		--summary docs/data/20260304_rtl_summary.csv \
+		--timeline docs/data/20260304_rtl_timeline.csv \
+		--out-csv docs/data/20260304_rtl_latency_breakdown.csv \
+		--out-compute-csv docs/data/20260304_rtl_compute_breakdown.csv \
+		--cmodel-cycle-csv docs/data/20260304_compute_cycle_models_s256d64.csv \
+		--cmodel-model fixed_flow_l32_norm8_row2 \
+		--out-rtl-cmodel-csv docs/data/20260304_rtl_cmodel_compute_compare.csv
+	python3 utils/plot_rtl_cmodel_compare.py \
+		--input docs/data/20260304_rtl_cmodel_compute_compare.csv \
+		--title "RTL vs CModel Compute Comparison" \
+		--output docs/report/20260304_rtl_cmodel_compute_compare.png

@@ -21,6 +21,8 @@ struct Config {
     bool run_stage_decomp = false;
     int stage_seed = -1;
     std::string stage_csv_out = "";
+    bool run_compute_cycle_model = false;
+    std::string cycle_csv_out = "";
 };
 
 using MatrixI16 = std::vector<std::vector<int16_t>>;
@@ -65,6 +67,16 @@ struct StageDecompResult {
     StageMetrics norm;
 };
 
+struct ComputeCycleResult {
+    std::string name;
+    int64_t pair_total = 0;
+    int64_t compute_cycles = 0;
+    int64_t norm_cycles = 0;
+    int64_t noc_cycles = 0;
+    int64_t total_compute_only_cycles = 0;
+    double pair_throughput_cycles = 0.0;
+};
+
 int16_t sat_s16(int32_t v);
 int32_t to_s32(int64_t v);
 uint32_t to_u32(uint64_t v);
@@ -85,6 +97,7 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
 Metrics calc_metrics(const MatrixF& a, const MatrixF& b);
 std::vector<ModeResult> run_one_seed(const Config& cfg, int seed);
 StageDecompResult run_stage_decomposition(const Config& cfg, int seed);
+std::vector<ComputeCycleResult> run_compute_cycle_models(const Config& cfg);
 Config parse_args(int argc, char** argv);
 
 } // namespace attn

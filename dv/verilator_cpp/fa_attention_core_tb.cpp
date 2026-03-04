@@ -4,12 +4,15 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <fstream>
 #include <limits>
 #include <random>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "Vfa_attention_core.h"
+#include "Vfa_attention_core___024root.h"
 #include "verilated.h"
 
 namespace {
@@ -327,7 +330,72 @@ struct WriteTxn {
     bool active = false;
 };
 
-int run_sim() {
+struct TbConfig {
+    std::string timeline_csv;
+    std::string summary_csv;
+};
+
+struct ProfileEvent {
+    uint64_t cycle;
+    std::string event;
+    std::string kind;
+    uint32_t addr;
+    uint32_t beats;
+};
+
+enum MasterState : uint8_t {
+    S_IDLE = 0,
+    S_LOAD_Q = 1,
+    S_INIT_CONTEXT = 2,
+    S_LOAD_K = 3,
+    S_LOAD_V = 4,
+    S_COMPUTE = 5,
+    S_NEXT_K = 6,
+    S_NORMALIZE = 7,
+    S_WRITE_O = 8,
+    S_NEXT_Q = 9,
+    S_DONE = 10,
+};
+
+enum ComputeState : uint8_t {
+    C_IDLE = 0,
+    C_DP_INIT = 1,
+    C_DP_RUN = 2,
+    C_SCORE_DONE = 3,
+    C_SOFTMAX_PREP = 4,
+    C_PV_ACC = 5,
+    C_PV_DONE = 6,
+    C_NEXT_KJ = 7,
+    C_NEXT_QI = 8,
+    C_DONE = 9,
+};
+
+static TbConfig parse_args(int argc, char** argv) {
+    TbConfig cfg;
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        auto next = [&](int& idx) -> std::string {
+            if (idx + 1 >= argc) {
+                throw std::runtime_error("Missing value for " + a);
+            }
+            return argv[++idx];
+        };
+
+        if (a == "--timeline-csv") cfg.timeline_csv = next(i);
+        else if (a == "--summary-csv") cfg.summary_csv = next(i);
+        else throw std::runtime_error("Unknown arg: " + a);
+    }
+    return cfg;
+}
+
+static const char* rd_kind(uint32_t addr) {
+    if (addr >= static_cast<uint32_t>(Q_BASE) && addr < static_cast<uint32_t>(Q_BASE + 0x10000)) return "Q";
+    if (addr >= static_cast<uint32_t>(K_BASE) && addr < static_cast<uint32_t>(K_BASE + 0x10000)) return "K";
+    if (addr >= static_cast<uint32_t>(V_BASE) && addr < static_cast<uint32_t>(V_BASE + 0x10000)) return "V";
+    return "UNK";
+}
+
+int run_sim(const TbConfig& cfg) {
     Verilated::traceEverOn(false);
     auto* dut = new Vfa_attention_core();
 
@@ -386,9 +454,24 @@ int run_sim() {
 
     ReadTxn rd;
     WriteTxn wr;
+    std::vector<ProfileEvent> events;
+    uint64_t rd_q_cycles = 0;
+    uint64_t rd_k_cycles = 0;
+    uint64_t rd_v_cycles = 0;
+    uint64_t wr_o_cycles = 0;
+    uint64_t ms_compute_cycles = 0;
+    uint64_t ms_normalize_cycles = 0;
+    uint64_t ms_other_cycles = 0;
+    uint64_t cs_dp_cycles = 0;
+    uint64_t cs_score_cycles = 0;
+    uint64_t cs_softmax_pv_cycles = 0;
+    uint64_t cs_ctrl_cycles = 0;
+
+    bool profile_active = false;
 
     uint64_t cycles = 0;
     uint64_t max_cycles = 20000000ull;
+    bool in_main_loop = false;
 
     auto eval_half = [&](int clk) {
         dut->clk = clk;
@@ -402,6 +485,7 @@ int run_sim() {
             rd.beats = static_cast<uint32_t>(dut->dma_rd_cmd_len) + 1;
             rd.idx = 0;
             rd.active = true;
+            events.push_back({cycles, "rd_cmd", rd_kind(rd.addr), rd.addr, rd.beats});
         }
 
         // Drive read data
@@ -430,20 +514,27 @@ int run_sim() {
             wr.beats = static_cast<uint32_t>(dut->dma_wr_cmd_len) + 1;
             wr.idx = 0;
             wr.active = true;
+            events.push_back({cycles, "wr_cmd", "O", wr.addr, wr.beats});
         }
     };
 
     auto update_after_posedge = [&]() {
         // Read beat accepted
         if (rd.active && dut->dma_rd_data_valid && dut->dma_rd_data_ready) {
+            const char* k = rd_kind(rd.addr);
+            if (std::string(k) == "Q") rd_q_cycles++;
+            else if (std::string(k) == "K") rd_k_cycles++;
+            else if (std::string(k) == "V") rd_v_cycles++;
             rd.idx++;
             if (rd.idx >= rd.beats) {
+                events.push_back({cycles, "rd_done", rd_kind(rd.addr), rd.addr, rd.beats});
                 rd.active = false;
             }
         }
 
         // Write beat accepted
         if (wr.active && dut->dma_wr_data_valid && dut->dma_wr_data_ready) {
+            wr_o_cycles++;
             BeatWords w{
                 static_cast<uint32_t>(dut->dma_wr_data[0]),
                 static_cast<uint32_t>(dut->dma_wr_data[1]),
@@ -454,7 +545,31 @@ int run_sim() {
             mem.mem[addr] = w;
             wr.idx++;
             if (wr.idx >= wr.beats) {
+                events.push_back({cycles, "wr_done", "O", wr.addr, wr.beats});
                 wr.active = false;
+            }
+        }
+
+        if (dut->o_busy) profile_active = true;
+        if (profile_active && in_main_loop) {
+            uint8_t ms = dut->rootp->fa_attention_core__DOT__ms;
+            uint8_t cs = dut->rootp->fa_attention_core__DOT__cs;
+
+            if (ms == S_COMPUTE) {
+                ms_compute_cycles++;
+                if (cs == C_DP_INIT || cs == C_DP_RUN) {
+                    cs_dp_cycles++;
+                } else if (cs == C_SCORE_DONE) {
+                    cs_score_cycles++;
+                } else if (cs == C_SOFTMAX_PREP || cs == C_PV_ACC || cs == C_PV_DONE) {
+                    cs_softmax_pv_cycles++;
+                } else {
+                    cs_ctrl_cycles++;
+                }
+            } else if (ms == S_NORMALIZE) {
+                ms_normalize_cycles++;
+            } else {
+                ms_other_cycles++;
             }
         }
     };
@@ -482,6 +597,7 @@ int run_sim() {
     update_after_posedge();
 
     bool done = false;
+    in_main_loop = true;
     while (cycles < max_cycles) {
         eval_half(0);
         drive_before_posedge();
@@ -494,12 +610,15 @@ int run_sim() {
             break;
         }
     }
+    in_main_loop = false;
 
     if (!done) {
         std::cerr << "[TB] Timeout after cycles=" << cycles << "\n";
         delete dut;
         return 2;
     }
+
+    events.push_back({cycles, "done", "CORE", 0, 0});
 
     MatrixI16 O_rtl = mem.load_matrix_q8_8(static_cast<uint32_t>(O_BASE), S, D, stride_bytes);
 
@@ -538,6 +657,40 @@ int run_sim() {
               << ", MAX_AE<=0.10 "
               << ((m_rtl_fp32.max_ae <= 0.10) ? "PASS" : "FAIL") << "\n";
 
+    if (!cfg.timeline_csv.empty()) {
+        std::ofstream tf(cfg.timeline_csv);
+        tf << "cycle,event,kind,addr,beats\n";
+        for (const auto& e : events) {
+            tf << e.cycle << "," << e.event << "," << e.kind << "," << e.addr << "," << e.beats << "\n";
+        }
+    }
+    if (!cfg.summary_csv.empty()) {
+        uint64_t dma_cycles = rd_q_cycles + rd_k_cycles + rd_v_cycles + wr_o_cycles;
+        uint64_t non_dma_cycles = (cycles > dma_cycles) ? (cycles - dma_cycles) : 0;
+        uint64_t prof_total = ms_compute_cycles + ms_normalize_cycles + ms_other_cycles;
+        uint64_t prof_unaccounted = (cycles > prof_total) ? (cycles - prof_total) : 0;
+        std::ofstream sf(cfg.summary_csv);
+        sf << "metric,value\n";
+        sf << "total_cycles," << cycles << "\n";
+        sf << "o_cycles," << static_cast<uint64_t>(dut->o_cycles) << "\n";
+        sf << "rd_q_cycles," << rd_q_cycles << "\n";
+        sf << "rd_k_cycles," << rd_k_cycles << "\n";
+        sf << "rd_v_cycles," << rd_v_cycles << "\n";
+        sf << "wr_o_cycles," << wr_o_cycles << "\n";
+        sf << "non_dma_cycles," << non_dma_cycles << "\n";
+        sf << "ms_compute_cycles," << ms_compute_cycles << "\n";
+        sf << "ms_normalize_cycles," << ms_normalize_cycles << "\n";
+        sf << "ms_other_cycles," << ms_other_cycles << "\n";
+        sf << "cs_dp_cycles," << cs_dp_cycles << "\n";
+        sf << "cs_score_cycles," << cs_score_cycles << "\n";
+        sf << "cs_softmax_pv_cycles," << cs_softmax_pv_cycles << "\n";
+        sf << "cs_ctrl_cycles," << cs_ctrl_cycles << "\n";
+        sf << "profiled_total_cycles," << prof_total << "\n";
+        sf << "profile_unaccounted_cycles," << prof_unaccounted << "\n";
+        sf << "rtl_fp32_mae," << m_rtl_fp32.mae << "\n";
+        sf << "rtl_fp32_maxae," << m_rtl_fp32.max_ae << "\n";
+    }
+
     delete dut;
     return pass_fp32 ? 0 : 1;
 }
@@ -546,5 +699,11 @@ int run_sim() {
 
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
-    return run_sim();
+    try {
+        TbConfig cfg = parse_args(argc, argv);
+        return run_sim(cfg);
+    } catch (const std::exception& e) {
+        std::cerr << "[TB][ERR] " << e.what() << "\n";
+        return 2;
+    }
 }

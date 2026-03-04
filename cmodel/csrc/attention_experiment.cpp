@@ -34,6 +34,44 @@ struct StageAccum {
     }
 };
 
+struct CycleModelCfg {
+    std::string name;
+    int dot_lanes = 4;
+    int dp_init_cycles = 1;
+    int post_cycles = 3;
+    bool overlap_dp_post = false;
+    int rows_parallel = 1;
+    int norm_vec = 1;
+    int noc_dispatch_per_k = 0;
+    int noc_row_sync = 0;
+};
+
+ComputeCycleResult simulate_compute_cycles(const Config& cfg, const CycleModelCfg& m) {
+    ComputeCycleResult r;
+    r.name = m.name;
+    r.pair_total = static_cast<int64_t>(cfg.S) * static_cast<int64_t>(cfg.S);
+
+    const int rows_par = std::max(1, m.rows_parallel);
+    const int norm_vec = std::max(1, m.norm_vec);
+    const int lanes = std::max(1, m.dot_lanes);
+
+    const int dp_cycles = m.dp_init_cycles + (cfg.D + lanes - 1) / lanes;
+    const int post_cycles = std::max(1, m.post_cycles);
+    const int steady = m.overlap_dp_post ? std::max(dp_cycles, post_cycles) : (dp_cycles + post_cycles);
+    const int startup = m.overlap_dp_post ? (dp_cycles + post_cycles - 1) : (dp_cycles + post_cycles);
+
+    const int64_t rows_total = cfg.S;
+    const int64_t row_groups = (rows_total + rows_par - 1) / rows_par;
+    const int64_t per_row_cycles = startup + static_cast<int64_t>(cfg.S - 1) * steady;
+    r.compute_cycles = row_groups * per_row_cycles;
+
+    r.norm_cycles = (static_cast<int64_t>(cfg.S) * cfg.D + norm_vec - 1) / norm_vec;
+    r.noc_cycles = row_groups * (static_cast<int64_t>(cfg.S) * m.noc_dispatch_per_k + m.noc_row_sync);
+    r.total_compute_only_cycles = r.compute_cycles + r.norm_cycles + r.noc_cycles;
+    r.pair_throughput_cycles = static_cast<double>(r.compute_cycles) / static_cast<double>(r.pair_total);
+    return r;
+}
+
 } // namespace
 
 Metrics calc_metrics(const MatrixF& a, const MatrixF& b) {
@@ -279,6 +317,47 @@ StageDecompResult run_stage_decomposition(const Config& cfg, int seed) {
     return r;
 }
 
+std::vector<ComputeCycleResult> run_compute_cycle_models(const Config& cfg) {
+    std::vector<CycleModelCfg> models = {
+        {"rtl_current_serial_l4", 4, 1, 3, false, 1, 1},
+        {"merge_post_serial_l4", 4, 1, 2, false, 1, 1},
+        {"dp_post_overlap_l4", 4, 1, 3, true, 1, 1},
+        {"dp_post_overlap_l8", 8, 1, 3, true, 1, 1},
+        {"dp_post_overlap_l16", 16, 1, 3, true, 1, 1},
+        {"dp_post_overlap_l16_norm4", 16, 1, 3, true, 1, 4},
+        {"dp_post_overlap_l16_norm4_row2", 16, 1, 3, true, 2, 4},
+        {"fixed_flow_l32_norm8_row2", 32, 1, 3, true, 2, 8},
+        {"fixed_flow_l32_norm8_row4", 32, 1, 3, true, 4, 8},
+        {"simple_noc_l16_norm4_row4", 16, 1, 3, true, 4, 4, 1, 64},
+        {"simple_noc_l32_norm8_row4", 32, 1, 3, true, 4, 8, 1, 64},
+    };
+
+    std::vector<ComputeCycleResult> out;
+    out.reserve(models.size());
+    for (const auto& m : models) {
+        out.push_back(simulate_compute_cycles(cfg, m));
+    }
+
+    if (!cfg.cycle_csv_out.empty()) {
+        std::ofstream csv(cfg.cycle_csv_out);
+        csv << "model,S,D,TQ,TK,pair_total,compute_cycles,norm_cycles,noc_cycles,total_compute_only_cycles,pair_throughput_cycles,target_300k_pass\n";
+        for (const auto& r : out) {
+            csv << r.name << ","
+                << cfg.S << "," << cfg.D << "," << cfg.TQ << "," << cfg.TK << ","
+                << r.pair_total << ","
+                << r.compute_cycles << ","
+                << r.norm_cycles << ","
+                << r.noc_cycles << ","
+                << r.total_compute_only_cycles << ","
+                << r.pair_throughput_cycles << ","
+                << ((r.total_compute_only_cycles < 300000) ? 1 : 0)
+                << "\n";
+        }
+    }
+
+    return out;
+}
+
 Config parse_args(int argc, char** argv) {
     Config cfg;
     for (int i = 1; i < argc; ++i) {
@@ -303,6 +382,8 @@ Config parse_args(int argc, char** argv) {
         else if (a == "--run-stage-decomp") cfg.run_stage_decomp = true;
         else if (a == "--stage-seed") cfg.stage_seed = std::stoi(next(i));
         else if (a == "--stage-csv-out") cfg.stage_csv_out = next(i);
+        else if (a == "--run-compute-cycle-model") cfg.run_compute_cycle_model = true;
+        else if (a == "--cycle-csv-out") cfg.cycle_csv_out = next(i);
         else throw std::runtime_error("Unknown arg: " + a);
     }
     if (cfg.mask_mode != "neg" && cfg.mask_mode != "hard") {

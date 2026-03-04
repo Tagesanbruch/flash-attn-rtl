@@ -10,7 +10,7 @@ SRCS := \
 	csrc/attention_kernels.cpp \
 	csrc/attention_experiment.cpp
 
-.PHONY: all build run run-noncausal run-gaussian run-gaussian-noncausal sweep run-mask-sweep run-stage-decomp run-solution-compare run-solution-compare-tuned clean
+.PHONY: all build run run-noncausal run-gaussian run-gaussian-noncausal sweep run-mask-sweep run-stage-decomp run-compute-cycles run-solution-compare run-solution-compare-tuned clean
 
 all: build
 
@@ -56,6 +56,10 @@ run-stage-decomp: build
 		--run-stage-decomp --stage-seed 20260303 --stage-csv-out ../docs/data/20260304_stage_decomp_smallint_causal.csv
 	$(BIN) --s 256 --d 64 --tq 32 --tk 64 --causal --input-mode gaussian --seed 20260303 --n-seeds 1 \
 		--run-stage-decomp --stage-seed 20260303 --stage-csv-out ../docs/data/20260304_stage_decomp_gaussian_causal.csv
+
+run-compute-cycles: build
+	$(BIN) --s 256 --d 64 --tq 32 --tk 64 --causal --input-mode small-int --seed 20260303 --n-seeds 1 \
+		--run-compute-cycle-model --cycle-csv-out ../docs/data/20260304_compute_cycle_models_s256d64.csv
 
 run-solution-compare: build
 	$(BIN) --s 256 --d 64 --tq 32 --tk 64 --causal --input-mode small-int --mask-mode neg --seed 20260303 --n-seeds 5 \

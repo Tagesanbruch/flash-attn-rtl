@@ -64,6 +64,9 @@ module fa_attention_core #(
   localparam int BEATS_PER_ROW  = D / ELEMS_PER_BEAT; // 8
   localparam int BEATS_PER_TILE_KV = TK * BEATS_PER_ROW; // 512
   localparam int BEATS_PER_TILE_Q  = TQ * BEATS_PER_ROW; // 256
+  localparam int DP_LANES = 32;
+  localparam int DP_CHUNKS = D / DP_LANES;
+  localparam int NORM_LANES = 8;
 
   // ---- Master state machine ----
   typedef enum logic [3:0] {
@@ -146,6 +149,7 @@ module fa_attention_core #(
   logic signed [15:0] m_old, m_new;
   logic [31:0] l_scaled, l_term, l_new_val;
   logic [63:0] l_scaled_wide;
+  logic signed [39:0] dp_partial_sum;
 
   always_comb begin
     m_old = row_m[comp_qi];
@@ -161,6 +165,15 @@ module fa_attention_core #(
     l_scaled = l_scaled_wide[46:15];
     l_term = {15'd0, exp_new_out, 1'b0};
     l_new_val = l_scaled + l_term;
+  end
+
+  always_comb begin
+    dp_partial_sum = '0;
+    for (int lane = 0; lane < DP_LANES; lane++) begin
+      automatic int d_idx;
+      d_idx = comp_d * DP_LANES + lane;
+      dp_partial_sum = dp_partial_sum + 40'(q_buf[comp_qi][d_idx]) * 40'(k_buf[comp_kj][d_idx]);
+    end
   end
 
   // Scale mul: dp_acc -> score
@@ -206,10 +219,11 @@ module fa_attention_core #(
         end
 
         C_DP_RUN: begin
-          dp_acc <= dp_acc + 40'(q_buf[comp_qi][comp_d]) * 40'(k_buf[comp_kj][comp_d]);
-          comp_d <= comp_d + 1'b1;
-          if (comp_d == D - 1)
+          dp_acc <= dp_acc + dp_partial_sum;
+          if (comp_d == DP_CHUNKS - 1)
             cs <= C_SCORE_DONE;
+          else
+            comp_d <= comp_d + 1'b1;
         end
 
         C_SCORE_DONE: begin
@@ -432,35 +446,38 @@ module fa_attention_core #(
         // -- Final normalization: O[i][k] = acc[i][k] / l[i] --
         S_NORMALIZE: begin
           cycle_counter <= cycle_counter + 1'b1;
-          // Normalize one element per cycle
-          begin
-            logic [31:0] den;
-            logic signed [63:0] num;
-            logic signed [63:0] num_adj;
-            logic signed [63:0] norm_result;
+          // Normalize 4 elements per cycle
+          for (int lane = 0; lane < NORM_LANES; lane++) begin
+            automatic int d_idx;
+            automatic logic [31:0] den;
+            automatic logic signed [63:0] num;
+            automatic logic signed [63:0] num_adj;
+            automatic logic signed [63:0] norm_result;
 
-            den = row_l[norm_qi];
-            num = row_acc[norm_qi][norm_d];
-            if (den == 32'd0) begin
-              norm_result = (num >= 0) ? 64'sd32767 : -64'sd32768;
-            end else begin
-              if (num >= 0)
-                num_adj = num + $signed({1'b0, den[31:1]});
+            d_idx = norm_d + lane;
+            if (d_idx < D) begin
+              den = row_l[norm_qi];
+              num = row_acc[norm_qi][d_idx];
+              if (den == 32'd0) begin
+                norm_result = (num >= 0) ? 64'sd32767 : -64'sd32768;
+              end else begin
+                if (num >= 0)
+                  num_adj = num + $signed({1'b0, den[31:1]});
+                else
+                  num_adj = num - $signed({1'b0, den[31:1]});
+                norm_result = num_adj / $signed({1'b0, den});
+              end
+
+              if (norm_result > 64'sd32767)
+                o_buf[norm_qi][d_idx] <= 16'sd32767;
+              else if (norm_result < -64'sd32768)
+                o_buf[norm_qi][d_idx] <= -16'sd32768;
               else
-                num_adj = num - $signed({1'b0, den[31:1]});
-              norm_result = num_adj / $signed({1'b0, den});
+                o_buf[norm_qi][d_idx] <= norm_result[15:0];
             end
-
-            // Saturate to Q8.8
-            if (norm_result > 64'sd32767)
-              o_buf[norm_qi][norm_d] <= 16'sd32767;
-            else if (norm_result < -64'sd32768)
-              o_buf[norm_qi][norm_d] <= -16'sd32768;
-            else
-              o_buf[norm_qi][norm_d] <= norm_result[15:0];
           end
 
-          if (norm_d == D - 1) begin
+          if (norm_d >= D - NORM_LANES) begin
             norm_d <= '0;
             if (norm_qi == TQ - 1) begin
               ms          <= S_WRITE_O;
@@ -469,7 +486,7 @@ module fa_attention_core #(
               norm_qi <= norm_qi + 1'b1;
             end
           end else begin
-            norm_d <= norm_d + 1'b1;
+            norm_d <= norm_d + NORM_LANES;
           end
         end
 

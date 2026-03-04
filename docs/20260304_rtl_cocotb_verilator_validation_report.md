@@ -147,3 +147,48 @@ make test MODULE=fa_attention_ip_top
 
 本轮“通过”定义聚焦于赛题正确性门限、寄存器功能与验证闭环；
 若按比赛最终评审全量指标，还需继续针对 `cycles` 做架构级优化（并行度、流水深度、访存重叠、tile 数据复用等）。
+
+---
+
+## 8. 2026-03-04（优化后）补充验证
+
+在 `C_DP_RUN` 实现 4-lane dot-product 并行后，已重新执行 Verilator C++ TB 与 cocotb 回归。
+
+### 8.1 Verilator C++ TB（优化后）
+
+- 关键结果：
+  - `DONE cycles=1365248`
+  - `RTL vs FP32 MAE=0.000972 MAX_AE=0.002032`
+  - 精度门限继续 PASS（`MAE<=0.03`、`MAX_AE<=0.10`）。
+
+### 8.2 Latency 前后对比（基于 profiling CSV）
+
+- 总周期：`4510976 -> 1365248`（下降约 `69.7%`）。
+- 分解项（`docs/data/20260304_latency_before_after_compare.csv`）：
+  - `Compute+Normalize+Ctrl: 4474113 -> 1328385`（`-3145728`, `-70.3095%`）
+  - `DMA_RD_Q/K/V` 与 `DMA_WR_O` 基本不变。
+
+对应产物：
+- `docs/data/20260304_latency_before_timeline.csv`
+- `docs/data/20260304_latency_before_summary.csv`
+- `docs/data/20260304_latency_before_breakdown.csv`
+- `docs/data/20260304_latency_before_breakdown.png`
+- `docs/data/20260304_latency_after_timeline.csv`
+- `docs/data/20260304_latency_after_summary.csv`
+- `docs/data/20260304_latency_after_breakdown.csv`
+- `docs/data/20260304_latency_after_breakdown.png`
+- `docs/data/20260304_latency_before_after_compare.csv`
+
+### 8.3 cocotb 回归复核（优化后）
+
+执行命令：
+
+```bash
+make test MODULE=fa_attention_core_full && make test MODULE=fa_attention_ip_top
+```
+
+结果：
+- `fa_attention_core_full`: `TESTS=1 PASS=1 FAIL=0`
+- `fa_attention_ip_top`: `TESTS=3 PASS=3 FAIL=0`
+
+说明：优化后精度与寄存器行为验证均保持通过。
