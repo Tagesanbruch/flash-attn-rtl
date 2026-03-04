@@ -66,6 +66,7 @@ module fa_attention_core #(
   localparam int BEATS_PER_TILE_Q  = TQ * BEATS_PER_ROW; // 256
   localparam int DP_LANES = 32;
   localparam int DP_CHUNKS = D / DP_LANES;
+  localparam int ROW_PAR = 2;
   localparam int NORM_LANES = 8;
 
   // ---- Master state machine ----
@@ -103,11 +104,13 @@ module fa_attention_core #(
   logic signed [63:0] row_acc [TQ][D];
 
   // ---- Compute engine state ----
-  logic [$clog2(TQ)-1:0] comp_qi;
+  logic [$clog2(TQ)-1:0] comp_qpair;
   logic [$clog2(TK)-1:0] comp_kj;
   logic [$clog2(D)-1:0]  comp_d;
-  logic signed [39:0]    dp_acc;
-  logic signed [15:0]    score_q8_8;
+  logic signed [39:0]    dp_acc0;
+  logic signed [39:0]    dp_acc1;
+  logic signed [15:0]    score_q8_8_0;
+  logic signed [15:0]    score_q8_8_1;
 
   // ---- Normalization / write-out state ----
   logic [$clog2(TQ)-1:0] norm_qi;
@@ -125,10 +128,14 @@ module fa_attention_core #(
   );
 
   // Exp instances for online softmax
-  logic signed [15:0] exp_diff_old_in, exp_diff_new_in;
-  logic [15:0] exp_old_out, exp_new_out;
-  fa_exp_pwl_8seg_q1_15 u_exp_old (.i_x_q8_8(exp_diff_old_in), .o_exp_q1_15(exp_old_out));
-  fa_exp_pwl_8seg_q1_15 u_exp_new (.i_x_q8_8(exp_diff_new_in), .o_exp_q1_15(exp_new_out));
+  logic signed [15:0] exp_diff_old_in0, exp_diff_new_in0;
+  logic signed [15:0] exp_diff_old_in1, exp_diff_new_in1;
+  logic [15:0] exp_old_out0, exp_new_out0;
+  logic [15:0] exp_old_out1, exp_new_out1;
+  fa_exp_pwl_8seg_q1_15 u_exp_old0 (.i_x_q8_8(exp_diff_old_in0), .o_exp_q1_15(exp_old_out0));
+  fa_exp_pwl_8seg_q1_15 u_exp_new0 (.i_x_q8_8(exp_diff_new_in0), .o_exp_q1_15(exp_new_out0));
+  fa_exp_pwl_8seg_q1_15 u_exp_old1 (.i_x_q8_8(exp_diff_old_in1), .o_exp_q1_15(exp_old_out1));
+  fa_exp_pwl_8seg_q1_15 u_exp_new1 (.i_x_q8_8(exp_diff_new_in1), .o_exp_q1_15(exp_new_out1));
 
   // Inner compute FSM
   typedef enum logic [3:0] {
@@ -146,80 +153,124 @@ module fa_attention_core #(
   comp_state_t cs;
 
   logic comp_start, comp_done;
-  logic signed [15:0] m_old, m_new;
-  logic [31:0] l_scaled, l_term, l_new_val;
-  logic [63:0] l_scaled_wide;
-  logic signed [39:0] dp_partial_sum;
+  logic signed [15:0] m_old0, m_new0;
+  logic signed [15:0] m_old1, m_new1;
+  logic [31:0] l_scaled0, l_term0, l_new_val0;
+  logic [31:0] l_scaled1, l_term1, l_new_val1;
+  logic [63:0] l_scaled_wide0;
+  logic [63:0] l_scaled_wide1;
+  logic signed [39:0] dp_partial_sum0;
+  logic signed [39:0] dp_partial_sum1;
 
   always_comb begin
-    m_old = row_m[comp_qi];
-    if (score_q8_8 > m_old)
-      m_new = score_q8_8;
+    m_old0 = row_m[comp_qpair];
+    if (score_q8_8_0 > m_old0)
+      m_new0 = score_q8_8_0;
     else
-      m_new = m_old;
+      m_new0 = m_old0;
 
-    exp_diff_old_in = m_old - m_new;
-    exp_diff_new_in = score_q8_8 - m_new;
+    exp_diff_old_in0 = m_old0 - m_new0;
+    exp_diff_new_in0 = score_q8_8_0 - m_new0;
 
-    l_scaled_wide = row_l[comp_qi] * exp_old_out;
-    l_scaled = l_scaled_wide[46:15];
-    l_term = {15'd0, exp_new_out, 1'b0};
-    l_new_val = l_scaled + l_term;
+    l_scaled_wide0 = row_l[comp_qpair] * exp_old_out0;
+    l_scaled0 = l_scaled_wide0[46:15];
+    l_term0 = {15'd0, exp_new_out0, 1'b0};
+    l_new_val0 = l_scaled0 + l_term0;
+
+    if (comp_qpair + 1 < TQ) begin
+      m_old1 = row_m[comp_qpair + 1];
+      if (score_q8_8_1 > m_old1)
+        m_new1 = score_q8_8_1;
+      else
+        m_new1 = m_old1;
+
+      exp_diff_old_in1 = m_old1 - m_new1;
+      exp_diff_new_in1 = score_q8_8_1 - m_new1;
+
+      l_scaled_wide1 = row_l[comp_qpair + 1] * exp_old_out1;
+      l_scaled1 = l_scaled_wide1[46:15];
+      l_term1 = {15'd0, exp_new_out1, 1'b0};
+      l_new_val1 = l_scaled1 + l_term1;
+    end else begin
+      m_old1 = i_neg_large_q8_8;
+      m_new1 = i_neg_large_q8_8;
+      exp_diff_old_in1 = 16'sd0;
+      exp_diff_new_in1 = 16'sd0;
+      l_scaled_wide1 = 64'd0;
+      l_scaled1 = 32'd0;
+      l_term1 = 32'd0;
+      l_new_val1 = 32'd0;
+    end
   end
 
   always_comb begin
-    dp_partial_sum = '0;
+    dp_partial_sum0 = '0;
+    dp_partial_sum1 = '0;
     for (int lane = 0; lane < DP_LANES; lane++) begin
       automatic int d_idx;
       d_idx = comp_d * DP_LANES + lane;
-      dp_partial_sum = dp_partial_sum + 40'(q_buf[comp_qi][d_idx]) * 40'(k_buf[comp_kj][d_idx]);
+      dp_partial_sum0 = dp_partial_sum0 + 40'(q_buf[comp_qpair][d_idx]) * 40'(k_buf[comp_kj][d_idx]);
+      if (comp_qpair + 1 < TQ)
+        dp_partial_sum1 = dp_partial_sum1 + 40'(q_buf[comp_qpair + 1][d_idx]) * 40'(k_buf[comp_kj][d_idx]);
     end
   end
 
   // Scale mul: dp_acc -> score
   // Extract Q8.8 from 40-bit accumulator (which is in Q16.16 after multiply)
   // dp_acc is sum of (Q8.8 * Q8.8) = Q16.16, so shift >>8 gives Q8.8
-  logic signed [15:0] dp_to_q8_8;
-  logic signed [31:0] dp_shifted;
+  logic signed [15:0] dp_to_q8_8_0;
+  logic signed [15:0] dp_to_q8_8_1;
+  logic signed [31:0] dp_shifted0;
+  logic signed [31:0] dp_shifted1;
   always_comb begin
-    dp_shifted = dp_acc[39:8]; // Q8.8 portion (with extra precision)
+    dp_shifted0 = dp_acc0[39:8]; // Q8.8 portion (with extra precision)
+    dp_shifted1 = dp_acc1[39:8]; // Q8.8 portion (with extra precision)
   end
-  fa_mul_sat_q8_8 u_score_scale (
-    .i_a_q8_8(dp_shifted[15:0]),
+  fa_mul_sat_q8_8 u_score_scale0 (
+    .i_a_q8_8(dp_shifted0[15:0]),
     .i_b_q8_8(i_scale_q8_8),
-    .o_y_q8_8(dp_to_q8_8)
+    .o_y_q8_8(dp_to_q8_8_0)
+  );
+  fa_mul_sat_q8_8 u_score_scale1 (
+    .i_a_q8_8(dp_shifted1[15:0]),
+    .i_b_q8_8(i_scale_q8_8),
+    .o_y_q8_8(dp_to_q8_8_1)
   );
 
   // ---- Inner compute FSM ----
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       cs        <= C_IDLE;
-      comp_qi   <= '0;
+      comp_qpair <= '0;
       comp_kj   <= '0;
       comp_d    <= '0;
-      dp_acc    <= '0;
+      dp_acc0   <= '0;
+      dp_acc1   <= '0;
       comp_done <= 1'b0;
-      score_q8_8 <= '0;
+      score_q8_8_0 <= '0;
+      score_q8_8_1 <= '0;
     end else begin
       comp_done <= 1'b0;
 
       case (cs)
         C_IDLE: begin
           if (comp_start) begin
-            comp_qi <= '0;
+            comp_qpair <= '0;
             comp_kj <= '0;
             cs      <= C_DP_INIT;
           end
         end
 
         C_DP_INIT: begin
-          dp_acc <= '0;
+          dp_acc0 <= '0;
+          dp_acc1 <= '0;
           comp_d <= '0;
           cs     <= C_DP_RUN;
         end
 
         C_DP_RUN: begin
-          dp_acc <= dp_acc + dp_partial_sum;
+          dp_acc0 <= dp_acc0 + dp_partial_sum0;
+          dp_acc1 <= dp_acc1 + dp_partial_sum1;
           if (comp_d == DP_CHUNKS - 1)
             cs <= C_SCORE_DONE;
           else
@@ -228,21 +279,31 @@ module fa_attention_core #(
 
         C_SCORE_DONE: begin
           // Apply scale
-          score_q8_8 <= dp_to_q8_8;
+          score_q8_8_0 <= dp_to_q8_8_0;
+          score_q8_8_1 <= dp_to_q8_8_1;
           // Apply causal mask
           if (i_causal_en) begin
-            if ((q_tile_idx * TQ + {4'b0, comp_qi}) < (k_tile_idx * TK + {4'b0, comp_kj}))
-              score_q8_8 <= i_neg_large_q8_8;
+            if ((q_tile_idx * TQ + comp_qpair) < (k_tile_idx * TK + comp_kj))
+              score_q8_8_0 <= i_neg_large_q8_8;
             else
-              score_q8_8 <= dp_to_q8_8;
+              score_q8_8_0 <= dp_to_q8_8_0;
+
+            if ((comp_qpair + 1 < TQ) && ((q_tile_idx * TQ + comp_qpair + 1) < (k_tile_idx * TK + comp_kj)))
+              score_q8_8_1 <= i_neg_large_q8_8;
+            else
+              score_q8_8_1 <= dp_to_q8_8_1;
           end
           cs <= C_SOFTMAX_PREP;
         end
 
         C_SOFTMAX_PREP: begin
           // Update row context: m, l
-          row_m[comp_qi] <= m_new;
-          row_l[comp_qi] <= l_new_val;
+          row_m[comp_qpair] <= m_new0;
+          row_l[comp_qpair] <= l_new_val0;
+          if (comp_qpair + 1 < TQ) begin
+            row_m[comp_qpair + 1] <= m_new1;
+            row_l[comp_qpair + 1] <= l_new_val1;
+          end
 
           // Update acc: rescale old + add P*V contribution
           for (int k = 0; k < D; k++) begin
@@ -250,11 +311,19 @@ module fa_attention_core #(
             automatic logic signed [63:0] acc_old_sc;
             automatic logic signed [33:0] pv_mul;
             automatic logic signed [63:0] pv_term;
-            acc_sc = row_acc[comp_qi][k] * $signed({1'b0, exp_old_out});
+            acc_sc = row_acc[comp_qpair][k] * $signed({1'b0, exp_old_out0});
             acc_old_sc = acc_sc[78:15];
-            pv_mul = $signed({1'b0, exp_new_out}) * v_buf[comp_kj][k];
+            pv_mul = $signed({1'b0, exp_new_out0}) * v_buf[comp_kj][k];
             pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
-            row_acc[comp_qi][k] <= acc_old_sc + pv_term;
+            row_acc[comp_qpair][k] <= acc_old_sc + pv_term;
+
+            if (comp_qpair + 1 < TQ) begin
+              acc_sc = row_acc[comp_qpair + 1][k] * $signed({1'b0, exp_old_out1});
+              acc_old_sc = acc_sc[78:15];
+              pv_mul = $signed({1'b0, exp_new_out1}) * v_buf[comp_kj][k];
+              pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
+              row_acc[comp_qpair + 1][k] <= acc_old_sc + pv_term;
+            end
           end
 
           cs <= C_NEXT_KJ;
@@ -271,10 +340,10 @@ module fa_attention_core #(
         end
 
         C_NEXT_QI: begin
-          if (comp_qi == TQ - 1) begin
+          if (comp_qpair >= TQ - ROW_PAR) begin
             cs <= C_DONE;
           end else begin
-            comp_qi <= comp_qi + 1'b1;
+            comp_qpair <= comp_qpair + ROW_PAR;
             comp_kj <= '0;
             cs      <= C_DP_INIT;
           end
