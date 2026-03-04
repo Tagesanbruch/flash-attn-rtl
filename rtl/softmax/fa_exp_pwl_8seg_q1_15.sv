@@ -5,6 +5,7 @@ module fa_exp_pwl_8seg_q1_15 (
   logic signed [15:0] x_clamped;
   logic [15:0] u_q8_8;
   logic [2:0] seg_idx;
+  logic sat_zero;
   logic [7:0] frac;
   logic [15:0] y0;
   logic [15:0] y1;
@@ -18,31 +19,38 @@ module fa_exp_pwl_8seg_q1_15 (
   always_comb begin
     if (i_x_q8_8 > 16'sd0) begin
       x_clamped = 16'sd0;
-    end else if (i_x_q8_8 < -16'sd2048) begin
-      x_clamped = -16'sd2048;
+    end else if (i_x_q8_8 < -16'sd4096) begin
+      x_clamped = -16'sd4096;
     end else begin
       x_clamped = i_x_q8_8;
     end
 
     u_q8_8 = $unsigned(-x_clamped);
     if (u_q8_8[15:8] >= 8) begin
-      seg_idx = 3'd7;
-      frac = 8'hFF;
+      seg_idx = 3'd0;
+      frac = 8'h00;
+      sat_zero = 1'b1;
     end else begin
       seg_idx = u_q8_8[10:8];
       frac = u_q8_8[7:0];
+      sat_zero = 1'b0;
     end
 
-    unique case (seg_idx)
-      3'd0: begin y0 = 16'd32767; y1 = 16'd12055; end
-      3'd1: begin y0 = 16'd12055; y1 = 16'd4431;  end
-      3'd2: begin y0 = 16'd4431;  y1 = 16'd1631;  end
-      3'd3: begin y0 = 16'd1631;  y1 = 16'd600;   end
-      3'd4: begin y0 = 16'd600;   y1 = 16'd221;   end
-      3'd5: begin y0 = 16'd221;   y1 = 16'd81;    end
-      3'd6: begin y0 = 16'd81;    y1 = 16'd30;    end
-      default: begin y0 = 16'd30; y1 = 16'd11;    end
-    endcase
+    if (sat_zero) begin
+      y0 = 16'd0;
+      y1 = 16'd0;
+    end else begin
+      unique case (seg_idx)
+        3'd0: begin y0 = 16'd32767; y1 = 16'd12055; end
+        3'd1: begin y0 = 16'd12055; y1 = 16'd4431;  end
+        3'd2: begin y0 = 16'd4431;  y1 = 16'd1631;  end
+        3'd3: begin y0 = 16'd1631;  y1 = 16'd600;   end
+        3'd4: begin y0 = 16'd600;   y1 = 16'd221;   end
+        3'd5: begin y0 = 16'd221;   y1 = 16'd81;    end
+        3'd6: begin y0 = 16'd81;    y1 = 16'd30;    end
+        default: begin y0 = 16'd30; y1 = 16'd11;    end
+      endcase
+    end
 
     delta = y0 - y1;
     delta_hi = delta[16:8];

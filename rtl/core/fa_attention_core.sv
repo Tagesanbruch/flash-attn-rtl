@@ -97,7 +97,7 @@ module fa_attention_core #(
   // ---- Row context (m, l, acc) ----
   logic signed [15:0] row_m   [TQ];
   logic [31:0]        row_l   [TQ];
-  logic signed [31:0] row_acc [TQ][D];
+  logic signed [63:0] row_acc [TQ][D];
 
   // ---- Compute engine state ----
   logic [$clog2(TQ)-1:0] comp_qi;
@@ -232,14 +232,14 @@ module fa_attention_core #(
 
           // Update acc: rescale old + add P*V contribution
           for (int k = 0; k < D; k++) begin
-            automatic logic signed [63:0] acc_sc;
-            automatic logic signed [31:0] acc_old_sc;
+            automatic logic signed [95:0] acc_sc;
+            automatic logic signed [63:0] acc_old_sc;
             automatic logic signed [33:0] pv_mul;
-            automatic logic signed [31:0] pv_term;
+            automatic logic signed [63:0] pv_term;
             acc_sc = row_acc[comp_qi][k] * $signed({1'b0, exp_old_out});
-            acc_old_sc = acc_sc[46:15];
+            acc_old_sc = acc_sc[78:15];
             pv_mul = $signed({1'b0, exp_new_out}) * v_buf[comp_kj][k];
-            pv_term = {{5{pv_mul[33]}}, pv_mul[33:7]};
+            pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
             row_acc[comp_qi][k] <= acc_old_sc + pv_term;
           end
 
@@ -351,7 +351,7 @@ module fa_attention_core #(
             row_m[r]   <= i_neg_large_q8_8;
             row_l[r]   <= 32'd0;
             for (int k = 0; k < D; k++)
-              row_acc[r][k] <= 32'sd0;
+              row_acc[r][k] <= 64'sd0;
           end
           k_tile_idx <= '0;
           ms         <= S_LOAD_K;
@@ -434,14 +434,27 @@ module fa_attention_core #(
           cycle_counter <= cycle_counter + 1'b1;
           // Normalize one element per cycle
           begin
-            logic signed [63:0] norm_mul;
-            logic signed [31:0] norm_result;
-            norm_mul = row_acc[norm_qi][norm_d] * $signed({1'b0, recip_val});
-            norm_result = norm_mul[47:16];
+            logic [31:0] den;
+            logic signed [63:0] num;
+            logic signed [63:0] num_adj;
+            logic signed [63:0] norm_result;
+
+            den = row_l[norm_qi];
+            num = row_acc[norm_qi][norm_d];
+            if (den == 32'd0) begin
+              norm_result = (num >= 0) ? 64'sd32767 : -64'sd32768;
+            end else begin
+              if (num >= 0)
+                num_adj = num + $signed({1'b0, den[31:1]});
+              else
+                num_adj = num - $signed({1'b0, den[31:1]});
+              norm_result = num_adj / $signed({1'b0, den});
+            end
+
             // Saturate to Q8.8
-            if (norm_result > 32'sd32767)
+            if (norm_result > 64'sd32767)
               o_buf[norm_qi][norm_d] <= 16'sd32767;
-            else if (norm_result < -32'sd32768)
+            else if (norm_result < -64'sd32768)
               o_buf[norm_qi][norm_d] <= -16'sd32768;
             else
               o_buf[norm_qi][norm_d] <= norm_result[15:0];

@@ -20,7 +20,7 @@ async def test_exp_directed(dut):
 async def test_exp_monotonic_and_error(dut):
     random.seed(20260302)
     last = None
-    for x in range(0, -2049, -16):
+    for x in range(0, -4097, -16):
         dut.i_x_q8_8.value = x & 0xFFFF
         await Timer(1, units="ns")
         got = int(dut.o_exp_q1_15.value) & 0xFFFF

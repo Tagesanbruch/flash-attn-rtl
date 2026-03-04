@@ -137,18 +137,26 @@ def python_flash_attention(Q, K, V, scale, neg_large, causal=False):
                         acc_scaled_wide = row_acc[qi][d] * exp_old
                         acc_old_sc = acc_scaled_wide >> 15
                         pv_mul = exp_new * to_s16(V[k_start + kj][d])
-                        pv_term = pv_mul >> 7
-                        row_acc[qi][d] = to_s32(acc_old_sc + pv_term)
+                        pv_term = pv_mul << 1
+                        row_acc[qi][d] = acc_old_sc + pv_term
 
                     row_m[qi] = to_s16(m_new)
                     row_l[qi] = l_new
 
         # Normalize
         for qi in range(TQ):
-            recip = recip_q16_16(to_u32(row_l[qi]))
+            den = to_u32(row_l[qi])
             for d in range(D):
-                norm_mul = row_acc[qi][d] * to_s32(recip)
-                norm_result = norm_mul >> 16
+                num = row_acc[qi][d]
+                if den == 0:
+                    norm_result = 32767 if num >= 0 else -32768
+                else:
+                    half = den >> 1
+                    if num >= 0:
+                        num_adj = num + half
+                    else:
+                        num_adj = num - half
+                    norm_result = int(num_adj / den)
                 if norm_result > 32767:
                     O[q_start + qi][d] = 32767
                 elif norm_result < -32768:

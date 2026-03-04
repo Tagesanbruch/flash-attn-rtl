@@ -40,14 +40,13 @@ def q8_8_mul_sat(a: int, b: int) -> int:
 def exp_pwl_q1_15(x_q8_8: int) -> int:
     if x_q8_8 > 0:
         x_q8_8 = 0
-    elif x_q8_8 < -2048:
-        x_q8_8 = -2048
+    elif x_q8_8 < -4096:
+        x_q8_8 = -4096
 
     u_q8_8 = -x_q8_8
     u_int = (u_q8_8 >> 8) & 0xFF
     if u_int >= 8:
-        seg_idx = 7
-        frac = 255
+        return 0
     else:
         seg_idx = (u_q8_8 >> 8) & 0x7
         frac = u_q8_8 & 0xFF
@@ -113,6 +112,6 @@ def q16_16_to_float_signed(x: int) -> float:
 
 
 def exp_real_q1_15(x_q8_8: int) -> int:
-    x = max(min(x_q8_8 / 256.0, 0.0), -8.0)
+    x = max(min(x_q8_8 / 256.0, 0.0), -16.0)
     y = math.exp(x)
     return max(0, min(65535, int(round(y * 32768))))
