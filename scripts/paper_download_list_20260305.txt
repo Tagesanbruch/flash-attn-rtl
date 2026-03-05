@@ -1,0 +1,49 @@
+# report|title|url
+20260305-miromind|A3: Accelerating Attention Mechanisms in Neural Networks with Approximation|https://taejunham.github.io/data/a3_hpca2020.pdf
+20260305-miromind|BitStopper: An Efficient Transformer Attention Accelerator via Stage Fusion|https://arxiv.org/abs/2512.06457
+20260305-miromind|ASADI: Accelerating Sparse Attention using Diagonal-based In-Situ Computing|https://www.comp.nus.edu.sg/~tulika/HPCA24.pdf
+20260305-miromind|SystolicAttention / FSA|https://arxiv.org/abs/2507.11331
+20260305-miromind|SpAtten|https://arxiv.org/abs/2012.09852
+20260305-miromind|FAMOUS|https://arxiv.org/abs/2409.14023
+20260305-miromind|ELSA|https://taejunham.github.io/data/elsa_isca21.pdf
+20260305-miromind|Flat: An Optimized Dataflow for Mitigating Attention Bottlenecks|https://people.csail.mit.edu/suvinay/pubs/2023.flat.asplos.pdf
+20260305-miromind|PADE|https://arxiv.org/abs/2512.14322
+20260305-gemini|SpAtten|https://arxiv.org/abs/2012.09852
+20260305-gemini|Sanger|https://arxiv.org/abs/2110.10857
+20260305-gemini|FACT|https://arxiv.org/abs/2210.00480
+20260305-gemini|FlatAttention|https://people.csail.mit.edu/suvinay/pubs/2023.flat.asplos.pdf
+20260305-gemini|FlashAttention|https://arxiv.org/abs/2205.14135
+20260305-gemini|FlashAttention-2|https://arxiv.org/abs/2307.08691
+20260305-gemini|FlashAttention-3|https://arxiv.org/abs/2407.08608
+20260305-chatgpt|SystolicAttention / FSA|https://arxiv.org/abs/2507.11331
+20260305-chatgpt|FlatAttention|https://people.csail.mit.edu/suvinay/pubs/2023.flat.asplos.pdf
+20260305-chatgpt|SpAtten|https://arxiv.org/abs/2012.09852
+20260305-chatgpt|FAMOUS|https://arxiv.org/abs/2409.14023
+20260305-chatgpt|A3|https://taejunham.github.io/data/a3_hpca2020.pdf
+20260305-chatgpt|ELSA|https://taejunham.github.io/data/elsa_isca21.pdf
+20260305-gemini|SpAtten project page|https://www.hanruiwang.com/projects/spatten
+20260305-gemini|Sanger paper digest|https://www.paperdigest.org/paper/?paper_id=doi.org_10.1145_3466752.3480125
+20260305-gemini|Sanger semantic scholar|https://www.semanticscholar.org/paper/Sanger%3A-A-Co-Design-Framework-for-Enabling-Sparse-Lu-Jin/b97c3c370401dc34d2adbeb24f34de5180a14be6
+20260305-gemini|FACT semantic scholar|https://www.semanticscholar.org/paper/3f5e63168d0ae1af41c3434e9e3e7e84dda9a5d8
+20260305-gemini|FACT researchgate|https://www.researchgate.net/publication/371666819_FACT_FFN-Attention_Co-optimized_Transformer_Architecture_with_Eager_Correlation_Prediction
+20260305-gemini|FlatAttention arXiv html|https://arxiv.org/html/2505.18824v1
+20260305-gemini|SystolicAttention arXiv html v1|https://arxiv.org/html/2507.11331v1
+20260305-gemini|SystolicAttention arXiv html v4|https://arxiv.org/html/2507.11331v4
+20260305-gemini|Transformer tiled FPGA architecture|https://people.ece.uw.edu/hauck/publications/Transformer_Taiwan.pdf
+20260305-gemini|FlashAttention-3 summary|https://wentao.site/flash_attention_v3_summary/
+20260305-gemini|FlashAttention-3 arXiv html|https://arxiv.org/html/2407.08608v1
+20260305-gemini|H-FA arXiv html|https://arxiv.org/html/2511.00295v3
+20260305-gemini|ITA attention and softmax accelerator|https://www.research-collection.ethz.ch/bitstreams/e3633cc3-096c-40f7-aed3-0478698126cb/download
+20260305-gemini|TENET arXiv html|https://arxiv.org/html/2509.13765v1
+20260305-gemini|Tree and Array Multipliers lecture notes|https://www.utdallas.edu/~ivor/ce6305/m10.pdf
+20260305-gemini|Inexact Signed Wallace Tree Multiplier|https://ieeexplore.ieee.org/iel7/6287639/9312710/09500194.pdf
+20260305-gemini|Fast Multiplication algorithms and implementation|http://i.stanford.edu/pub/cstr/reports/csl/tr/94/617/CSL-TR-94-617.ps
+20260305-gemini|High-speed Wallace tree multiplier|https://www.ijesrt.com/Old_IJESRT/issues%20pdf%20file/Archive-2016/June-2016/59_DESIGN%20OF%20A%20HIGH-SPEED%20WALLACE%20TREE%20MULTIPLIER.pdf
+20260305-gemini|Precision-adjustable Softmax architecture|https://www.researchgate.net/profile/Meiqi-Wang-5/publication/342225584_Efficient_Precision-Adjustable_Architecture_for_Softmax_Function_in_Deep_Learning/links/5f29462aa6fdcccc43a8afae/Efficient-Precision-Adjustable-Architecture-for-Softmax-Function-in-Deep-Learning.pdf
+20260305-gemini|Design space exploration for Softmax implementations|https://lca.ece.utexas.edu/pubs/SoftMax___ASAP2020_June27.pdf
+20260305-gemini|Hardware-aware Softmax approximation|https://oar.a-star.edu.sg/storage/p/pv0k3qeq26/0421.pdf
+20260305-gemini|Approximation-based Softmax and LayerNorm in Transformers|https://www.mdpi.com/2079-9292/14/12/2337
+20260305-gemini|Hardware-oriented approximations of Softmax and RMSNorm|https://pmc.ncbi.nlm.nih.gov/articles/PMC12843610/
+20260305-gemini|RTL design and analysis of Softmax layer|https://repositories.lib.utexas.edu/bitstreams/877eda64-14ad-4326-ac22-47402db07e01/download
+20260305-gemini|Quantitative evaluation of approximate Softmax|https://arxiv.org/html/2501.13379v2
+20260305-gemini|SOLE arXiv html|https://arxiv.org/html/2510.17189v1
