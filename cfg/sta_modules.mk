@@ -37,8 +37,13 @@ STA_RTL_fa_row_reduction_core := \
 STA_RTL_fa_axi_lite_regs := rtl/bus/fa_axi_lite_regs.sv
 STA_RTL_fa_core_controller := rtl/core/fa_core_controller.sv
 STA_RTL_fa_attention_ip_top := \
+	rtl/common/fa_mul_sat_q8_8.sv \
+	rtl/softmax/fa_exp_pwl_8seg_q1_15.sv \
+	rtl/softmax/fa_recip_nr_q16_16.sv \
 	rtl/bus/fa_axi_lite_regs.sv \
-	rtl/core/fa_core_controller.sv \
+	rtl/bus/fa_dma_reader.sv \
+	rtl/bus/fa_dma_writer.sv \
+	rtl/core/fa_attention_core.sv \
 	rtl/top/fa_attention_ip_top.sv
 
 sta_get_rtl_files = $(STA_RTL_$(1))

@@ -77,7 +77,6 @@ module fa_attention_core #(
     S_LOAD_K,         // DMA fetch K tile
     S_LOAD_V,         // DMA fetch V tile
     S_COMPUTE,        // Tile compute (QK^T + online softmax + PV)
-    S_NEXT_K,         // Advance K/V tile index
     S_NORMALIZE,      // Final row normalization (acc/l)
     S_WRITE_O,        // DMA write O tile
     S_NEXT_Q,         // Advance Q tile index
@@ -93,10 +92,25 @@ module fa_attention_core #(
   logic signed [15:0] q_buf [TQ][D];
   logic [$clog2(TQ*D/ELEMS_PER_BEAT):0] q_fill_cnt;
 
-  // ---- K/V local buffers (simple arrays, no ping-pong for now) ----
-  logic signed [15:0] k_buf [TK][D];
-  logic signed [15:0] v_buf [TK][D];
+  // ---- K/V local buffers (ping-pong) ----
+  logic signed [15:0] k_buf0 [TK][D];
+  logic signed [15:0] k_buf1 [TK][D];
+  logic signed [15:0] v_buf0 [TK][D];
+  logic signed [15:0] v_buf1 [TK][D];
   logic [$clog2(TK*D/ELEMS_PER_BEAT):0] kv_fill_cnt;
+  logic active_bank;
+  logic pref_target_bank;
+
+  typedef enum logic [2:0] {
+    PF_IDLE,
+    PF_CMD_K,
+    PF_DATA_K,
+    PF_CMD_V,
+    PF_DATA_V,
+    PF_DONE
+  } prefetch_state_t;
+  prefetch_state_t pf_state;
+  logic [$clog2(TK*D/ELEMS_PER_BEAT):0] pf_fill_cnt;
 
   // ---- Row context (m, l, acc) ----
   logic signed [15:0] row_m   [TQ];
@@ -140,14 +154,9 @@ module fa_attention_core #(
   // Inner compute FSM
   typedef enum logic [3:0] {
     C_IDLE,
-    C_DP_INIT,
     C_DP_RUN,
     C_SCORE_DONE,
     C_SOFTMAX_PREP,
-    C_PV_ACC,
-    C_PV_DONE,
-    C_NEXT_KJ,
-    C_NEXT_QI,
     C_DONE
   } comp_state_t;
   comp_state_t cs;
@@ -157,6 +166,7 @@ module fa_attention_core #(
   logic signed [15:0] m_old1, m_new1;
   logic [31:0] l_scaled0, l_term0, l_new_val0;
   logic [31:0] l_scaled1, l_term1, l_new_val1;
+  logic [31:0] l_new_safe0, l_new_safe1;
   logic [63:0] l_scaled_wide0;
   logic [63:0] l_scaled_wide1;
   logic signed [39:0] dp_partial_sum0;
@@ -176,6 +186,7 @@ module fa_attention_core #(
     l_scaled0 = l_scaled_wide0[46:15];
     l_term0 = {15'd0, exp_new_out0, 1'b0};
     l_new_val0 = l_scaled0 + l_term0;
+    l_new_safe0 = (l_new_val0 == 32'd0) ? 32'd1 : l_new_val0;
 
     if (comp_qpair + 1 < TQ) begin
       m_old1 = row_m[comp_qpair + 1];
@@ -191,6 +202,7 @@ module fa_attention_core #(
       l_scaled1 = l_scaled_wide1[46:15];
       l_term1 = {15'd0, exp_new_out1, 1'b0};
       l_new_val1 = l_scaled1 + l_term1;
+      l_new_safe1 = (l_new_val1 == 32'd0) ? 32'd1 : l_new_val1;
     end else begin
       m_old1 = i_neg_large_q8_8;
       m_new1 = i_neg_large_q8_8;
@@ -200,18 +212,25 @@ module fa_attention_core #(
       l_scaled1 = 32'd0;
       l_term1 = 32'd0;
       l_new_val1 = 32'd0;
+      l_new_safe1 = 32'd1;
     end
   end
 
   always_comb begin
+    int d_idx;
     dp_partial_sum0 = '0;
     dp_partial_sum1 = '0;
     for (int lane = 0; lane < DP_LANES; lane++) begin
-      automatic int d_idx;
       d_idx = comp_d * DP_LANES + lane;
-      dp_partial_sum0 = dp_partial_sum0 + 40'(q_buf[comp_qpair][d_idx]) * 40'(k_buf[comp_kj][d_idx]);
+      if (active_bank)
+        dp_partial_sum0 = dp_partial_sum0 + 40'(q_buf[comp_qpair][d_idx]) * 40'(k_buf1[comp_kj][d_idx]);
+      else
+        dp_partial_sum0 = dp_partial_sum0 + 40'(q_buf[comp_qpair][d_idx]) * 40'(k_buf0[comp_kj][d_idx]);
       if (comp_qpair + 1 < TQ)
-        dp_partial_sum1 = dp_partial_sum1 + 40'(q_buf[comp_qpair + 1][d_idx]) * 40'(k_buf[comp_kj][d_idx]);
+        if (active_bank)
+          dp_partial_sum1 = dp_partial_sum1 + 40'(q_buf[comp_qpair + 1][d_idx]) * 40'(k_buf1[comp_kj][d_idx]);
+        else
+          dp_partial_sum1 = dp_partial_sum1 + 40'(q_buf[comp_qpair + 1][d_idx]) * 40'(k_buf0[comp_kj][d_idx]);
     end
   end
 
@@ -257,15 +276,11 @@ module fa_attention_core #(
           if (comp_start) begin
             comp_qpair <= '0;
             comp_kj <= '0;
-            cs      <= C_DP_INIT;
+            dp_acc0 <= '0;
+            dp_acc1 <= '0;
+            comp_d <= '0;
+            cs      <= C_DP_RUN;
           end
-        end
-
-        C_DP_INIT: begin
-          dp_acc0 <= '0;
-          dp_acc1 <= '0;
-          comp_d <= '0;
-          cs     <= C_DP_RUN;
         end
 
         C_DP_RUN: begin
@@ -299,53 +314,56 @@ module fa_attention_core #(
         C_SOFTMAX_PREP: begin
           // Update row context: m, l
           row_m[comp_qpair] <= m_new0;
-          row_l[comp_qpair] <= l_new_val0;
+          row_l[comp_qpair] <= l_new_safe0;
           if (comp_qpair + 1 < TQ) begin
             row_m[comp_qpair + 1] <= m_new1;
-            row_l[comp_qpair + 1] <= l_new_val1;
+            row_l[comp_qpair + 1] <= l_new_safe1;
           end
 
           // Update acc: rescale old + add P*V contribution
           for (int k = 0; k < D; k++) begin
-            automatic logic signed [95:0] acc_sc;
-            automatic logic signed [63:0] acc_old_sc;
-            automatic logic signed [33:0] pv_mul;
-            automatic logic signed [63:0] pv_term;
+            logic signed [95:0] acc_sc;
+            logic signed [63:0] acc_old_sc;
+            logic signed [33:0] pv_mul;
+            logic signed [63:0] pv_term;
             acc_sc = row_acc[comp_qpair][k] * $signed({1'b0, exp_old_out0});
             acc_old_sc = acc_sc[78:15];
-            pv_mul = $signed({1'b0, exp_new_out0}) * v_buf[comp_kj][k];
+            if (active_bank)
+              pv_mul = $signed({1'b0, exp_new_out0}) * v_buf1[comp_kj][k];
+            else
+              pv_mul = $signed({1'b0, exp_new_out0}) * v_buf0[comp_kj][k];
             pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
             row_acc[comp_qpair][k] <= acc_old_sc + pv_term;
 
             if (comp_qpair + 1 < TQ) begin
               acc_sc = row_acc[comp_qpair + 1][k] * $signed({1'b0, exp_old_out1});
               acc_old_sc = acc_sc[78:15];
-              pv_mul = $signed({1'b0, exp_new_out1}) * v_buf[comp_kj][k];
+              if (active_bank)
+                pv_mul = $signed({1'b0, exp_new_out1}) * v_buf1[comp_kj][k];
+              else
+                pv_mul = $signed({1'b0, exp_new_out1}) * v_buf0[comp_kj][k];
               pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
               row_acc[comp_qpair + 1][k] <= acc_old_sc + pv_term;
             end
           end
 
-          cs <= C_NEXT_KJ;
-        end
-
-        C_NEXT_KJ: begin
           if (comp_kj == TK - 1) begin
-            comp_kj <= '0;
-            cs      <= C_NEXT_QI;
+            if (comp_qpair >= TQ - ROW_PAR) begin
+              cs <= C_DONE;
+            end else begin
+              comp_qpair <= comp_qpair + ROW_PAR;
+              comp_kj <= '0;
+              dp_acc0 <= '0;
+              dp_acc1 <= '0;
+              comp_d <= '0;
+              cs      <= C_DP_RUN;
+            end
           end else begin
             comp_kj <= comp_kj + 1'b1;
-            cs      <= C_DP_INIT;
-          end
-        end
-
-        C_NEXT_QI: begin
-          if (comp_qpair >= TQ - ROW_PAR) begin
-            cs <= C_DONE;
-          end else begin
-            comp_qpair <= comp_qpair + ROW_PAR;
-            comp_kj <= '0;
-            cs      <= C_DP_INIT;
+            dp_acc0 <= '0;
+            dp_acc1 <= '0;
+            comp_d <= '0;
+            cs      <= C_DP_RUN;
           end
         end
 
@@ -368,6 +386,10 @@ module fa_attention_core #(
       cycle_counter <= '0;
       q_fill_cnt    <= '0;
       kv_fill_cnt   <= '0;
+      active_bank   <= 1'b0;
+      pref_target_bank <= 1'b1;
+      pf_state      <= PF_IDLE;
+      pf_fill_cnt   <= '0;
       norm_qi       <= '0;
       norm_d        <= '0;
       o_write_cnt   <= '0;
@@ -398,6 +420,10 @@ module fa_attention_core #(
             cycle_counter <= '0;
             q_tile_idx    <= '0;
             k_tile_idx    <= '0;
+            active_bank   <= 1'b0;
+            pref_target_bank <= 1'b1;
+            pf_state      <= PF_IDLE;
+            pf_fill_cnt   <= '0;
             ms            <= S_LOAD_Q;
             q_fill_cnt    <= '0;
           end
@@ -418,7 +444,8 @@ module fa_attention_core #(
             // Receive Q data
             if (dma_rd_data_valid) begin
               for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
-                automatic int flat = (q_fill_cnt - 1) * ELEMS_PER_BEAT + i;
+                int flat;
+                flat = (q_fill_cnt - 1) * ELEMS_PER_BEAT + i;
                 q_buf[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
               end
               q_fill_cnt <= q_fill_cnt + 1'b1;
@@ -437,6 +464,10 @@ module fa_attention_core #(
               row_acc[r][k] <= 64'sd0;
           end
           k_tile_idx <= '0;
+          active_bank <= 1'b0;
+          pref_target_bank <= 1'b1;
+          pf_state <= PF_IDLE;
+          pf_fill_cnt <= '0;
           ms         <= S_LOAD_K;
           kv_fill_cnt <= '0;
         end
@@ -453,8 +484,12 @@ module fa_attention_core #(
           end else if (kv_fill_cnt <= BEATS_PER_TILE_KV) begin
             if (dma_rd_data_valid) begin
               for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
-                automatic int flat = (kv_fill_cnt - 1) * ELEMS_PER_BEAT + i;
-                k_buf[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                int flat;
+                flat = (kv_fill_cnt - 1) * ELEMS_PER_BEAT + i;
+                if (active_bank)
+                  k_buf1[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                else
+                  k_buf0[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
               end
               kv_fill_cnt <= kv_fill_cnt + 1'b1;
               if (dma_rd_data_last || kv_fill_cnt == BEATS_PER_TILE_KV) begin
@@ -477,8 +512,12 @@ module fa_attention_core #(
           end else if (kv_fill_cnt <= BEATS_PER_TILE_KV) begin
             if (dma_rd_data_valid) begin
               for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
-                automatic int flat = (kv_fill_cnt - 1) * ELEMS_PER_BEAT + i;
-                v_buf[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                int flat;
+                flat = (kv_fill_cnt - 1) * ELEMS_PER_BEAT + i;
+                if (active_bank)
+                  v_buf1[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                else
+                  v_buf0[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
               end
               kv_fill_cnt <= kv_fill_cnt + 1'b1;
               if (dma_rd_data_last || kv_fill_cnt == BEATS_PER_TILE_KV) begin
@@ -491,24 +530,100 @@ module fa_attention_core #(
         // -- Tile compute --
         S_COMPUTE: begin
           cycle_counter <= cycle_counter + 1'b1;
+
+          // Prefetch next K/V tile into the opposite bank while current tile computes.
+          case (pf_state)
+            PF_IDLE: begin
+              if (k_tile_idx < NUM_K_TILES - 1) begin
+                pref_target_bank <= ~active_bank;
+                pf_fill_cnt <= '0;
+                pf_state <= PF_CMD_K;
+              end
+            end
+
+            PF_CMD_K: begin
+              dma_rd_cmd_valid <= 1'b1;
+              dma_rd_cmd_addr  <= i_k_base[31:0] + (k_tile_idx + 1) * TK * i_stride_bytes;
+              dma_rd_cmd_len   <= BEATS_PER_TILE_KV - 1;
+              if (dma_rd_cmd_ready) begin
+                pf_fill_cnt <= 1;
+                pf_state <= PF_DATA_K;
+              end
+            end
+
+            PF_DATA_K: begin
+              if (dma_rd_data_valid) begin
+                for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
+                  int flat;
+                  flat = (pf_fill_cnt - 1) * ELEMS_PER_BEAT + i;
+                  if (pref_target_bank)
+                    k_buf1[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                  else
+                    k_buf0[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                end
+                pf_fill_cnt <= pf_fill_cnt + 1'b1;
+                if (dma_rd_data_last || pf_fill_cnt == BEATS_PER_TILE_KV) begin
+                  pf_fill_cnt <= '0;
+                  pf_state <= PF_CMD_V;
+                end
+              end
+            end
+
+            PF_CMD_V: begin
+              dma_rd_cmd_valid <= 1'b1;
+              dma_rd_cmd_addr  <= i_v_base[31:0] + (k_tile_idx + 1) * TK * i_stride_bytes;
+              dma_rd_cmd_len   <= BEATS_PER_TILE_KV - 1;
+              if (dma_rd_cmd_ready) begin
+                pf_fill_cnt <= 1;
+                pf_state <= PF_DATA_V;
+              end
+            end
+
+            PF_DATA_V: begin
+              if (dma_rd_data_valid) begin
+                for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
+                  int flat;
+                  flat = (pf_fill_cnt - 1) * ELEMS_PER_BEAT + i;
+                  if (pref_target_bank)
+                    v_buf1[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                  else
+                    v_buf0[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                end
+                pf_fill_cnt <= pf_fill_cnt + 1'b1;
+                if (dma_rd_data_last || pf_fill_cnt == BEATS_PER_TILE_KV) begin
+                  pf_state <= PF_DONE;
+                end
+              end
+            end
+
+            PF_DONE: begin
+            end
+
+            default: pf_state <= PF_IDLE;
+          endcase
+
           if (!comp_done && cs == C_IDLE) begin
             comp_start <= 1'b1;
           end
           if (comp_done) begin
-            ms <= S_NEXT_K;
-          end
-        end
-
-        S_NEXT_K: begin
-          cycle_counter <= cycle_counter + 1'b1;
-          if (k_tile_idx == NUM_K_TILES - 1) begin
-            ms      <= S_NORMALIZE;
-            norm_qi <= '0;
-            norm_d  <= '0;
-          end else begin
-            k_tile_idx  <= k_tile_idx + 1'b1;
-            kv_fill_cnt <= '0;
-            ms          <= S_LOAD_K;
+            if (k_tile_idx == NUM_K_TILES - 1) begin
+              pf_state <= PF_IDLE;
+              pf_fill_cnt <= '0;
+              ms      <= S_NORMALIZE;
+              norm_qi <= '0;
+              norm_d  <= '0;
+            end else if (pf_state == PF_DONE) begin
+              k_tile_idx  <= k_tile_idx + 1'b1;
+              active_bank <= pref_target_bank;
+              if ((k_tile_idx + 1) == (NUM_K_TILES - 1)) begin
+                pf_state <= PF_IDLE;
+                pf_fill_cnt <= '0;
+              end else begin
+                pref_target_bank <= ~pref_target_bank;
+                pf_fill_cnt <= '0;
+                pf_state <= PF_CMD_K;
+              end
+            end
           end
         end
 
@@ -517,11 +632,11 @@ module fa_attention_core #(
           cycle_counter <= cycle_counter + 1'b1;
           // Normalize 4 elements per cycle
           for (int lane = 0; lane < NORM_LANES; lane++) begin
-            automatic int d_idx;
-            automatic logic [31:0] den;
-            automatic logic signed [63:0] num;
-            automatic logic signed [63:0] num_adj;
-            automatic logic signed [63:0] norm_result;
+            int d_idx;
+            logic [31:0] den;
+            logic signed [63:0] num;
+            logic signed [63:0] num_adj;
+            logic signed [63:0] norm_result;
 
             d_idx = norm_d + lane;
             if (d_idx < D) begin
@@ -571,7 +686,8 @@ module fa_attention_core #(
           end else if (o_write_cnt <= BEATS_PER_TILE_Q) begin
             dma_wr_data_valid <= 1'b1;
             for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
-              automatic int flat = (o_write_cnt - 1) * ELEMS_PER_BEAT + i;
+              int flat;
+              flat = (o_write_cnt - 1) * ELEMS_PER_BEAT + i;
               dma_wr_data[i*16 +: 16] <= o_buf[flat / D][flat % D];
             end
             dma_wr_data_last <= (o_write_cnt == BEATS_PER_TILE_Q);
@@ -602,7 +718,6 @@ module fa_attention_core #(
 
         default: ms <= S_IDLE;
       endcase
-
       end // !soft_reset
     end
   end
@@ -610,5 +725,6 @@ module fa_attention_core #(
   assign o_cycles = cycle_counter;
 
   // dma_rd_data_ready: accept data whenever we're in a load state
-  assign dma_rd_data_ready = (ms == S_LOAD_Q || ms == S_LOAD_K || ms == S_LOAD_V);
+  assign dma_rd_data_ready = (ms == S_LOAD_Q || ms == S_LOAD_K || ms == S_LOAD_V ||
+                              (ms == S_COMPUTE && (pf_state == PF_DATA_K || pf_state == PF_DATA_V)));
 endmodule
