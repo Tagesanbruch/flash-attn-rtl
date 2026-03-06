@@ -5,14 +5,10 @@ import re
 BASE = "syn"
 DATE = "20260304"
 MODULES = [
-    "fa_clip_signed",
     "fa_mul_sat_q8_8",
     "fa_exp_pwl_8seg_q1_15",
     "fa_recip_nr_q16_16",
-    "fa_online_softmax_update",
-    "fa_row_reduction_core",
     "fa_axi_lite_regs",
-    "fa_core_controller",
 ]
 
 

@@ -13,7 +13,7 @@ YOSYS_STA_DIR ?= ../ysyx/yosys-sta
 PDK_SRC_DIR ?= ../ysyx/mac/pdk/icsprout55-pdk
 PDK_NAME ?= icsprout55
 
-STA_MODULE ?= fa_core_controller
+STA_MODULE ?= fa_attention_ip_top
 STA_DATE ?= $(shell date +%Y%m%d)
 STA_CLK_FREQ_MHZ ?= 500
 STA_CLK_PORT ?= clk
@@ -49,26 +49,12 @@ lint:
 		rtl/softmax/fa_exp_pwl_8seg_q1_15.sv
 	verilator $(LINT_FLAGS) --top-module fa_recip_nr_q16_16 \
 		rtl/softmax/fa_recip_nr_q16_16.sv
-	verilator $(LINT_FLAGS) --top-module fa_online_softmax_update \
-		rtl/softmax/fa_exp_pwl_8seg_q1_15.sv \
-		rtl/softmax/fa_online_softmax_update.sv
-	verilator $(LINT_FLAGS) --top-module fa_row_reduction_core \
-		rtl/softmax/fa_exp_pwl_8seg_q1_15.sv \
-		rtl/softmax/fa_recip_nr_q16_16.sv \
-		rtl/softmax/fa_online_softmax_update.sv \
-		rtl/core/fa_row_reduction_core.sv
 	verilator $(LINT_FLAGS) --top-module fa_axi_lite_regs \
 		rtl/bus/fa_axi_lite_regs.sv
-	verilator $(LINT_FLAGS) --top-module fa_core_controller \
-		rtl/core/fa_core_controller.sv
 	verilator $(LINT_FLAGS) --top-module fa_dma_reader \
 		rtl/bus/fa_dma_reader.sv
 	verilator $(LINT_FLAGS) --top-module fa_dma_writer \
 		rtl/bus/fa_dma_writer.sv
-	verilator $(LINT_FLAGS) --top-module fa_tile_buffer \
-		rtl/core/fa_tile_buffer.sv
-	verilator $(LINT_FLAGS) --top-module fa_dot_product_d \
-		rtl/core/fa_dot_product_d.sv
 	verilator $(LINT_FLAGS) --top-module fa_attention_core \
 		rtl/common/fa_mul_sat_q8_8.sv \
 		rtl/softmax/fa_exp_pwl_8seg_q1_15.sv \

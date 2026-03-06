@@ -33,24 +33,6 @@ MODULE_PY := test_fa_recip_nr_q16_16
 VERILOG_SOURCES := $(RTL_SOFTMAX_DIR)/fa_recip_nr_q16_16.sv
 endif
 
-ifeq ($(SELECTED_MODULE),fa_online_softmax_update)
-TOPLEVEL := fa_online_softmax_update
-MODULE_PY := test_fa_online_softmax_update
-VERILOG_SOURCES := \
-	$(RTL_SOFTMAX_DIR)/fa_exp_pwl_8seg_q1_15.sv \
-	$(RTL_SOFTMAX_DIR)/fa_online_softmax_update.sv
-endif
-
-ifeq ($(SELECTED_MODULE),fa_row_reduction_core)
-TOPLEVEL := fa_row_reduction_core
-MODULE_PY := test_fa_row_reduction_core
-VERILOG_SOURCES := \
-	$(RTL_SOFTMAX_DIR)/fa_exp_pwl_8seg_q1_15.sv \
-	$(RTL_SOFTMAX_DIR)/fa_recip_nr_q16_16.sv \
-	$(RTL_SOFTMAX_DIR)/fa_online_softmax_update.sv \
-	$(RTL_CORE_DIR)/fa_row_reduction_core.sv
-endif
-
 ifeq ($(SELECTED_MODULE),fa_attention_ip_top)
 TOPLEVEL := fa_attention_ip_top
 MODULE_PY := test_fa_attention_ip_top_regs
@@ -76,18 +58,6 @@ ifeq ($(SELECTED_MODULE),fa_dma_writer)
 TOPLEVEL := fa_dma_writer
 MODULE_PY := test_fa_dma_writer
 VERILOG_SOURCES := $(RTL_BUS_DIR)/fa_dma_writer.sv
-endif
-
-ifeq ($(SELECTED_MODULE),fa_tile_buffer)
-TOPLEVEL := fa_tile_buffer
-MODULE_PY := test_fa_tile_buffer
-VERILOG_SOURCES := $(RTL_CORE_DIR)/fa_tile_buffer.sv
-endif
-
-ifeq ($(SELECTED_MODULE),fa_dot_product_d)
-TOPLEVEL := fa_dot_product_d
-MODULE_PY := test_fa_dot_product_d
-VERILOG_SOURCES := $(RTL_CORE_DIR)/fa_dot_product_d.sv
 endif
 
 ifeq ($(SELECTED_MODULE),fa_attention_core)

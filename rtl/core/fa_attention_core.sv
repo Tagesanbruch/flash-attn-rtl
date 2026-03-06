@@ -68,6 +68,7 @@ module fa_attention_core #(
   localparam int DP_CHUNKS = D / DP_LANES;
   localparam int ROW_PAR = 2;
   localparam int NORM_LANES = 8;
+  localparam int RECIP_LAT = 10;
 
   // ---- Master state machine ----
   typedef enum logic [3:0] {
@@ -130,6 +131,13 @@ module fa_attention_core #(
   logic [$clog2(TQ)-1:0] norm_qi;
   logic [$clog2(D)-1:0]  norm_d;
   logic [$clog2(TQ*D/ELEMS_PER_BEAT):0] o_write_cnt;
+  logic                  norm_recip_in_valid;
+  logic                  norm_recip_out_valid;
+  logic [31:0]           norm_recip_out_q16_16;
+  logic                  norm_recip_pending;
+  logic                  norm_row_ready;
+  logic                  norm_row_den_zero;
+  logic [31:0]           norm_row_recip;
 
   // ---- O output buffer ----
   logic signed [15:0] o_buf [TQ][D];
@@ -247,6 +255,15 @@ module fa_attention_core #(
     .i_a_q8_8(dp_shifted1[15:0]),
     .i_b_q8_8(i_scale_q8_8),
     .o_y_q8_8(dp_to_q8_8_1)
+  );
+
+  fa_recip_nr_q16_16 u_norm_recip (
+    .clk(clk),
+    .rst_n(rst_n),
+    .i_valid(norm_recip_in_valid),
+    .i_x_q16_16(row_l[norm_qi]),
+    .o_valid(norm_recip_out_valid),
+    .o_recip_q16_16(norm_recip_out_q16_16)
   );
 
   // ---- Inner compute FSM ----
@@ -385,6 +402,11 @@ module fa_attention_core #(
       pf_fill_cnt   <= '0;
       norm_qi       <= '0;
       norm_d        <= '0;
+      norm_recip_in_valid <= 1'b0;
+      norm_recip_pending  <= 1'b0;
+      norm_row_ready      <= 1'b0;
+      norm_row_den_zero   <= 1'b0;
+      norm_row_recip      <= 32'd0;
       o_write_cnt   <= '0;
       o_busy        <= 1'b0;
       o_done        <= 1'b0;
@@ -399,11 +421,16 @@ module fa_attention_core #(
       dma_rd_cmd_valid <= 1'b0;
       dma_wr_cmd_valid <= 1'b0;
       dma_wr_data_valid <= 1'b0;
+      norm_recip_in_valid <= 1'b0;
 
       if (i_soft_reset) begin
         ms         <= S_IDLE;
         o_busy     <= 1'b0;
         o_error    <= 1'b0;
+        norm_recip_pending <= 1'b0;
+        norm_row_ready     <= 1'b0;
+        norm_row_den_zero  <= 1'b0;
+        norm_row_recip     <= 32'd0;
       end else begin
 
       case (ms)
@@ -602,9 +629,13 @@ module fa_attention_core #(
             if (k_tile_idx == NUM_K_TILES - 1) begin
               pf_state <= PF_IDLE;
               pf_fill_cnt <= '0;
-              ms      <= S_NORMALIZE;
-              norm_qi <= '0;
-              norm_d  <= '0;
+              ms                <= S_NORMALIZE;
+              norm_qi           <= '0;
+              norm_d            <= '0;
+              norm_recip_pending <= 1'b0;
+              norm_row_ready     <= 1'b0;
+              norm_row_den_zero  <= 1'b0;
+              norm_row_recip     <= 32'd0;
             end else if (pf_state == PF_DONE) begin
               k_tile_idx  <= k_tile_idx + 1'b1;
               active_bank <= pref_target_bank;
@@ -623,47 +654,67 @@ module fa_attention_core #(
         // -- Final normalization: O[i][k] = acc[i][k] / l[i] --
         S_NORMALIZE: begin
           cycle_counter <= cycle_counter + 1'b1;
-          // Normalize 4 elements per cycle
-          for (int lane = 0; lane < NORM_LANES; lane++) begin
-            int d_idx;
-            logic [31:0] den;
-            logic signed [63:0] num;
-            logic signed [63:0] num_adj;
-            logic signed [63:0] norm_result;
-
-            d_idx = norm_d + lane;
-            if (d_idx < D) begin
-              den = row_l[norm_qi];
-              num = row_acc[norm_qi][d_idx];
-              if (den == 32'd0) begin
-                norm_result = (num >= 0) ? 64'sd32767 : -64'sd32768;
+          if (!norm_row_ready) begin
+            if (!norm_recip_pending) begin
+              if (row_l[norm_qi] == 32'd0) begin
+                norm_row_den_zero <= 1'b1;
+                norm_row_ready    <= 1'b1;
+                norm_row_recip    <= 32'd0;
               end else begin
-                if (num >= 0)
-                  num_adj = num + $signed({1'b0, den[31:1]});
-                else
-                  num_adj = num - $signed({1'b0, den[31:1]});
-                norm_result = num_adj / $signed({1'b0, den});
+                norm_recip_in_valid <= 1'b1;
+                norm_recip_pending  <= 1'b1;
+                norm_row_den_zero   <= 1'b0;
               end
-
-              if (norm_result > 64'sd32767)
-                o_buf[norm_qi][d_idx] <= 16'sd32767;
-              else if (norm_result < -64'sd32768)
-                o_buf[norm_qi][d_idx] <= -16'sd32768;
-              else
-                o_buf[norm_qi][d_idx] <= norm_result[15:0];
-            end
-          end
-
-          if ((norm_d + NORM_LANES) >= D) begin
-            norm_d <= '0;
-            if (norm_qi == TQ - 1) begin
-              ms          <= S_WRITE_O;
-              o_write_cnt <= '0;
-            end else begin
-              norm_qi <= norm_qi + 1'b1;
+            end else if (norm_recip_out_valid) begin
+              norm_recip_pending <= 1'b0;
+              norm_row_ready     <= 1'b1;
+              norm_row_recip     <= norm_recip_out_q16_16;
             end
           end else begin
-            norm_d <= norm_d + NORM_LANES;
+            for (int lane = 0; lane < NORM_LANES; lane++) begin
+              int d_idx;
+              logic signed [63:0] num;
+              logic signed [95:0] norm_mul_q32_32;
+              logic signed [95:0] norm_rounded_q32_32;
+              logic signed [79:0] norm_result;
+
+              d_idx = norm_d + lane;
+              if (d_idx < D) begin
+                num = row_acc[norm_qi][d_idx];
+                if (norm_row_den_zero) begin
+                  norm_result = (num >= 0) ? 80'sd32767 : -80'sd32768;
+                end else begin
+                  norm_mul_q32_32 = num * $signed({1'b0, norm_row_recip});
+                  if (norm_mul_q32_32 >= 0)
+                    norm_rounded_q32_32 = norm_mul_q32_32 + 96'sd2147483648;
+                  else
+                    norm_rounded_q32_32 = norm_mul_q32_32 - 96'sd2147483648;
+                  norm_result = norm_rounded_q32_32 >>> 32;
+                end
+
+                if (norm_result > 80'sd32767)
+                  o_buf[norm_qi][d_idx] <= 16'sd32767;
+                else if (norm_result < -80'sd32768)
+                  o_buf[norm_qi][d_idx] <= -16'sd32768;
+                else
+                  o_buf[norm_qi][d_idx] <= norm_result[15:0];
+              end
+            end
+
+            if ((norm_d + NORM_LANES) >= D) begin
+              norm_d            <= '0;
+              norm_row_ready    <= 1'b0;
+              norm_row_den_zero <= 1'b0;
+              norm_row_recip    <= 32'd0;
+              if (norm_qi == TQ - 1) begin
+                ms          <= S_WRITE_O;
+                o_write_cnt <= '0;
+              end else begin
+                norm_qi <= norm_qi + 1'b1;
+              end
+            end else begin
+              norm_d <= norm_d + NORM_LANES;
+            end
           end
         end
 

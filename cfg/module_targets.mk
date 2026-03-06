@@ -1,1 +1,1 @@
-MODULES := fa_mul_sat_q8_8 fa_exp_pwl_8seg_q1_15 fa_recip_nr_q16_16 fa_online_softmax_update fa_row_reduction_core fa_dma_reader fa_dma_writer fa_tile_buffer fa_dot_product_d fa_attention_core fa_attention_ip_top
+MODULES := fa_mul_sat_q8_8 fa_exp_pwl_8seg_q1_15 fa_recip_nr_q16_16 fa_dma_reader fa_dma_writer fa_attention_core fa_attention_ip_top
