@@ -41,6 +41,16 @@ VERILOG_SOURCES := \
 	$(RTL_SOFTMAX_DIR)/fa_online_softmax_update.sv
 endif
 
+ifeq ($(SELECTED_MODULE),fa_row_reduction_core)
+TOPLEVEL := fa_row_reduction_core
+MODULE_PY := test_fa_row_reduction_core
+VERILOG_SOURCES := \
+	$(RTL_SOFTMAX_DIR)/fa_exp_pwl_8seg_q1_15.sv \
+	$(RTL_SOFTMAX_DIR)/fa_recip_nr_q16_16.sv \
+	$(RTL_SOFTMAX_DIR)/fa_online_softmax_update.sv \
+	$(RTL_CORE_DIR)/fa_row_reduction_core.sv
+endif
+
 ifeq ($(SELECTED_MODULE),fa_attention_ip_top)
 TOPLEVEL := fa_attention_ip_top
 MODULE_PY := test_fa_attention_ip_top_regs

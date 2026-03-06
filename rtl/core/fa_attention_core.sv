@@ -129,17 +129,10 @@ module fa_attention_core #(
   // ---- Normalization / write-out state ----
   logic [$clog2(TQ)-1:0] norm_qi;
   logic [$clog2(D)-1:0]  norm_d;
-  logic [31:0]           recip_val;
   logic [$clog2(TQ*D/ELEMS_PER_BEAT):0] o_write_cnt;
 
   // ---- O output buffer ----
   logic signed [15:0] o_buf [TQ][D];
-
-  // Recip instance
-  fa_recip_nr_q16_16 u_recip (
-    .i_x_q16_16(row_l[norm_qi]),
-    .o_recip_q16_16(recip_val)
-  );
 
   // Exp instances for online softmax
   logic signed [15:0] exp_diff_old_in0, exp_diff_new_in0;
@@ -661,7 +654,7 @@ module fa_attention_core #(
             end
           end
 
-          if (norm_d >= D - NORM_LANES) begin
+          if ((norm_d + NORM_LANES) >= D) begin
             norm_d <= '0;
             if (norm_qi == TQ - 1) begin
               ms          <= S_WRITE_O;

@@ -16,6 +16,7 @@ STA_MODULES := \
 	fa_attention_ip_top
 
 STA_CLOCKED_MODULES := \
+	fa_recip_nr_q16_16 \
 	fa_online_softmax_update \
 	fa_row_reduction_core \
 	fa_axi_lite_regs \

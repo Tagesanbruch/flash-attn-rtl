@@ -28,24 +28,27 @@ module fa_row_reduction_core (
     .o_row_done(row_done)
   );
 
+  // ─── Pipelined normalization path ──────────────────────────────
+  // Pipeline stage 0: Latch acc & l on row_done, start NR
   logic        norm_start;
   logic [31:0] norm_l_latched;
   logic signed [31:0] norm_acc_latched;
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      norm_start       <= 1'b0;
-      norm_l_latched   <= 32'd0;
+      norm_start      <= 1'b0;
+      norm_l_latched  <= 32'd0;
       norm_acc_latched <= 32'sd0;
     end else begin
       norm_start <= row_done;
       if (row_done) begin
-        norm_l_latched   <= l_q16_16;
+        norm_l_latched  <= l_q16_16;
         norm_acc_latched <= acc_q16_16;
       end
     end
   end
 
+  // Pipeline stage 1-10: NR reciprocal (10-cycle latency, pipelined multiply)
   logic        recip_valid;
   logic [31:0] recip_q16_16;
 
@@ -58,6 +61,7 @@ module fa_row_reduction_core (
     .o_recip_q16_16(recip_q16_16)
   );
 
+  // Pipeline: delay acc to align with recip output (10 cycles through NR)
   logic signed [31:0] acc_delay [0:9];
   integer j;
 
@@ -72,6 +76,7 @@ module fa_row_reduction_core (
     end
   end
 
+  // Pipeline stage 11: Final multiply acc * recip + saturation
   logic signed [63:0] norm_mul_q32_32;
   logic signed [63:0] norm_shifted;
   logic signed [15:0] norm_sat;
@@ -79,6 +84,7 @@ module fa_row_reduction_core (
   always_comb begin
     norm_mul_q32_32 = acc_delay[9] * $signed({1'b0, recip_q16_16});
     norm_shifted = norm_mul_q32_32 >>> 16;
+    // Saturate on the full 64-bit value to avoid [31:0] truncation sign flip
     if (norm_shifted > 64'sd32767)
       norm_sat = 16'sd32767;
     else if (norm_shifted < -64'sd32768)
@@ -89,12 +95,13 @@ module fa_row_reduction_core (
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      o_row_out_q8_8  <= 16'sd0;
       o_row_out_valid <= 1'b0;
+      o_row_out_q8_8  <= 16'sd0;
     end else begin
       o_row_out_valid <= recip_valid;
-      if (recip_valid)
+      if (recip_valid) begin
         o_row_out_q8_8 <= norm_sat;
+      end
     end
   end
 endmodule

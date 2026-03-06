@@ -43,12 +43,12 @@ module fa_online_softmax_update (
   );
 
   always_comb begin
+    // When i_row_start is active, use reset values for computation
+    // so the first beat of a new row doesn't carry over previous row state
     if (i_row_start) begin
       m_new = (i_score_q8_8 > -16'sd32768) ? i_score_q8_8 : -16'sd32768;
-    end else if (i_score_q8_8 > m_reg) begin
-      m_new = i_score_q8_8;
     end else begin
-      m_new = m_reg;
+      m_new = (i_score_q8_8 > m_reg) ? i_score_q8_8 : m_reg;
     end
 
     diff_old_q8_8 = (i_row_start ? -16'sd32768 : m_reg) - m_new;

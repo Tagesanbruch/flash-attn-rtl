@@ -6,9 +6,25 @@ module fa_recip_nr_q16_16 (
   output logic        o_valid,
   output logic [31:0] o_recip_q16_16
 );
-  // Newton-Raphson reciprocal: 10-stage pipeline with pipelined 32×32 multiply.
-  // Internal latency is hidden behind i_valid/o_valid handshaking.
+  // Newton-Raphson reciprocal: 10-stage pipeline with pipelined 32×32 multiply
+  //
+  // Each 32×32 multiply is split into:
+  //   Sub-stage A: four 16×16 partial products (parallel, ~1ns)
+  //   Sub-stage B: accumulate partial products (~1ns)
+  //
+  // Pipeline:
+  //   Stage 0: CLZ + normalize
+  //   Stage 1: LUT lookup
+  //   Stage 2: d_norm × r0 partial products   (16×16)
+  //   Stage 3: accumulate dr0, extract, corr1 = 2-dr0  (add + sub)
+  //   Stage 4: r0 × corr1 partial products     (16×16)
+  //   Stage 5: accumulate r1_full, extract r1
+  //   Stage 6: d_norm × r1 partial products   (16×16)
+  //   Stage 7: accumulate dr1, extract, corr2 = 2-dr1  (add + sub)
+  //   Stage 8: r1 × corr2 partial products     (16×16)
+  //   Stage 9: accumulate r2_full, extract r2, de-normalize
 
+  // ─── CLZ function ──────────────────────────────────────────────
   function automatic [5:0] clz32(input [31:0] val);
     reg [5:0] n;
     reg [31:0] x;
@@ -28,6 +44,9 @@ module fa_recip_nr_q16_16 (
     end
   endfunction
 
+  // ═══════════════════════════════════════════════════════════════
+  // Stage 0: CLZ + normalize (split from LUT for timing)
+  // ═══════════════════════════════════════════════════════════════
   logic [5:0]  lz;
   logic [31:0] d_norm;
 
@@ -54,6 +73,9 @@ module fa_recip_nr_q16_16 (
     end
   end
 
+  // ═══════════════════════════════════════════════════════════════
+  // Stage 1: LUT lookup (small combinational depth)
+  // ═══════════════════════════════════════════════════════════════
   logic [31:0] r0_lut;
 
   always_comb begin
@@ -89,7 +111,7 @@ module fa_recip_nr_q16_16 (
       5'd28: r0_lut = 32'h8767_AB5F;
       5'd29: r0_lut = 32'h8534_0853;
       5'd30: r0_lut = 32'h8312_6E98;
-      default: r0_lut = 32'h8102_0408;
+      5'd31: r0_lut = 32'h8102_0408;
     endcase
   end
 
@@ -113,8 +135,10 @@ module fa_recip_nr_q16_16 (
     end
   end
 
+  // ═══════════════════════════════════════════════════════════════
+  // Stage 2: d_norm × r0 — partial products (four 16×16)
+  // ═══════════════════════════════════════════════════════════════
   logic [31:0] pp2_hh, pp2_hl, pp2_lh, pp2_ll;
-
   always_comb begin
     pp2_hh = s1_d_norm[31:16] * s1_r0[31:16];
     pp2_hl = s1_d_norm[31:16] * s1_r0[15:0];
@@ -145,6 +169,9 @@ module fa_recip_nr_q16_16 (
     end
   end
 
+  // ═══════════════════════════════════════════════════════════════
+  // Stage 3: accumulate dr0, extract dr0_q1_31, corr1 = 2 - dr0
+  // ═══════════════════════════════════════════════════════════════
   logic [63:0] dr0_acc;
   logic [31:0] dr0_q1_31;
   logic [32:0] corr1;
@@ -157,8 +184,8 @@ module fa_recip_nr_q16_16 (
   end
 
   logic        s3_valid;
-  logic [31:0] s3_corr1;
-  logic        s3_corr1_ov;
+  logic [31:0] s3_corr1;   // corr1[31:0] — Q1.31 correction
+  logic        s3_corr1_ov; // corr1[32] — overflow flag
   logic [31:0] s3_d_norm, s3_r0;
   logic [5:0]  s3_lz;
   logic        s3_is_zero, s3_is_one;
@@ -178,6 +205,9 @@ module fa_recip_nr_q16_16 (
     end
   end
 
+  // ═══════════════════════════════════════════════════════════════
+  // Stage 4: r0 × corr1 — partial products (four 16×16)
+  // ═══════════════════════════════════════════════════════════════
   logic [31:0] mul4_a, mul4_b;
   logic [31:0] pp4_hh, pp4_hl, pp4_lh, pp4_ll;
 
@@ -193,7 +223,7 @@ module fa_recip_nr_q16_16 (
   logic        s4_valid;
   logic [31:0] s4_pp_hh, s4_pp_hl, s4_pp_lh, s4_pp_ll;
   logic        s4_corr1_ov;
-  logic [31:0] s4_r0;
+  logic [31:0] s4_r0;     // original r0 for clamp path
   logic [31:0] s4_d_norm;
   logic [5:0]  s4_lz;
   logic        s4_is_zero, s4_is_one;
@@ -216,13 +246,16 @@ module fa_recip_nr_q16_16 (
     end
   end
 
+  // ═══════════════════════════════════════════════════════════════
+  // Stage 5: accumulate r1_full, extract r1
+  // ═══════════════════════════════════════════════════════════════
   logic [63:0] r1_full_acc;
   logic [31:0] r1_extracted;
 
   always_comb begin
     r1_full_acc = {s4_pp_hh, 32'b0} + {16'b0, s4_pp_hl, 16'b0}
-                + {16'b0, s4_pp_lh, 16'b0} + {32'b0, s4_pp_ll};
-    r1_extracted = s4_corr1_ov ? s4_r0 : r1_full_acc[62:31];
+               + {16'b0, s4_pp_lh, 16'b0} + {32'b0, s4_pp_ll};
+    r1_extracted = s4_corr1_ov ? s4_r0 : r1_full_acc[62:31];  // Q0.32
   end
 
   logic        s5_valid;
@@ -244,6 +277,9 @@ module fa_recip_nr_q16_16 (
     end
   end
 
+  // ═══════════════════════════════════════════════════════════════
+  // Stage 6: d_norm × r1 — partial products (four 16×16)
+  // ═══════════════════════════════════════════════════════════════
   logic [31:0] pp6_hh, pp6_hl, pp6_lh, pp6_ll;
 
   always_comb begin
@@ -275,6 +311,9 @@ module fa_recip_nr_q16_16 (
     end
   end
 
+  // ═══════════════════════════════════════════════════════════════
+  // Stage 7: accumulate dr1, extract dr1_q1_31, corr2 = 2 - dr1
+  // ═══════════════════════════════════════════════════════════════
   logic [63:0] dr1_acc;
   logic [31:0] dr1_q1_31;
   logic [32:0] corr2;
@@ -307,6 +346,9 @@ module fa_recip_nr_q16_16 (
     end
   end
 
+  // ═══════════════════════════════════════════════════════════════
+  // Stage 8: r1 × corr2 — partial products (four 16×16)
+  // ═══════════════════════════════════════════════════════════════
   logic [31:0] mul8_a, mul8_b;
   logic [31:0] pp8_hh, pp8_hl, pp8_lh, pp8_ll;
 
@@ -343,6 +385,9 @@ module fa_recip_nr_q16_16 (
     end
   end
 
+  // ═══════════════════════════════════════════════════════════════
+  // Stage 9: accumulate r2, de-normalize, output
+  // ═══════════════════════════════════════════════════════════════
   logic [63:0] r2_full_acc;
   logic [31:0] r2;
   logic [63:0] result_wide;
@@ -350,16 +395,17 @@ module fa_recip_nr_q16_16 (
 
   always_comb begin
     r2_full_acc = {s8_pp_hh, 32'b0} + {16'b0, s8_pp_hl, 16'b0}
-                + {16'b0, s8_pp_lh, 16'b0} + {32'b0, s8_pp_ll};
-    r2 = s8_corr2_ov ? s8_r1 : r2_full_acc[62:31];
+               + {16'b0, s8_pp_lh, 16'b0} + {32'b0, s8_pp_ll};
+    r2 = s8_corr2_ov ? s8_r1 : r2_full_acc[62:31];  // Q0.32
 
+    // De-normalize
     result_wide = 64'd0;
     if (s8_is_zero) begin
       result_final = 32'hFFFF_FFFF;
     end else if (s8_is_one) begin
       result_final = 32'hFFFF_FFFF;
     end else if (s8_lz >= 6'd31) begin
-      result_wide = {32'd0, r2} << (s8_lz - 6'd31);
+      result_wide  = {32'd0, r2} << (s8_lz - 6'd31);
       if (result_wide[63:32] != 32'd0)
         result_final = 32'hFFFF_FFFF;
       else
@@ -378,4 +424,5 @@ module fa_recip_nr_q16_16 (
       o_recip_q16_16 <= result_final;
     end
   end
+
 endmodule
