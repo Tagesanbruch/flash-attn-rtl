@@ -1,0 +1,16 @@
+# report|title|url
+20260306-deepresearch|Softermax: Hardware/Software Co-Design of an Efficient Softmax for Transformers|https://arxiv.org/abs/2103.09301
+20260306-deepresearch|Low-Cost FlashAttention with Fused Exponential and Multiplication Hardware Operators|https://arxiv.org/abs/2505.14314
+20260306-deepresearch|On the Implementation of Fixed-point Exponential Function for Machine Learning and Signal Processing Accelerators|https://arxiv.org/abs/2112.02263
+20260306-deepresearch|SystolicAttention: Fusing FlashAttention within a Single Systolic Array|https://arxiv.org/abs/2507.11331
+20260306-deepresearch|FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness|https://arxiv.org/abs/2205.14135
+20260306-deepresearch|FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning|https://arxiv.org/abs/2307.08691
+20260306-deepresearch|FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision|https://arxiv.org/abs/2407.08608
+20260306-deepresearch|FlatAttention|https://people.csail.mit.edu/suvinay/pubs/2023.flat.asplos.pdf
+20260306-deepresearch|FAMOUS|https://arxiv.org/abs/2409.14023
+20260306-bonus|SpAtten|https://arxiv.org/abs/2012.09852
+20260306-bonus|BitStopper: An Efficient Transformer Attention Accelerator via Stage Fusion|https://arxiv.org/abs/2512.06457
+20260306-bonus|PADE|https://arxiv.org/abs/2512.14322
+# manual follow-up: no confirmed arXiv TeX source in this project flow
+# 20260306-bonus-manual|Sanger: A Co-Design Framework for Enabling Sparse Attention Using Reconfigurable Architecture|https://doi.org/10.1145/3466752.3480125
+# 20260306-bonus-manual|FACT: FFN-Attention Co-optimized Transformer Architecture with Eager Correlation Prediction|https://www.researchgate.net/publication/371666819_FACT_FFN-Attention_Co-optimized_Transformer_Architecture_with_Eager_Correlation_Prediction

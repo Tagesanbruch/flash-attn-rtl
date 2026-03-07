@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import argparse
+import gzip
+import io
 import os
 import re
 import tarfile
@@ -7,7 +10,7 @@ import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LIST_FILE = ROOT / "scripts" / "paper_download_list_20260305.txt"
+DEFAULT_LIST_FILE = ROOT / "scripts" / "paper_download_list_20260305.txt"
 PAPERS_DIR = ROOT / "papers"
 ARXIV_TEX_DIR = PAPERS_DIR / "arXiv-tex"
 
@@ -51,6 +54,31 @@ def ensure_pdf_url(url: str):
     return url, None
 
 
+def extract_arxiv_payload(archive_path: Path, out_dir: Path):
+    data = archive_path.read_bytes()
+
+    if tarfile.is_tarfile(archive_path):
+        with tarfile.open(archive_path, "r:*") as tf:
+            tf.extractall(out_dir)
+        return "tar"
+
+    if data[:2] == b"\x1f\x8b":
+        extracted = gzip.decompress(data)
+        buf = io.BytesIO(extracted)
+        if tarfile.is_tarfile(buf):
+            buf.seek(0)
+            with tarfile.open(fileobj=buf, mode="r:*") as tf:
+                tf.extractall(out_dir)
+            return "tar.gz"
+        tex_path = out_dir / f"{archive_path.stem}.tex"
+        tex_path.write_bytes(extracted)
+        return "gz-plain"
+
+    tex_path = out_dir / f"{archive_path.stem}.tex"
+    tex_path.write_bytes(data)
+    return "plain"
+
+
 def download_arxiv_src(aid: str):
     src_url = f"https://arxiv.org/src/{aid}"
     out_dir = ARXIV_TEX_DIR / aid
@@ -62,15 +90,27 @@ def download_arxiv_src(aid: str):
         print(f"[WARN] arXiv src download failed {aid}: {e}")
         return
     try:
-        with tarfile.open(archive_path, "r:gz") as tf:
-            tf.extractall(out_dir)
-        print(f"[OK] extracted arXiv src: {aid}")
+        kind = extract_arxiv_payload(archive_path, out_dir)
+        print(f"[OK] extracted arXiv src: {aid} ({kind})")
     except Exception as e:
         print(f"[WARN] arXiv src extract failed {aid}: {e}")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Download paper PDFs and arXiv sources")
+    parser.add_argument(
+        "--list-file",
+        default=os.environ.get("PAPER_LIST_FILE", str(DEFAULT_LIST_FILE)),
+        help="Path to paper list file",
+    )
+    return parser.parse_args()
+
+
 def main():
-    items = read_list(LIST_FILE)
+    args = parse_args()
+    list_file = Path(args.list_file).resolve()
+    items = read_list(list_file)
+    print(f"[INFO] using list file: {list_file}")
     print(f"[INFO] loaded items: {len(items)}")
 
     for report, title, url in items:

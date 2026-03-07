@@ -35,7 +35,9 @@ TOPLEVEL_LANG ?= verilog
 EXP_SV_FILES := $(wildcard $(EXP_DIR)/*.sv)
 
 # Determine if the module is clocked (has clk port)
-CLOCKED_MODULES := fa_row_reduction_core fa_online_softmax_update fa_recip_nr_q16_16
+CLOCKED_MODULES := fa_row_reduction_core fa_online_softmax_update fa_recip_nr_q16_16 \
+	fa_mul_sat_q8_8_pipe fa_exp_pwl_8seg_q1_15_pipe fa_online_softmax_base2 \
+	fa_row_reduction_core_base2 fa_row_norm_vec
 IS_CLOCKED := $(filter $(MOD),$(CLOCKED_MODULES))
 STA_SDC_FILE := $(if $(IS_CLOCKED),$(STA_SDC_CLOCKED),$(STA_SDC_COMB))
 
