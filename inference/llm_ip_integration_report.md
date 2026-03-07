@@ -250,3 +250,155 @@ Qwen2.5-0.5B 的每层 Attention：
 ### 6.4 关于 Qwen3-0.6B 的处理
 
 已确认 Qwen3-0.6B 的 `head_dim = 128`，与当前 IP 不兼容。要支持它必须走"方向一"的 D=128 改造路线。如果改造完成，Qwen3-0.6B 也是很好的目标（参数量小、有完整 HuggingFace 权重）。
+
+---
+
+## 七、 纯 CPU 基线性能 Profile（MacOS - Apple Silicon）
+
+为了后续对比硬件 IP 带来的加速比差距，并且摸清端到端大模型推理中的注意力计算的占比权重，我们在 MacOS 环境下对纯 C 语言编写的推理引擎 `run.c` 进行了性能 Profiling 嵌入，并成功跑通了 **Qwen2.5-0.5B** 模型。
+
+### 7.1 测试环境与模型
+*   **平台**：Apple Silicon (ARM64) macOS 下的 `clang -Ofast` 多线程版本。
+*   **测试模型**：`Qwen2.5-0.5B-Instruct`
+*   **Prompt**："What is the history of the Apple company? Explain detailed."
+*   **Token 规模**：Prefill（首字） 41 Tokens，Decode（解码） 559 Tokens，总长度刚好达到 600 Tokens。
+
+### 7.2 Profiling 原始数据实测结果与操作计数 (Operation Counts)
+
+以下是基于 523 tokens（Prefill 42，Decode 481） 推理运行耗时的截取摘要：
+*   **Prefill 吞吐率**: 13.02 tokens/s 
+*   **Decode 吞吐率**: 27.36 tokens/s
+
+**单 Token 推理的运算调用次数（以 Qwen2.5-0.5B 为例）：**
+为了对齐 IP 核设计的评估规模（单 Batch，单 Head），我们需要知道模型跑出一个 Token 后，究竟在 CPU 上触发了多少次运算逻辑。
+基于对 C 代码核心算子的 Hook 计数，单 Token 生成（即通过所有的 `n_layers = 24` 层网络）平均触发的调用次数如下：
+
+| 运算类型 | 单 Token 分摊调用次数 | 关联组件 |
+|---|---|---|
+| **Matmul (矩阵乘)** | **169 次** | QKV 投影 (3) + O 投影 (1) + FFN (3) = 7 次/层 × 24 层 = 168 次 (+1次 lm_head) |
+| **RMSNorm (归一化)** | **49 次** | Attention Norm (1) + FFN Norm (1) = 2 次/层 × 24 层 = 48 次 (+1次 Final Norm) |
+| **Softmax (指数归一)** | **336 次** | 每层每 Head 一次：14 Heads/层 × 24 层 = 336 次 |
+| **MHA QK-Dot (向量点积)** | **与上下文长度成正比** | 在 S=256 时，单次 Softmax 前需计算 256 次点积，所以单 Token 需 336 × 256 ≈ 8.6 万次内积 |
+| **MHA A-V (加权求和)** | **与上下文长度成正比** | 在 S=256 时，Softmax 后也是 8.6 万次行向量加权累加 |
+
+**全流程定级耗时与 MACs（乘加运算）:**
+
+| 算子阶段 | Total MACs (G) | 执行时间 (s) | 算力利用率 (GMAC/s) |
+|---|---|---|---|
+| **QKV 投影** | 12.956 | 2.050 | 6.32 |
+| **Attention (MHA)** | 5.893 | 2.904 | 2.03 |
+| **O 投影** | 10.077 | 0.975 | 10.34 |
+| **FFN 网络** | 164.110 | 10.581 | 15.51 |
+
+* 注: `GMAC/s` 等价于一半的 `GOPS`。当前 pipeline 综合 CPU 算力为 ~23.38 GOPS。
+
+### 7.3 分析与结论
+
+1.  **注意力运算的特征频率**：每生成一个 Token，模型需要执行 336 次标准的 Softmax 操作对应 336 次单 Head Attention 加速请求。这正好符合我们 RTL IP 的基本算粒特征（单 Batch、单 Head 评估）。
+2.  **注意力耗时比例**：虽然 MHA 过程的 MACs 极小（不及 FFN 的三十分之一），但由于内存访存密集与小矩阵特性，它占用了超过 **17.6%** 的处理时间。这使得针对 `head_dim=64` 的 Flash-Attention 进行硬件加速能显著改善这一时间黑洞。
+3.  **计算调度的启发**：如果将这个 169 次 Matmul 与 336 次 Softmax/Attention 的循环交由硬件 SoC 调度，必须让软件或者 DMA Controller 高效配合，避免因为 AXI 握手和反复配置寄存器导致 Overhead 高于 CPU 原生运算时间。
+4.  **Amdahl 定律的演化**：即便 Attention 被极速硬件化了，单 Token 还有 169 次沉重的底层 FFN Matmul 和 49 次 RMSNorm，它们可能成为下一个阿喀琉斯之踵。如果我们的课题旨在打造全链路端到端 LLM-IP，那么矩阵乘与向量规约（Norm）算子硬件化也将是不可或缺的拼图。
+
+### 7.4 单 Token 推理时序与张量流转链路溯源 (Execution Trace)
+
+为了明确软硬件边界交互时的**数据总线传输宽度与维度**，我们单独拦截了模型在进行一次 Decode 推理（例：Pos = 41 时）的访存轨迹。
+在单个 Transformer Layer 中，数据流的计算工序被严格划分为：**外部 Matmul 投影计算 -> Flash-Attention 等价内部计算 -> 外部 FFN 计算**。
+
+以下是精准对应 `Qwen2.5-0.5B` 结构的尺寸数据流：
+*(注: Base Dim = 896, n_heads = 14, head_size = 64, n_kv_heads = 2, ffn_hidden = 4864)*
+
+```text
+=== FORWARD PASS (pos=41) ===
+Input token embedding shape: [896]
+
+--- Layer 0 ~ 23 (24次循环) ---
+1. Input RMSNorm              : [896] -> [896]
+2. Q_proj (Matmul)            : input [896] * weight [896, 896] -> q [896]
+3. K_proj (Matmul)            : input [896] * weight [896, 128] -> k [128]
+4. V_proj (Matmul)            : input [896] * weight [896, 128] -> v [128]
+5. Add Bias to Q, K, V
+6. Apply RoPE to Q, K
+
+7. ============= FlashAttention Module Equivalent =============
+   [此模块即为 RTL IP 的替换边界]
+   -> 硬件接口输入张量: Q [14 Heads, 64], K_cache [42 Seq, 2 Heads, 64], V_cache [42 Seq, 2 Heads, 64]
+   
+   Internal Ops (按单个 Head 切分并行，独立循环 14 次):
+     - Mem Read (DMA)    : 读取当前 Q 行 [64]
+     - Mem Read (DMA)    : 读取 K 缓存行 [64]
+     - QK^T Dot Products : 执行 42 次 (当前上下文 S=41+1) 的点积运算
+     - Softmax           : 在内部 Buffer 对 42 个 float 积分元素求归一化
+     - P*V Weighted Sums : 读取 V 缓存执行 42 次 (标量 * 向量[64])
+   
+   -> 硬件接口输出张量: Attention_Out [14 Heads, 64] -> (拼接拍平给软件) -> [896]
+   ==========================================================
+
+8. O_proj (Matmul)            : input [896] * weight [896, 896] -> o [896]
+9. Add Residual               : Attention Out + Input
+10. Post-Attention RMSNorm    : [896] -> [896]
+
+11. FFN Up/Gate Proj (Matmul) : input [896] * W1/W3 [896, 4864] -> hb/hb2 [4864]
+12. FFN SwiGLU Activation
+13. FFN Down Proj (Matmul)    : input [4864] * W2 [4864, 896] -> xb [896]
+14. Add Residual              : FFN Out + Input
+```
+
+**集成访存(DMA)规划**:
+可见，如果用 RTL IP 替换核心 Attention，硬件需要一个能够：
+1. 从 `Q_BASE` 取回 64 个元素的 SRAM 口。
+2. 从 `K_BASE / V_BASE` 执行基于序列长度（最大支持如 256）的连续 Burst 读的 DMA。
+3. 并且完全屏蔽/内化 `QK Dot + Softmax + PV Sum` 操作，直接向 `O_BASE` Burst 写回 64 元素。
+
+---
+
+## 8. 软硬件协同：RTL 接口在推理程序中的集成方案设计
+
+根据 `problem.md` 中定义的 Baseline 接口（AXI4-Lite 控制 + AXI4 Master DMA），如果我们要将这颗名为 `fa_attention_ip_top` 的 RTL IP 接入到纯 C 语言推理流 `run.c`/`runperf.c` 中，推理软件架构的改造方案如下：
+
+### 8.1 是否需要单独定义一个 `flash-attention` C 函数？
+
+**迫切需要。**
+在目前的 `runperf.c` 的 `forward()` 函数中，注意力计算的 `qk` 点积、`softmax` 和 `v` 加权和是直接作为多重 `for` 循环平铺在主业务流里的。不仅复用了大量的栈上标量，且其多头（Multi-Head）并行是交由 OpenMP 来处理的。
+若直接将 AXI 寄存器配置代码散落在主循坏中，会严重污染计算图。我们**必须封装一个独立的 `flash_attention_hw` 接口函数**。
+
+**推荐的C函数原型封装**：
+```c
+void flash_attention_hw(
+    float *q,          // 位于内存的 [n_heads, head_size]
+    float *k_cache,    // 位于内存的 [S_max, n_kv_heads, head_size]
+    float *v_cache,    // 位于内存的 [S_max, n_kv_heads, head_size]
+    float *att_out,    // 输出目标 [n_heads, head_size]
+    int seq_len,       // 当前上下文长度 S (如 prefill=38, decode依次+1)
+    int n_heads, 
+    int head_size, 
+    int kv_mul         // query 与 kv head 的比例 (GQA/MQA 需要)
+);
+```
+
+### 8.2 软硬接口映射与访问流程 (SoC 内存映射)
+
+一旦封装了该函数，软件将经历将 "浮点运算" 转换为 "DMA 配置与等待" 的过程。根据大赛规定的 AXI 寄存器表，函数内部的操作分为三个阶段：
+
+**阶段 1: 数据准备与量化 (CPU 侧)**
+- **数据格式转换**: C 语言推理当前全是 `float32`，但赛题要求 RTL IP 接口数据的格式是 **Q8.8 定点数 (16-bit)**。
+- 软件必须在 `flash_attention_hw` 中，分配一块连续的 DMA 内存，或者在驱动层拦截 QKV 数据，将其从 `float32` 缩放至 `Q8.8` (乘以 256 并强转 `short`)。
+
+**阶段 2: AXI-Lite 寄存器下发 (发起硬件请求)**
+硬件挂载在系统总线上后（例如在 FPGA 或 SoC 中），C 程序使用 `mmap` 或者裸机指针对硬件基址写入特征参数。对于当前循环的某一个 Head，操作序如下：
+1. **基址配置**:
+   - `Q_BASE_L`: 写入当前处理的这一列 `q` 向量所在的物理主存地址。
+   - `K_BASE_L` / `V_BASE_L`: 写入 KV-Cache 的物理基地址。
+   - `O_BASE_L`: 写入当前 Head 存放 Attention 输出的物理主存地址。
+2. **步长与参数配置**:
+   - `STRIDE_BYTES = 128` (因为 `head_size=64`，16-bit 占用 2 Bytes，`64*2=128`)。
+   - `SCALE` 定点写入 $\frac{1}{\sqrt{64}}$ 的预计算倒数。
+3. **启动计算**:
+   - 对 `CTRL` (0x00) 偏移地址的 bit0 写入 1，拉高 `START` 信号。
+
+**阶段 3: 等待与数据回发 (Polling & Dequantize)**
+1. **轮询状态**: CPU 利用一个小的 `while()` 循环不断读取 `STATUS` (0x04) 寄存器的 bit1(`DONE`)。
+2. **反量化**: 硬件将结果通过 DMA Master Burst 写入了 `O_BASE` 指向的主存地址。软件从该内存读出 Q8.8 结果，并将其除以 256，转换回 `float32` 填入 `att_out` 缓存供后续 `O_proj` 投影层调用。
+
+### 8.3 阶段性结论与难点
+通过这种 `flash_attention_hw` 驱动层包装，C语言只需处理最外层的 `for (layer)`，即可将繁重的运算交由 IP 处理。
+目前集成面临的**核心难点**是：软件运行环境是 Mac，而 IP 是硬件。为了验证，后续我们需要通过 `Verilator` (DPI-C) 建立协仿真平台。在 C 语言程序中将上述提到的物理地址读写，定向为对 Verilator AXI Bridge 的 C++ 方法调用，才能实现推理代码与 RTL 代码的端到端联调测试。

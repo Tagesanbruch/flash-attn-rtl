@@ -1,0 +1,4 @@
+*.bin
+*.txt
+*.log
+build/*
