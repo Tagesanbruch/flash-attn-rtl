@@ -40,6 +40,11 @@ all_c_infer: run.c ${QWEN_BIN_MODEL_PATH} ${QWEN_BIN_TOKEN_PATH}
 	mkdir -p build
 	$(CC) -Ofast -fopenmp -march=native -DNORMAL -DQWEN_BIN_MODEL_PATH='"${QWEN_BIN_MODEL_PATH}"' -DQWEN_BIN_TOKEN_PATH='"${QWEN_BIN_TOKEN_PATH}"' run.c  -lm  -o build/run
 
+########## C-Model Flash Attention (Q8.8) ###########
+run_fa: run_fa.c flash_attn.c
+	mkdir -p build
+	$(CC) -Ofast -fopenmp -march=native -DNORMAL -DQWEN_BIN_MODEL_PATH='"${QWEN_BIN_MODEL_PATH}"' -DQWEN_BIN_TOKEN_PATH='"${QWEN_BIN_TOKEN_PATH}"' run_fa.c flash_attn.c -lm -o build/run_fa
+
 ########## FP8 run ###########
 run_fp8: run-fp8.c ${QWEN3_FP8_BIN_PATH} ${QWEN_BIN_TOKEN_PATH}
 	mkdir -p build

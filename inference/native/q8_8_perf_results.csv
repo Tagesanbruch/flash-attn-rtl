@@ -1,0 +1,21 @@
+Prompt,Model,Tokens,QKV_Speed(GMAC/s),ATTN_Speed(GMAC/s),Pipeline_Tput(GMAC/s),ATTN_Time_%
+What is the capital of France?,FP32(runperf),"prefill=36, decode=7",4.78,1.14,7.72,1.8
+What is the capital of France?,Q8.8(run_fa),"prefill=36, decode=7",8.28,1.27,17.77,3.7
+Explain the theory of relativity in simple terms.,FP32(runperf),"prefill=40, decode=281",8.33,2.06,15.95,14.7
+Explain the theory of relativity in simple terms.,Q8.8(run_fa),"prefill=40, decode=309",8.21,6.04,17.33,5.9
+Write a short poem about a mechanical AI.,FP32(runperf),"prefill=38, decode=121",8.29,2.02,16.40,7.7
+Write a short poem about a mechanical AI.,Q8.8(run_fa),"prefill=38, decode=121",7.56,3.38,16.18,4.6
+What are the main differences between Python and C?,FP32(runperf),"prefill=39, decode=561",8.25,2.00,13.89,24.2
+What are the main differences between Python and C?,Q8.8(run_fa),"prefill=39, decode=561",8.50,8.88,17.37,6.8
+How does a standard transformer architecture work?,FP32(runperf),"prefill=37, decode=276",8.56,2.12,16.12,14.1
+How does a standard transformer architecture work?,Q8.8(run_fa),"prefill=37, decode=440",8.11,7.82,17.37,6.2
+Who painted the Mona Lisa?,FP32(runperf),"prefill=35, decode=124",7.69,2.02,15.59,7.4
+Who painted the Mona Lisa?,Q8.8(run_fa),"prefill=35, decode=10",8.29,1.35,17.04,3.5
+Provide a recipe for classic chocolate chip cookies.,FP32(runperf),"prefill=38, decode=320",8.38,2.07,15.55,15.8
+Provide a recipe for classic chocolate chip cookies.,Q8.8(run_fa),"prefill=38, decode=327",8.46,6.79,17.59,5.6
+Summarize the plot of the movie Inception.,FP32(runperf),"prefill=41, decode=81",8.60,1.93,17.54,6.7
+Summarize the plot of the movie Inception.,Q8.8(run_fa),"prefill=41, decode=111",8.15,3.66,17.33,4.3
+What is the history of the Apple company?,FP32(runperf),"prefill=38, decode=430",8.48,2.04,15.21,20.4
+What is the history of the Apple company?,Q8.8(run_fa),"prefill=38, decode=562",8.46,8.67,17.65,7.1
+Can you explain the baseline specification of Flash Attention?,FP32(runperf),"prefill=42, decode=558",8.33,1.96,14.36,25.6
+Can you explain the baseline specification of Flash Attention?,Q8.8(run_fa),"prefill=42, decode=462",8.41,7.96,18.03,6.7
