@@ -1,5 +1,7 @@
 # 设计报告驱动实验：datapath 微架构实验与指标总结
 
+> 2026-03-09 追加说明：第二轮继续优化 Online Softmax / QK / Norm 的结果，见 [docs/20260309_softmax_qk_norm_followup_report.md](docs/20260309_softmax_qk_norm_followup_report.md)。
+
 ## 1. 实验目标
 
 根据 [report/20260309-miromind.md](report/20260309-miromind.md) 中给出的下一阶段建议，本次在 `experiments/` 下新增了 3 组针对已拆分 datapath 的独立实验，用于回答以下问题：

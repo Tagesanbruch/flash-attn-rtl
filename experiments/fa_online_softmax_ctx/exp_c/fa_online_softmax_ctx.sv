@@ -115,6 +115,9 @@ module fa_online_softmax_ctx (
 
   always_ff @(posedge clk or negedge rst_n) begin
     int idx;
+    logic signed [15:0] fwd_m_prev;
+    logic [31:0]        fwd_l_prev;
+    logic signed [31:0] fwd_acc_prev;
     logic [31:0]        l_new_q16_16;
     logic signed [31:0] acc_new_q16_16;
 
@@ -137,14 +140,22 @@ module fa_online_softmax_ctx (
     end else begin
       if (i_valid) begin
         idx = i_ctx_id;
+        fwd_m_prev = m_state[idx];
+        fwd_l_prev = l_state[idx];
+        fwd_acc_prev = acc_state[idx];
+        if (s3_valid && (s3_ctx_id == i_ctx_id)) begin
+          fwd_m_prev = s3_m_new;
+          fwd_l_prev = s3_l_scaled_q32_31[46:15] + {15'd0, s3_exp_new, 1'b0};
+          fwd_acc_prev = s3_acc_scaled_q33_31[46:15] + {{5{s3_v_mul_q9_23[33]}}, s3_v_mul_q9_23[33:7]};
+        end
         s0_valid <= 1'b1;
         s0_row_end <= i_row_end;
         s0_ctx_id <= i_ctx_id;
         s0_score <= i_score_q8_8;
         s0_value <= i_value_q8_8;
-        s0_m_prev <= i_row_start ? -16'sd32768 : m_state[idx];
-        s0_l_prev <= i_row_start ? 32'd0 : l_state[idx];
-        s0_acc_prev <= i_row_start ? 32'sd0 : acc_state[idx];
+        s0_m_prev <= i_row_start ? -16'sd32768 : fwd_m_prev;
+        s0_l_prev <= i_row_start ? 32'd0 : fwd_l_prev;
+        s0_acc_prev <= i_row_start ? 32'sd0 : fwd_acc_prev;
       end else begin
         s0_valid <= 1'b0;
       end
