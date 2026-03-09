@@ -81,7 +81,7 @@ module fa_attention_core #(
   localparam int BEATS_PER_ROW  = D / ELEMS_PER_BEAT; // 8
   localparam int BEATS_PER_TILE_KV = TK * BEATS_PER_ROW; // 512
   localparam int BEATS_PER_TILE_Q  = TQ * BEATS_PER_ROW; // 256
-  localparam int DP_LANES = 32;
+  localparam int DP_LANES = (D < 32) ? D : 32;
   localparam int DP_CHUNKS = D / DP_LANES;
   localparam int ROW_PAR = 2;
   localparam int NORM_LANES = 8;
@@ -159,15 +159,8 @@ module fa_attention_core #(
   // ---- O output buffer ----
   logic signed [15:0] o_buf [TQ][D];
 
-  // Exp instances for online softmax
-  logic signed [15:0] exp_diff_old_in0, exp_diff_new_in0;
-  logic signed [15:0] exp_diff_old_in1, exp_diff_new_in1;
   logic [15:0] exp_old_out0, exp_new_out0;
   logic [15:0] exp_old_out1, exp_new_out1;
-  fa_exp_pwl_8seg_q1_15 u_exp_old0 (.i_x_q8_8(exp_diff_old_in0), .o_exp_q1_15(exp_old_out0));
-  fa_exp_pwl_8seg_q1_15 u_exp_new0 (.i_x_q8_8(exp_diff_new_in0), .o_exp_q1_15(exp_new_out0));
-  fa_exp_pwl_8seg_q1_15 u_exp_old1 (.i_x_q8_8(exp_diff_old_in1), .o_exp_q1_15(exp_old_out1));
-  fa_exp_pwl_8seg_q1_15 u_exp_new1 (.i_x_q8_8(exp_diff_new_in1), .o_exp_q1_15(exp_new_out1));
 
   // Inner compute FSM
   typedef enum logic [3:0] {
@@ -189,68 +182,50 @@ module fa_attention_core #(
   logic [63:0] l_scaled_wide1;
   logic signed [39:0] dp_partial_sum0;
   logic signed [39:0] dp_partial_sum1;
+  logic                     comp_row1_valid;
+  logic signed [15:0]       dp_q_row0 [D];
+  logic signed [15:0]       dp_q_row1 [D];
+  logic signed [15:0]       dp_k_row  [D];
+  logic signed [63:0]       sm_acc_old0 [D];
+  logic signed [63:0]       sm_acc_old1 [D];
+  logic signed [15:0]       sm_v_row    [D];
+  logic signed [63:0]       sm_acc_new0 [D];
+  logic signed [63:0]       sm_acc_new1 [D];
+  logic signed [63:0]       norm_acc_chunk [NORM_LANES];
+  logic signed [15:0]       norm_o_chunk   [NORM_LANES];
 
   always_comb begin
     m_old0 = row_m[comp_qpair];
-    if (score_q8_8_0 > m_old0)
-      m_new0 = score_q8_8_0;
-    else
-      m_new0 = m_old0;
-
-    exp_diff_old_in0 = m_old0 - m_new0;
-    exp_diff_new_in0 = score_q8_8_0 - m_new0;
-
-    l_scaled_wide0 = row_l[comp_qpair] * exp_old_out0;
-    l_scaled0 = l_scaled_wide0[46:15];
-    l_term0 = {15'd0, exp_new_out0, 1'b0};
-    l_new_val0 = l_scaled0 + l_term0;
-    l_new_safe0 = (l_new_val0 == 32'd0) ? 32'd1 : l_new_val0;
-
-    if (comp_qpair + 1 < TQ) begin
-      m_old1 = row_m[comp_qpair + 1];
-      if (score_q8_8_1 > m_old1)
-        m_new1 = score_q8_8_1;
+    m_old1 = (comp_qpair + 1 < TQ) ? row_m[comp_qpair + 1] : i_neg_large_q8_8;
+    comp_row1_valid = (comp_qpair + 1 < TQ);
+    for (int k = 0; k < D; k++) begin
+      dp_q_row0[k] = q_buf[comp_qpair][k];
+      dp_q_row1[k] = comp_row1_valid ? q_buf[comp_qpair + 1][k] : 16'sd0;
+      dp_k_row[k] = active_bank ? k_buf1[comp_kj][k] : k_buf0[comp_kj][k];
+      sm_acc_old0[k] = row_acc[comp_qpair][k];
+      sm_acc_old1[k] = comp_row1_valid ? row_acc[comp_qpair + 1][k] : 64'sd0;
+      sm_v_row[k] = active_bank ? v_buf1[comp_kj][k] : v_buf0[comp_kj][k];
+    end
+    for (int lane = 0; lane < NORM_LANES; lane++) begin
+      if ((norm_d + lane) < D)
+        norm_acc_chunk[lane] = row_acc[norm_qi][norm_d + lane];
       else
-        m_new1 = m_old1;
-
-      exp_diff_old_in1 = m_old1 - m_new1;
-      exp_diff_new_in1 = score_q8_8_1 - m_new1;
-
-      l_scaled_wide1 = row_l[comp_qpair + 1] * exp_old_out1;
-      l_scaled1 = l_scaled_wide1[46:15];
-      l_term1 = {15'd0, exp_new_out1, 1'b0};
-      l_new_val1 = l_scaled1 + l_term1;
-      l_new_safe1 = (l_new_val1 == 32'd0) ? 32'd1 : l_new_val1;
-    end else begin
-      m_old1 = i_neg_large_q8_8;
-      m_new1 = i_neg_large_q8_8;
-      exp_diff_old_in1 = 16'sd0;
-      exp_diff_new_in1 = 16'sd0;
-      l_scaled_wide1 = 64'd0;
-      l_scaled1 = 32'd0;
-      l_term1 = 32'd0;
-      l_new_val1 = 32'd0;
-      l_new_safe1 = 32'd1;
+        norm_acc_chunk[lane] = 64'sd0;
     end
   end
 
-  always_comb begin
-    int d_idx;
-    dp_partial_sum0 = '0;
-    dp_partial_sum1 = '0;
-    for (int lane = 0; lane < DP_LANES; lane++) begin
-      d_idx = comp_d * DP_LANES + lane;
-      if (active_bank)
-        dp_partial_sum0 = dp_partial_sum0 + 40'(q_buf[comp_qpair][d_idx]) * 40'(k_buf1[comp_kj][d_idx]);
-      else
-        dp_partial_sum0 = dp_partial_sum0 + 40'(q_buf[comp_qpair][d_idx]) * 40'(k_buf0[comp_kj][d_idx]);
-      if (comp_qpair + 1 < TQ)
-        if (active_bank)
-          dp_partial_sum1 = dp_partial_sum1 + 40'(q_buf[comp_qpair + 1][d_idx]) * 40'(k_buf1[comp_kj][d_idx]);
-        else
-          dp_partial_sum1 = dp_partial_sum1 + 40'(q_buf[comp_qpair + 1][d_idx]) * 40'(k_buf0[comp_kj][d_idx]);
-    end
-  end
+  fa_qk_dotprod_slice #(
+    .D(D),
+    .DP_LANES(DP_LANES)
+  ) u_qk_dotprod_slice (
+    .i_q_row0(dp_q_row0),
+    .i_q_row1(dp_q_row1),
+    .i_row1_valid(comp_row1_valid),
+    .i_k_row(dp_k_row),
+    .i_chunk_idx(comp_d),
+    .o_partial_sum0(dp_partial_sum0),
+    .o_partial_sum1(dp_partial_sum1)
+  );
 
   // Scale mul: dp_acc -> score
   // Extract Q8.8 from 40-bit accumulator (which is in Q16.16 after multiply)
@@ -274,6 +249,32 @@ module fa_attention_core #(
     .o_y_q8_8(dp_to_q8_8_1)
   );
 
+  fa_online_softmax_pair #(
+    .D(D)
+  ) u_online_softmax_pair (
+    .i_row1_valid(comp_row1_valid),
+    .i_neg_large_q8_8(i_neg_large_q8_8),
+    .i_score0(score_q8_8_0),
+    .i_score1(score_q8_8_1),
+    .i_m_old0(m_old0),
+    .i_m_old1(m_old1),
+    .i_l_old0(row_l[comp_qpair]),
+    .i_l_old1(comp_row1_valid ? row_l[comp_qpair + 1] : 32'd0),
+    .i_acc_old0(sm_acc_old0),
+    .i_acc_old1(sm_acc_old1),
+    .i_v_row(sm_v_row),
+    .o_m_new0(m_new0),
+    .o_m_new1(m_new1),
+    .o_l_new0(l_new_safe0),
+    .o_l_new1(l_new_safe1),
+    .o_exp_old0(exp_old_out0),
+    .o_exp_new0(exp_new_out0),
+    .o_exp_old1(exp_old_out1),
+    .o_exp_new1(exp_new_out1),
+    .o_acc_new0(sm_acc_new0),
+    .o_acc_new1(sm_acc_new1)
+  );
+
   fa_recip_nr_q16_16 u_norm_recip (
     .clk(clk),
     .rst_n(rst_n),
@@ -281,6 +282,15 @@ module fa_attention_core #(
     .i_x_q16_16(row_l[norm_qi]),
     .o_valid(norm_recip_out_valid),
     .o_recip_q16_16(norm_recip_out_q16_16)
+  );
+
+  fa_o_normalize_block #(
+    .NORM_LANES(NORM_LANES)
+  ) u_o_normalize_block (
+    .i_den_zero(norm_row_den_zero),
+    .i_recip_q16_16(norm_row_recip),
+    .i_acc(norm_acc_chunk),
+    .o_data(norm_o_chunk)
   );
 
   // ---- Inner compute FSM ----
@@ -347,31 +357,10 @@ module fa_attention_core #(
             row_l[comp_qpair + 1] <= l_new_safe1;
           end
 
-          // Update acc: rescale old + add P*V contribution
           for (int k = 0; k < D; k++) begin
-            logic signed [95:0] acc_sc;
-            logic signed [63:0] acc_old_sc;
-            logic signed [33:0] pv_mul;
-            logic signed [63:0] pv_term;
-            acc_sc = row_acc[comp_qpair][k] * $signed({1'b0, exp_old_out0});
-            acc_old_sc = acc_sc[78:15];
-            if (active_bank)
-              pv_mul = $signed({1'b0, exp_new_out0}) * v_buf1[comp_kj][k];
-            else
-              pv_mul = $signed({1'b0, exp_new_out0}) * v_buf0[comp_kj][k];
-            pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
-            row_acc[comp_qpair][k] <= acc_old_sc + pv_term;
-
-            if (comp_qpair + 1 < TQ) begin
-              acc_sc = row_acc[comp_qpair + 1][k] * $signed({1'b0, exp_old_out1});
-              acc_old_sc = acc_sc[78:15];
-              if (active_bank)
-                pv_mul = $signed({1'b0, exp_new_out1}) * v_buf1[comp_kj][k];
-              else
-                pv_mul = $signed({1'b0, exp_new_out1}) * v_buf0[comp_kj][k];
-              pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
-              row_acc[comp_qpair + 1][k] <= acc_old_sc + pv_term;
-            end
+            row_acc[comp_qpair][k] <= sm_acc_new0[k];
+            if (comp_qpair + 1 < TQ)
+              row_acc[comp_qpair + 1][k] <= sm_acc_new1[k];
           end
 
           if (comp_kj == TK - 1) begin
@@ -688,32 +677,9 @@ module fa_attention_core #(
           end else begin
             for (int lane = 0; lane < NORM_LANES; lane++) begin
               int d_idx;
-              logic signed [63:0] num;
-              logic signed [95:0] norm_mul_q32_32;
-              logic signed [95:0] norm_rounded_q32_32;
-              logic signed [79:0] norm_result;
-
               d_idx = norm_d + lane;
-              if (d_idx < D) begin
-                num = row_acc[norm_qi][d_idx];
-                if (norm_row_den_zero) begin
-                  norm_result = (num >= 0) ? 80'sd32767 : -80'sd32768;
-                end else begin
-                  norm_mul_q32_32 = num * $signed({1'b0, norm_row_recip});
-                  if (norm_mul_q32_32 >= 0)
-                    norm_rounded_q32_32 = norm_mul_q32_32 + 96'sd2147483648;
-                  else
-                    norm_rounded_q32_32 = norm_mul_q32_32 - 96'sd2147483648;
-                  norm_result = norm_rounded_q32_32 >>> 32;
-                end
-
-                if (norm_result > 80'sd32767)
-                  o_buf[norm_qi][d_idx] <= 16'sd32767;
-                else if (norm_result < -80'sd32768)
-                  o_buf[norm_qi][d_idx] <= -16'sd32768;
-                else
-                  o_buf[norm_qi][d_idx] <= norm_result[15:0];
-              end
+              if (d_idx < D)
+                o_buf[norm_qi][d_idx] <= norm_o_chunk[lane];
             end
 
             if ((norm_d + NORM_LANES) >= D) begin

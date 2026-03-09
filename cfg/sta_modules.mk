@@ -27,6 +27,9 @@ STA_RTL_fa_attention_ip_top := \
 	rtl/bus/fa_axi_lite_regs.sv \
 	rtl/bus/fa_dma_reader.sv \
 	rtl/bus/fa_dma_writer.sv \
+	rtl/core/fa_qk_dotprod_slice.sv \
+	rtl/core/fa_online_softmax_pair.sv \
+	rtl/core/fa_o_normalize_block.sv \
 	rtl/core/fa_attention_core.sv \
 	rtl/top/fa_attention_ip_top.sv
 
