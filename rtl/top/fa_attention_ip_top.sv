@@ -77,6 +77,45 @@ module fa_attention_ip_top #(
   logic        core_busy, core_done, core_error;
   logic [31:0] core_cycles;
 
+  logic        perf_ms_load_q;
+  logic        perf_ms_init_context;
+  logic        perf_ms_load_k;
+  logic        perf_ms_load_v;
+  logic        perf_ms_compute;
+  logic        perf_ms_normalize;
+  logic        perf_ms_write_o;
+  logic        perf_ms_next_q;
+  logic        perf_cs_dp_run;
+  logic        perf_cs_score_done;
+  logic        perf_cs_softmax_prep;
+  logic        perf_comp_launch;
+  logic [1:0]  perf_active_rows;
+  logic        perf_norm_recip_req;
+  logic        perf_norm_recip_rsp;
+
+  logic [31:0] perf_run_count;
+  logic [31:0] perf_busy_cycles;
+  logic [31:0] perf_dma_rd_cmd_count;
+  logic [31:0] perf_dma_rd_beat_count;
+  logic [31:0] perf_dma_wr_cmd_count;
+  logic [31:0] perf_dma_wr_beat_count;
+  logic [31:0] perf_comp_launch_count;
+  logic [31:0] perf_exp_eval_count;
+  logic [31:0] perf_mul_eval_count;
+  logic [31:0] perf_recip_req_count;
+  logic [31:0] perf_recip_rsp_count;
+  logic [31:0] perf_ms_load_q_cycles;
+  logic [31:0] perf_ms_init_context_cycles;
+  logic [31:0] perf_ms_load_k_cycles;
+  logic [31:0] perf_ms_load_v_cycles;
+  logic [31:0] perf_ms_compute_cycles;
+  logic [31:0] perf_ms_normalize_cycles;
+  logic [31:0] perf_ms_write_o_cycles;
+  logic [31:0] perf_ms_next_q_cycles;
+  logic [31:0] perf_cs_dp_run_cycles;
+  logic [31:0] perf_cs_score_done_cycles;
+  logic [31:0] perf_cs_softmax_prep_cycles;
+
   // DMA reader <-> core
   logic        dma_rd_cmd_valid, dma_rd_cmd_ready;
   logic [31:0] dma_rd_cmd_addr;
@@ -106,9 +145,68 @@ module fa_attention_ip_top #(
     .s_axil_araddr(s_axil_araddr), .s_axil_arvalid(s_axil_arvalid), .s_axil_arready(s_axil_arready),
     .s_axil_rdata(s_axil_rdata), .s_axil_rresp(s_axil_rresp), .s_axil_rvalid(s_axil_rvalid), .s_axil_rready(s_axil_rready),
     .i_busy(core_busy), .i_done(core_done), .i_error(core_error), .i_cycles(core_cycles),
+    .i_perf_run_count(perf_run_count), .i_perf_busy_cycles(perf_busy_cycles),
+    .i_perf_dma_rd_cmd_count(perf_dma_rd_cmd_count), .i_perf_dma_rd_beat_count(perf_dma_rd_beat_count),
+    .i_perf_dma_wr_cmd_count(perf_dma_wr_cmd_count), .i_perf_dma_wr_beat_count(perf_dma_wr_beat_count),
+    .i_perf_comp_launch_count(perf_comp_launch_count), .i_perf_exp_eval_count(perf_exp_eval_count),
+    .i_perf_mul_eval_count(perf_mul_eval_count), .i_perf_recip_req_count(perf_recip_req_count),
+    .i_perf_recip_rsp_count(perf_recip_rsp_count), .i_perf_ms_load_q_cycles(perf_ms_load_q_cycles),
+    .i_perf_ms_init_context_cycles(perf_ms_init_context_cycles), .i_perf_ms_load_k_cycles(perf_ms_load_k_cycles),
+    .i_perf_ms_load_v_cycles(perf_ms_load_v_cycles), .i_perf_ms_compute_cycles(perf_ms_compute_cycles),
+    .i_perf_ms_normalize_cycles(perf_ms_normalize_cycles), .i_perf_ms_write_o_cycles(perf_ms_write_o_cycles),
+    .i_perf_ms_next_q_cycles(perf_ms_next_q_cycles), .i_perf_cs_dp_run_cycles(perf_cs_dp_run_cycles),
+    .i_perf_cs_score_done_cycles(perf_cs_score_done_cycles), .i_perf_cs_softmax_prep_cycles(perf_cs_softmax_prep_cycles),
     .o_start_pulse(start_pulse), .o_soft_reset(soft_reset), .o_irq_en(irq_en), .o_causal_en(causal_en),
     .o_q_base(q_base), .o_k_base(k_base), .o_v_base(v_base), .o_o_base(o_base),
     .o_stride_bytes(stride_bytes), .o_neg_large_q8_8(neg_large_q8_8), .o_scale_q8_8(scale_q8_8)
+  );
+
+  fa_perf_counters u_perf (
+    .clk(clk),
+    .rst_n(rst_n),
+    .i_run_start(start_pulse),
+    .i_soft_reset(soft_reset),
+    .i_ms_load_q(perf_ms_load_q),
+    .i_ms_init_context(perf_ms_init_context),
+    .i_ms_load_k(perf_ms_load_k),
+    .i_ms_load_v(perf_ms_load_v),
+    .i_ms_compute(perf_ms_compute),
+    .i_ms_normalize(perf_ms_normalize),
+    .i_ms_write_o(perf_ms_write_o),
+    .i_ms_next_q(perf_ms_next_q),
+    .i_cs_dp_run(perf_cs_dp_run),
+    .i_cs_score_done(perf_cs_score_done),
+    .i_cs_softmax_prep(perf_cs_softmax_prep),
+    .i_comp_launch(perf_comp_launch),
+    .i_active_rows(perf_active_rows),
+    .i_norm_recip_req(perf_norm_recip_req),
+    .i_norm_recip_rsp(perf_norm_recip_rsp),
+    .i_dma_rd_cmd_fire(dma_rd_cmd_valid && dma_rd_cmd_ready),
+    .i_dma_rd_beat_fire(dma_rd_out_valid && dma_rd_out_ready),
+    .i_dma_wr_cmd_fire(dma_wr_cmd_valid && dma_wr_cmd_ready),
+    .i_dma_wr_beat_fire(dma_wr_in_valid && dma_wr_in_ready),
+    .o_run_count(perf_run_count),
+    .o_busy_cycles(perf_busy_cycles),
+    .o_dma_rd_cmd_count(perf_dma_rd_cmd_count),
+    .o_dma_rd_beat_count(perf_dma_rd_beat_count),
+    .o_dma_wr_cmd_count(perf_dma_wr_cmd_count),
+    .o_dma_wr_beat_count(perf_dma_wr_beat_count),
+    .o_comp_launch_count(perf_comp_launch_count),
+    .o_exp_eval_count(perf_exp_eval_count),
+    .o_mul_eval_count(perf_mul_eval_count),
+    .o_recip_req_count(perf_recip_req_count),
+    .o_recip_rsp_count(perf_recip_rsp_count),
+    .o_ms_load_q_cycles(perf_ms_load_q_cycles),
+    .o_ms_init_context_cycles(perf_ms_init_context_cycles),
+    .o_ms_load_k_cycles(perf_ms_load_k_cycles),
+    .o_ms_load_v_cycles(perf_ms_load_v_cycles),
+    .o_ms_compute_cycles(perf_ms_compute_cycles),
+    .o_ms_normalize_cycles(perf_ms_normalize_cycles),
+    .o_ms_write_o_cycles(perf_ms_write_o_cycles),
+    .o_ms_next_q_cycles(perf_ms_next_q_cycles),
+    .o_cs_dp_run_cycles(perf_cs_dp_run_cycles),
+    .o_cs_score_done_cycles(perf_cs_score_done_cycles),
+    .o_cs_softmax_prep_cycles(perf_cs_softmax_prep_cycles)
   );
 
   // ==== DMA Reader ====
@@ -163,7 +261,22 @@ module fa_attention_ip_top #(
     .dma_wr_cmd_valid(dma_wr_cmd_valid), .dma_wr_cmd_ready(dma_wr_cmd_ready),
     .dma_wr_cmd_addr(dma_wr_cmd_addr), .dma_wr_cmd_len(dma_wr_cmd_len),
     .dma_wr_data_valid(dma_wr_in_valid), .dma_wr_data_ready(dma_wr_in_ready),
-    .dma_wr_data(dma_wr_in_data), .dma_wr_data_last(dma_wr_in_last)
+    .dma_wr_data(dma_wr_in_data), .dma_wr_data_last(dma_wr_in_last),
+    .o_perf_ms_load_q(perf_ms_load_q),
+    .o_perf_ms_init_context(perf_ms_init_context),
+    .o_perf_ms_load_k(perf_ms_load_k),
+    .o_perf_ms_load_v(perf_ms_load_v),
+    .o_perf_ms_compute(perf_ms_compute),
+    .o_perf_ms_normalize(perf_ms_normalize),
+    .o_perf_ms_write_o(perf_ms_write_o),
+    .o_perf_ms_next_q(perf_ms_next_q),
+    .o_perf_cs_dp_run(perf_cs_dp_run),
+    .o_perf_cs_score_done(perf_cs_score_done),
+    .o_perf_cs_softmax_prep(perf_cs_softmax_prep),
+    .o_perf_comp_launch(perf_comp_launch),
+    .o_perf_active_rows(perf_active_rows),
+    .o_perf_norm_recip_req(perf_norm_recip_req),
+    .o_perf_norm_recip_rsp(perf_norm_recip_rsp)
   );
 
   // Error aggregation

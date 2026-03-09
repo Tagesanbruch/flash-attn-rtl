@@ -45,6 +45,7 @@ VERILOG_SOURCES := \
 	$(RTL_BUS_DIR)/fa_dma_reader.sv \
 	$(RTL_BUS_DIR)/fa_dma_writer.sv \
 	$(RTL_CORE_DIR)/fa_attention_core.sv \
+	$(RTL_TOP_DIR)/fa_perf_counters.sv \
 	$(RTL_TOP_DIR)/fa_attention_ip_top.sv
 endif
 

@@ -28,6 +28,28 @@ module fa_axi_lite_regs #(
   input  logic                 i_done,
   input  logic                 i_error,
   input  logic [31:0]          i_cycles,
+  input  logic [31:0]          i_perf_run_count,
+  input  logic [31:0]          i_perf_busy_cycles,
+  input  logic [31:0]          i_perf_dma_rd_cmd_count,
+  input  logic [31:0]          i_perf_dma_rd_beat_count,
+  input  logic [31:0]          i_perf_dma_wr_cmd_count,
+  input  logic [31:0]          i_perf_dma_wr_beat_count,
+  input  logic [31:0]          i_perf_comp_launch_count,
+  input  logic [31:0]          i_perf_exp_eval_count,
+  input  logic [31:0]          i_perf_mul_eval_count,
+  input  logic [31:0]          i_perf_recip_req_count,
+  input  logic [31:0]          i_perf_recip_rsp_count,
+  input  logic [31:0]          i_perf_ms_load_q_cycles,
+  input  logic [31:0]          i_perf_ms_init_context_cycles,
+  input  logic [31:0]          i_perf_ms_load_k_cycles,
+  input  logic [31:0]          i_perf_ms_load_v_cycles,
+  input  logic [31:0]          i_perf_ms_compute_cycles,
+  input  logic [31:0]          i_perf_ms_normalize_cycles,
+  input  logic [31:0]          i_perf_ms_write_o_cycles,
+  input  logic [31:0]          i_perf_ms_next_q_cycles,
+  input  logic [31:0]          i_perf_cs_dp_run_cycles,
+  input  logic [31:0]          i_perf_cs_score_done_cycles,
+  input  logic [31:0]          i_perf_cs_softmax_prep_cycles,
 
   output logic                 o_start_pulse,
   output logic                 o_soft_reset,
@@ -56,6 +78,28 @@ module fa_axi_lite_regs #(
   localparam logic [7:0] REG_NEG_LARGE    = 8'h38;
   localparam logic [7:0] REG_SCALE        = 8'h3C;
   localparam logic [7:0] REG_CYCLES       = 8'h40;
+  localparam logic [7:0] REG_PERF_RUN_COUNT            = 8'h80;
+  localparam logic [7:0] REG_PERF_BUSY_CYCLES          = 8'h84;
+  localparam logic [7:0] REG_PERF_DMA_RD_CMD_COUNT     = 8'h88;
+  localparam logic [7:0] REG_PERF_DMA_RD_BEAT_COUNT    = 8'h8C;
+  localparam logic [7:0] REG_PERF_DMA_WR_CMD_COUNT     = 8'h90;
+  localparam logic [7:0] REG_PERF_DMA_WR_BEAT_COUNT    = 8'h94;
+  localparam logic [7:0] REG_PERF_COMP_LAUNCH_COUNT    = 8'h98;
+  localparam logic [7:0] REG_PERF_EXP_EVAL_COUNT       = 8'h9C;
+  localparam logic [7:0] REG_PERF_MUL_EVAL_COUNT       = 8'hA0;
+  localparam logic [7:0] REG_PERF_RECIP_REQ_COUNT      = 8'hA4;
+  localparam logic [7:0] REG_PERF_RECIP_RSP_COUNT      = 8'hA8;
+  localparam logic [7:0] REG_PERF_MS_LOAD_Q_CYCLES     = 8'hAC;
+  localparam logic [7:0] REG_PERF_MS_INIT_CTX_CYCLES   = 8'hB0;
+  localparam logic [7:0] REG_PERF_MS_LOAD_K_CYCLES     = 8'hB4;
+  localparam logic [7:0] REG_PERF_MS_LOAD_V_CYCLES     = 8'hB8;
+  localparam logic [7:0] REG_PERF_MS_COMPUTE_CYCLES    = 8'hBC;
+  localparam logic [7:0] REG_PERF_MS_NORMALIZE_CYCLES  = 8'hC0;
+  localparam logic [7:0] REG_PERF_MS_WRITE_O_CYCLES    = 8'hC4;
+  localparam logic [7:0] REG_PERF_MS_NEXT_Q_CYCLES     = 8'hC8;
+  localparam logic [7:0] REG_PERF_CS_DP_RUN_CYCLES     = 8'hCC;
+  localparam logic [7:0] REG_PERF_CS_SCORE_DONE_CYCLES = 8'hD0;
+  localparam logic [7:0] REG_PERF_CS_SOFTMAX_PREP_CYCLES = 8'hD4;
 
   logic [31:0] reg_ctrl;
   logic [31:0] reg_cfg;
@@ -110,6 +154,28 @@ module fa_axi_lite_regs #(
       REG_NEG_LARGE:    s_axil_rdata = reg_neg_large;
       REG_SCALE:        s_axil_rdata = reg_scale;
       REG_CYCLES:       s_axil_rdata = i_cycles;
+      REG_PERF_RUN_COUNT:              s_axil_rdata = i_perf_run_count;
+      REG_PERF_BUSY_CYCLES:            s_axil_rdata = i_perf_busy_cycles;
+      REG_PERF_DMA_RD_CMD_COUNT:       s_axil_rdata = i_perf_dma_rd_cmd_count;
+      REG_PERF_DMA_RD_BEAT_COUNT:      s_axil_rdata = i_perf_dma_rd_beat_count;
+      REG_PERF_DMA_WR_CMD_COUNT:       s_axil_rdata = i_perf_dma_wr_cmd_count;
+      REG_PERF_DMA_WR_BEAT_COUNT:      s_axil_rdata = i_perf_dma_wr_beat_count;
+      REG_PERF_COMP_LAUNCH_COUNT:      s_axil_rdata = i_perf_comp_launch_count;
+      REG_PERF_EXP_EVAL_COUNT:         s_axil_rdata = i_perf_exp_eval_count;
+      REG_PERF_MUL_EVAL_COUNT:         s_axil_rdata = i_perf_mul_eval_count;
+      REG_PERF_RECIP_REQ_COUNT:        s_axil_rdata = i_perf_recip_req_count;
+      REG_PERF_RECIP_RSP_COUNT:        s_axil_rdata = i_perf_recip_rsp_count;
+      REG_PERF_MS_LOAD_Q_CYCLES:       s_axil_rdata = i_perf_ms_load_q_cycles;
+      REG_PERF_MS_INIT_CTX_CYCLES:     s_axil_rdata = i_perf_ms_init_context_cycles;
+      REG_PERF_MS_LOAD_K_CYCLES:       s_axil_rdata = i_perf_ms_load_k_cycles;
+      REG_PERF_MS_LOAD_V_CYCLES:       s_axil_rdata = i_perf_ms_load_v_cycles;
+      REG_PERF_MS_COMPUTE_CYCLES:      s_axil_rdata = i_perf_ms_compute_cycles;
+      REG_PERF_MS_NORMALIZE_CYCLES:    s_axil_rdata = i_perf_ms_normalize_cycles;
+      REG_PERF_MS_WRITE_O_CYCLES:      s_axil_rdata = i_perf_ms_write_o_cycles;
+      REG_PERF_MS_NEXT_Q_CYCLES:       s_axil_rdata = i_perf_ms_next_q_cycles;
+      REG_PERF_CS_DP_RUN_CYCLES:       s_axil_rdata = i_perf_cs_dp_run_cycles;
+      REG_PERF_CS_SCORE_DONE_CYCLES:   s_axil_rdata = i_perf_cs_score_done_cycles;
+      REG_PERF_CS_SOFTMAX_PREP_CYCLES: s_axil_rdata = i_perf_cs_softmax_prep_cycles;
       default:          s_axil_rdata = 32'd0;
     endcase
   end

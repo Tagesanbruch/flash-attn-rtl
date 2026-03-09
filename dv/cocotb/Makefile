@@ -5,6 +5,7 @@ include ../../cfg/module_targets.mk
 
 test:
 	@echo "[COCOTB] Running MODULE=$(SELECTED_MODULE)"
+	VIRTUAL_ENV=$(ROOT_DIR)/.venv PATH=$(ROOT_DIR)/.venv/bin:$$PATH \
 	$(MAKE) -f $(COCOTB_MAKEFILE) \
 		MODULE=$(MODULE_PY) \
 		TOPLEVEL=$(TOPLEVEL) \
@@ -15,7 +16,7 @@ regress:
 	@set -e; \
 	for m in $(MODULES); do \
 		echo "[COCOTB] Regress $$m"; \
-		$(MAKE) MODULE=$$m test; \
+		VIRTUAL_ENV=$(ROOT_DIR)/.venv PATH=$(ROOT_DIR)/.venv/bin:$$PATH $(MAKE) MODULE=$$m test; \
 	done
 
 list:

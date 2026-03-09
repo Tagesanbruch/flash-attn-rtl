@@ -54,7 +54,24 @@ module fa_attention_core #(
   output logic                     dma_wr_data_valid,
   input  logic                     dma_wr_data_ready,
   output logic [BUS_W-1:0]         dma_wr_data,
-  output logic                     dma_wr_data_last
+  output logic                     dma_wr_data_last,
+
+  // ---- Performance hooks ----
+  output logic                     o_perf_ms_load_q,
+  output logic                     o_perf_ms_init_context,
+  output logic                     o_perf_ms_load_k,
+  output logic                     o_perf_ms_load_v,
+  output logic                     o_perf_ms_compute,
+  output logic                     o_perf_ms_normalize,
+  output logic                     o_perf_ms_write_o,
+  output logic                     o_perf_ms_next_q,
+  output logic                     o_perf_cs_dp_run,
+  output logic                     o_perf_cs_score_done,
+  output logic                     o_perf_cs_softmax_prep,
+  output logic                     o_perf_comp_launch,
+  output logic [1:0]               o_perf_active_rows,
+  output logic                     o_perf_norm_recip_req,
+  output logic                     o_perf_norm_recip_rsp
 );
 
   // ---- Parameters ----
@@ -767,6 +784,33 @@ module fa_attention_core #(
   end
 
   assign o_cycles = cycle_counter;
+
+  assign o_perf_ms_load_q        = (ms == S_LOAD_Q);
+  assign o_perf_ms_init_context  = (ms == S_INIT_CONTEXT);
+  assign o_perf_ms_load_k        = (ms == S_LOAD_K);
+  assign o_perf_ms_load_v        = (ms == S_LOAD_V);
+  assign o_perf_ms_compute       = (ms == S_COMPUTE);
+  assign o_perf_ms_normalize     = (ms == S_NORMALIZE);
+  assign o_perf_ms_write_o       = (ms == S_WRITE_O);
+  assign o_perf_ms_next_q        = (ms == S_NEXT_Q);
+
+  assign o_perf_cs_dp_run        = (cs == C_DP_RUN);
+  assign o_perf_cs_score_done    = (cs == C_SCORE_DONE);
+  assign o_perf_cs_softmax_prep  = (cs == C_SOFTMAX_PREP);
+  assign o_perf_comp_launch      = comp_start;
+  assign o_perf_norm_recip_req   = norm_recip_in_valid;
+  assign o_perf_norm_recip_rsp   = norm_recip_out_valid;
+
+  always_comb begin
+    if (ms == S_COMPUTE) begin
+      if ((comp_qpair + 1) < TQ)
+        o_perf_active_rows = 2'd2;
+      else
+        o_perf_active_rows = 2'd1;
+    end else begin
+      o_perf_active_rows = 2'd0;
+    end
+  end
 
   // dma_rd_data_ready: accept data whenever we're in a load state
   assign dma_rd_data_ready = (ms == S_LOAD_Q || ms == S_LOAD_K || ms == S_LOAD_V ||
