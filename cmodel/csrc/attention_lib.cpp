@@ -29,6 +29,7 @@ int run_cmodel(int argc, char** argv) {
                   << " seeds=" << cfg.n_seeds << "\n";
 
         std::vector<std::string> names = {
+            "rtl_strict",
             "rtl_exact", "rtl_real_exp", "rtl_real_exp_float_norm", "float_online_q8",
             "acc_float_qout", "acc_float_real_exp_qout",
             "fixed_hiacc_qout", "fixed_hiacc_real_exp_qout",
@@ -100,7 +101,7 @@ int run_cmodel(int argc, char** argv) {
             std::cout << "[cmodel] csv written: " << cfg.csv_out << "\n";
         }
 
-        std::cout << "[cmodel] threshold check on rtl_exact: "
+        std::cout << "[cmodel] threshold check on rtl_strict: "
                   << "MAE<=0.03=" << ((aggs[0].mae_sum / aggs[0].cnt <= 0.03) ? "PASS" : "FAIL")
                   << ", MaxAE<=0.10=" << ((aggs[0].maxe_max <= 0.10) ? "PASS" : "FAIL")
                   << "\n";

@@ -29,6 +29,7 @@ using MatrixI16 = std::vector<std::vector<int16_t>>;
 using MatrixF = std::vector<std::vector<float>>;
 
 enum class Mode {
+    RTL_STRICT,
     RTL_EXACT,
     RTL_REAL_EXP,
     RTL_REAL_EXP_FLOAT_NORM,
@@ -84,6 +85,7 @@ int16_t q8_8_mul_sat(int16_t a, int16_t b);
 uint16_t exp_pwl_q1_15(int16_t x_q8_8);
 uint16_t exp_real_q1_15(int16_t x_q8_8);
 uint32_t recip_q16_16(uint32_t x_q16_16);
+uint32_t recip_nr_rtl_q16_16(uint32_t x_q16_16);
 float q8_8_to_float(int16_t x);
 int16_t float_to_q8_8(float x);
 MatrixF dequant_q8_8(const MatrixI16& x);

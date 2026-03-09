@@ -74,6 +74,79 @@ uint32_t recip_q16_16(uint32_t x_q16_16) {
     return static_cast<uint32_t>(q);
 }
 
+namespace {
+
+uint32_t mul_q1_31(uint32_t a, uint32_t b) {
+    uint64_t pp_hh = static_cast<uint64_t>(a >> 16) * static_cast<uint64_t>(b >> 16);
+    uint64_t pp_hl = static_cast<uint64_t>(a >> 16) * static_cast<uint64_t>(b & 0xFFFFu);
+    uint64_t pp_lh = static_cast<uint64_t>(a & 0xFFFFu) * static_cast<uint64_t>(b >> 16);
+    uint64_t pp_ll = static_cast<uint64_t>(a & 0xFFFFu) * static_cast<uint64_t>(b & 0xFFFFu);
+    uint64_t acc = (pp_hh << 32) + (pp_hl << 16) + (pp_lh << 16) + pp_ll;
+    return static_cast<uint32_t>(acc >> 32);
+}
+
+uint32_t mul_q1_31_corr(uint32_t a, uint32_t b, bool corr_ov) {
+    uint64_t pp_hh = static_cast<uint64_t>(a >> 16) * static_cast<uint64_t>(b >> 16);
+    uint64_t pp_hl = static_cast<uint64_t>(a >> 16) * static_cast<uint64_t>(b & 0xFFFFu);
+    uint64_t pp_lh = static_cast<uint64_t>(a & 0xFFFFu) * static_cast<uint64_t>(b >> 16);
+    uint64_t pp_ll = static_cast<uint64_t>(a & 0xFFFFu) * static_cast<uint64_t>(b & 0xFFFFu);
+    uint64_t acc = (pp_hh << 32) + (pp_hl << 16) + (pp_lh << 16) + pp_ll;
+    return corr_ov ? a : static_cast<uint32_t>(acc >> 31);
+}
+
+int clz32_cpp(uint32_t val) {
+    if (val == 0) return 32;
+    int n = 0;
+    uint32_t x = val;
+    if ((x >> 16) == 0) { n += 16; x <<= 16; }
+    if ((x >> 24) == 0) { n += 8; x <<= 8; }
+    if ((x >> 28) == 0) { n += 4; x <<= 4; }
+    if ((x >> 30) == 0) { n += 2; x <<= 2; }
+    if ((x >> 31) == 0) { n += 1; }
+    return n;
+}
+
+} // namespace
+
+uint32_t recip_nr_rtl_q16_16(uint32_t x_q16_16) {
+    static const uint32_t lut[32] = {
+        0xFC0FC0FCu, 0xF4898D60u, 0xED7303B6u, 0xE6C2B448u,
+        0xE070381Cu, 0xDA740DA7u, 0xD4C77B03u, 0xCF6474A9u,
+        0xCA4587E7u, 0xC565C87Bu, 0xC0C0C0C1u, 0xBC52640Cu,
+        0xB81702E0u, 0xB40B40B4u, 0xB02C0B03u, 0xAC769184u,
+        0xA8E83F57u, 0xA57EB503u, 0xA237C32Bu, 0x9F1165E7u,
+        0x9C09C09Cu, 0x991F1A51u, 0x964FDA6Cu, 0x939A85C4u,
+        0x90FDBC09u, 0x8E78356Du, 0x8C08C08Cu, 0x89AE408Au,
+        0x8767AB5Fu, 0x85340853u, 0x83126E98u, 0x81020408u,
+    };
+
+    int lz = clz32_cpp(x_q16_16);
+    uint32_t d_norm = x_q16_16 << lz;
+    bool is_zero = (x_q16_16 == 0);
+    bool is_one = (x_q16_16 == 1);
+
+    uint32_t r0 = lut[(d_norm >> 26) & 0x1Fu];
+    uint32_t dr0_q1_31 = mul_q1_31(d_norm, r0);
+    uint64_t corr1_w = (1ull << 32) - static_cast<uint64_t>(dr0_q1_31);
+    uint32_t corr1 = static_cast<uint32_t>(corr1_w & 0xFFFFFFFFu);
+    bool corr1_ov = ((corr1_w >> 32) & 0x1u) != 0;
+    uint32_t r1 = mul_q1_31_corr(r0, corr1, corr1_ov);
+
+    uint32_t dr1_q1_31 = mul_q1_31(d_norm, r1);
+    uint64_t corr2_w = (1ull << 32) - static_cast<uint64_t>(dr1_q1_31);
+    uint32_t corr2 = static_cast<uint32_t>(corr2_w & 0xFFFFFFFFu);
+    bool corr2_ov = ((corr2_w >> 32) & 0x1u) != 0;
+    uint32_t r2 = mul_q1_31_corr(r1, corr2, corr2_ov);
+
+    if (is_zero || is_one) return 0xFFFFFFFFu;
+
+    if (lz >= 31) {
+        uint64_t result_wide = static_cast<uint64_t>(r2) << (lz - 31);
+        return (result_wide >> 32) ? 0xFFFFFFFFu : static_cast<uint32_t>(result_wide);
+    }
+    return r2 >> (31 - lz);
+}
+
 float q8_8_to_float(int16_t x) {
     return static_cast<float>(x) / 256.0f;
 }

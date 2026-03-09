@@ -188,6 +188,13 @@ def _calc_fp32_metrics(got, ref_fp32):
     return mae, max_err, worst
 
 
+def _dump_matrix_csv(path, mat):
+    with open(path, "w") as f:
+        for row in mat:
+            f.write(",".join(str(v) for v in row))
+            f.write("\n")
+
+
 class AxiMemoryModel:
     def __init__(self, dut):
         self.dut = dut
@@ -297,6 +304,54 @@ class AxiMemoryModel:
 
             self.dut.m_axi_wready.value = 1 if self._wr_active else 0
             self.dut.m_axi_bvalid.value = 1 if self._wr_resp_pending else 0
+
+
+async def _capture_top_write_stream(dut, captured_beats):
+    while True:
+        await RisingEdge(dut.clk)
+        if int(dut.dma_wr_in_valid.value) and int(dut.dma_wr_in_ready.value):
+            captured_beats.append(int(dut.dma_wr_in_data.value))
+
+
+async def _monitor_logical_read_stream(dut, mem, issues):
+    bytes_per_beat = BUS_W // 8
+    pending = []
+    cmd_idx = 0
+    beat_idx = 0
+    while True:
+        await RisingEdge(dut.clk)
+        if int(dut.dma_rd_cmd_valid.value) and int(dut.dma_rd_cmd_ready.value):
+            addr = int(dut.dma_rd_cmd_addr.value)
+            beats = int(dut.dma_rd_cmd_len.value) + 1
+            pending = [mem.mem.get(addr + i * bytes_per_beat, 0) for i in range(beats)]
+            cmd_idx += 1
+            beat_idx = 0
+
+        if int(dut.dma_rd_out_valid.value) and int(dut.dma_rd_out_ready.value):
+            if not pending:
+                issues.append(("unexpected_data", cmd_idx, beat_idx, int(dut.dma_rd_out_data.value)))
+                continue
+            got = int(dut.dma_rd_out_data.value)
+            exp = pending.pop(0)
+            is_last = int(dut.dma_rd_out_last.value)
+            exp_last = 1 if len(pending) == 0 else 0
+            if got != exp:
+                issues.append(("data_mismatch", cmd_idx, beat_idx, got, exp))
+            if is_last != exp_last:
+                issues.append(("last_mismatch", cmd_idx, beat_idx, is_last, exp_last))
+            beat_idx += 1
+
+
+def _unpack_beats_to_matrix(beats, rows, cols):
+    out = [[0] * cols for _ in range(rows)]
+    total_beats = rows * cols // ELEMS_PER_BEAT
+    assert len(beats) >= total_beats, f"insufficient beats: {len(beats)} < {total_beats}"
+    for beat_idx in range(total_beats):
+        packed = beats[beat_idx]
+        for e in range(ELEMS_PER_BEAT):
+            flat = beat_idx * ELEMS_PER_BEAT + e
+            out[flat // cols][flat % cols] = to_s16((packed >> (e * 16)) & 0xFFFF)
+    return out
 
 
 def _init_dma_inputs(dut):
@@ -491,7 +546,11 @@ async def test_perf_counters_full_run(dut):
     _init_dma_inputs(dut)
     master = AxiLiteMaster(dut)
     mem = AxiMemoryModel(dut)
+    write_stream_beats = []
+    read_stream_issues = []
     cocotb.start_soon(mem.run())
+    cocotb.start_soon(_capture_top_write_stream(dut, write_stream_beats))
+    cocotb.start_soon(_monitor_logical_read_stream(dut, mem, read_stream_issues))
     await master.reset_master()
     for _ in range(5):
         await RisingEdge(dut.clk)
@@ -503,11 +562,13 @@ async def test_perf_counters_full_run(dut):
     data_max = int(os.environ.get("TOP_TEST_DATA_MAX", "64"))
     scale_q8_8 = int(os.environ.get("TOP_TEST_SCALE_Q8_8", "32"))
     neg_large_q8_8 = int(os.environ.get("TOP_TEST_NEG_LARGE_Q8_8", str(to_s16(0xE000))))
+    causal = int(os.environ.get("TOP_TEST_CAUSAL", "1")) != 0
     cocotb.log.info(
-        "top stimulus config: seed=%d range=[%d,%d] causal=1 scale_q8_8=%d neg_large_q8_8=%d",
+        "top stimulus config: seed=%d range=[%d,%d] causal=%d scale_q8_8=%d neg_large_q8_8=%d",
         seed,
         data_min,
         data_max,
+        int(causal),
         scale_q8_8,
         neg_large_q8_8,
     )
@@ -537,18 +598,26 @@ async def test_perf_counters_full_run(dut):
     await master.write(REG_STRIDE_BYTES, stride_bytes)
     await master.write(REG_SCALE, scale_q8_8 & 0xFFFF)
     await master.write(REG_NEG_LARGE, neg_large_q8_8 & 0xFFFFFFFF)
-    await master.write(REG_CFG, 0x1)
+    await master.write(REG_CFG, 0x1 if causal else 0x0)
 
     await master.write(REG_CTRL, 0x1)
 
     done_seen = False
-    for _ in range(15000):
-        for _ in range(64):
+    wait_internal_done = int(os.environ.get("TOP_WAIT_INTERNAL_DONE", "0")) != 0
+    if wait_internal_done:
+        for _ in range(15000 * 64):
             await RisingEdge(dut.clk)
-        status = await master.read(REG_STATUS)
-        if status & 0x2:
-            done_seen = True
-            break
+            if int(dut.u_core.o_done.value):
+                done_seen = True
+                break
+    else:
+        for _ in range(15000):
+            for _ in range(64):
+                await RisingEdge(dut.clk)
+            status = await master.read(REG_STATUS)
+            if status & 0x2:
+                done_seen = True
+                break
 
     if not done_seen:
         try:
@@ -681,11 +750,37 @@ async def test_perf_counters_full_run(dut):
     assert ms_load_k_cycles > 0 and ms_load_v_cycles > 0 and ms_write_o_cycles > 0
 
     out = mem.load_matrix_q8_8(o_base, S, D, stride_bytes)
+    stream_out = _unpack_beats_to_matrix(write_stream_beats, S, D)
     non_zero_outputs = sum(1 for row in out for v in row if v != 0)
     assert non_zero_outputs > 0, "output buffer should contain non-zero results after full run"
 
-    golden_fixed = _fixed_flash_attention_ref(Q, K, V, scale=scale_q8_8, neg_large=to_s16(neg_large_q8_8), causal=True)
-    golden_fp32 = _fp32_ref(Q, K, V, causal=True)
+    stream_vs_mem_mae_lsb, stream_vs_mem_max_lsb, stream_vs_mem_worst = _calc_i16_metrics(stream_out, out)
+    cocotb.log.info(
+        "top write-path check (stream vs mem): mae_lsb=%.4f max_lsb=%d worst=%s",
+        stream_vs_mem_mae_lsb,
+        stream_vs_mem_max_lsb,
+        stream_vs_mem_worst,
+    )
+    assert not read_stream_issues, f"logical read stream issues: {read_stream_issues[:5]}"
+
+    dump_dir = os.environ.get("TOP_RTL_DUMP_DIR", "").strip()
+    if dump_dir:
+        os.makedirs(dump_dir, exist_ok=True)
+        _dump_matrix_csv(os.path.join(dump_dir, "Q_q8_8.csv"), Q)
+        _dump_matrix_csv(os.path.join(dump_dir, "K_q8_8.csv"), K)
+        _dump_matrix_csv(os.path.join(dump_dir, "V_q8_8.csv"), V)
+        _dump_matrix_csv(os.path.join(dump_dir, "O_top_q8_8.csv"), out)
+        with open(os.path.join(dump_dir, "meta.txt"), "w") as f:
+            f.write(f"seed={seed}\n")
+            f.write(f"data_min={data_min}\n")
+            f.write(f"data_max={data_max}\n")
+            f.write(f"causal={int(causal)}\n")
+            f.write(f"scale_q8_8={scale_q8_8}\n")
+            f.write(f"neg_large_q8_8={neg_large_q8_8}\n")
+        cocotb.log.info("top dump written to %s", dump_dir)
+
+    golden_fixed = _fixed_flash_attention_ref(Q, K, V, scale=scale_q8_8, neg_large=to_s16(neg_large_q8_8), causal=causal)
+    golden_fp32 = _fp32_ref(Q, K, V, causal=causal)
 
     mae_i16, max_err_i16, worst_i16 = _calc_i16_metrics(out, golden_fixed)
     mae_fp32, max_err_fp32, worst_fp32 = _calc_fp32_metrics(out, golden_fp32)

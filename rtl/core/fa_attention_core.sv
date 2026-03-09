@@ -431,13 +431,11 @@ module fa_attention_core #(
       comp_start    <= 1'b0;
       dma_rd_cmd_valid <= 1'b0;
       dma_wr_cmd_valid <= 1'b0;
-      dma_wr_data_valid <= 1'b0;
     end else begin
       o_done     <= 1'b0;
       comp_start <= 1'b0;
       dma_rd_cmd_valid <= 1'b0;
       dma_wr_cmd_valid <= 1'b0;
-      dma_wr_data_valid <= 1'b0;
       norm_recip_in_valid <= 1'b0;
 
       if (i_soft_reset) begin
@@ -745,14 +743,7 @@ module fa_attention_core #(
             if (dma_wr_cmd_ready)
               o_write_cnt <= o_write_cnt + 1'b1;
           end else if (o_write_cnt <= BEATS_PER_TILE_Q) begin
-            dma_wr_data_valid <= 1'b1;
-            for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
-              int flat;
-              flat = (o_write_cnt - 1) * ELEMS_PER_BEAT + i;
-              dma_wr_data[i*16 +: 16] <= o_buf[flat / D][flat % D];
-            end
-            dma_wr_data_last <= (o_write_cnt == BEATS_PER_TILE_Q);
-            if (dma_wr_data_ready) begin
+            if (dma_wr_data_valid && dma_wr_data_ready) begin
               o_write_cnt <= o_write_cnt + 1'b1;
               if (o_write_cnt == BEATS_PER_TILE_Q)
                 ms <= S_NEXT_Q;
@@ -780,6 +771,19 @@ module fa_attention_core #(
         default: ms <= S_IDLE;
       endcase
       end // !soft_reset
+    end
+  end
+
+  always_comb begin
+    dma_wr_data_valid = 1'b0;
+    dma_wr_data_last  = 1'b0;
+    dma_wr_data       = '0;
+    if ((ms == S_WRITE_O) && (o_write_cnt != 0) && (o_write_cnt <= BEATS_PER_TILE_Q)) begin
+      dma_wr_data_valid = 1'b1;
+      dma_wr_data_last  = (o_write_cnt == BEATS_PER_TILE_Q);
+      for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
+        dma_wr_data[i*16 +: 16] = o_buf[((o_write_cnt - 1) * ELEMS_PER_BEAT + i) / D][((o_write_cnt - 1) * ELEMS_PER_BEAT + i) % D];
+      end
     end
   end
 

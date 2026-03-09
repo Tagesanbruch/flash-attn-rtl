@@ -199,6 +199,8 @@ def python_fp32_attention(Q, K, V, causal=False):
 
 async def drive_dma_read_responses(dut, mem):
     """Coroutine: watches for DMA read commands and responds with data."""
+    split_beats = int(os.environ.get('CORE_RD_STREAM_SPLIT_BEATS', '0'))
+    split_gap_cycles = int(os.environ.get('CORE_RD_STREAM_GAP_CYCLES', '0'))
     while True:
         await RisingEdge(dut.clk)
         cmd_valid = int(dut.dma_rd_cmd_valid.value)
@@ -206,7 +208,10 @@ async def drive_dma_read_responses(dut, mem):
         if cmd_valid == 1 and cmd_ready == 1:
             addr = int(dut.dma_rd_cmd_addr.value)
             burst_len = int(dut.dma_rd_cmd_len.value) + 1
-            dut._log.info(f"DMA RD CMD: addr={addr:#010x}, beats={burst_len}")
+            dut._log.info(
+                f"DMA RD CMD: addr={addr:#010x}, beats={burst_len}, "
+                f"split_beats={split_beats}, gap_cycles={split_gap_cycles}"
+            )
             data = mem.read_burst(addr, burst_len)
             for i, d in enumerate(data):
                 dut.dma_rd_data_valid.value = 1
@@ -216,9 +221,74 @@ async def drive_dma_read_responses(dut, mem):
                     await RisingEdge(dut.clk)
                     if int(dut.dma_rd_data_ready.value) == 1:
                         break
+                if split_beats > 0 and (i + 1) < len(data) and ((i + 1) % split_beats) == 0:
+                    dut.dma_rd_data_valid.value = 0
+                    dut.dma_rd_data_last.value = 0
+                    for _ in range(split_gap_cycles):
+                        await RisingEdge(dut.clk)
             dut.dma_rd_data_valid.value = 0
             dut.dma_rd_data_last.value = 0
             dut._log.info(f"DMA RD done {burst_len} beats")
+
+
+async def drive_dma_read_responses_toplike(dut, mem):
+    """Model the visible ready/valid timing of the top-level DMA reader."""
+    split_beats = int(os.environ.get('CORE_RD_STREAM_SPLIT_BEATS', '256'))
+    split_gap_cycles = int(os.environ.get('CORE_RD_STREAM_GAP_CYCLES', '1'))
+    bytes_per_beat = BUS_W // 8
+
+    dut.dma_rd_cmd_ready.value = 1
+    dut.dma_rd_data_valid.value = 0
+    dut.dma_rd_data.value = 0
+    dut.dma_rd_data_last.value = 0
+
+    active = False
+    cmd_addr = 0
+    total_beats = 0
+    beat_idx = 0
+    gap_count = 0
+    while True:
+        await RisingEdge(dut.clk)
+
+        if active and int(dut.dma_rd_data_valid.value) and int(dut.dma_rd_data_ready.value):
+            beat_idx += 1
+            if beat_idx >= total_beats:
+                active = False
+                dut.dma_rd_cmd_ready.value = 1
+                dut.dma_rd_data_valid.value = 0
+                dut.dma_rd_data_last.value = 0
+                continue
+            if split_beats > 0 and (beat_idx % split_beats) == 0:
+                gap_count = split_gap_cycles
+                dut.dma_rd_data_valid.value = 0
+                dut.dma_rd_data_last.value = 0
+                continue
+
+        if (not active) and int(dut.dma_rd_cmd_valid.value) and int(dut.dma_rd_cmd_ready.value):
+            cmd_addr = int(dut.dma_rd_cmd_addr.value)
+            total_beats = int(dut.dma_rd_cmd_len.value) + 1
+            beat_idx = 0
+            active = True
+            gap_count = 1  # AR->R startup bubble
+            dut.dma_rd_cmd_ready.value = 0
+            dut._log.info(
+                f"DMA RD CMD(toplike): addr={cmd_addr:#010x}, beats={total_beats}, "
+                f"split_beats={split_beats}, gap_cycles={split_gap_cycles}"
+            )
+
+        if active:
+            if gap_count > 0:
+                gap_count -= 1
+                dut.dma_rd_data_valid.value = 0
+                dut.dma_rd_data_last.value = 0
+            else:
+                addr = cmd_addr + beat_idx * bytes_per_beat
+                dut.dma_rd_data_valid.value = 1
+                dut.dma_rd_data.value = mem.mem.get(addr, 0)
+                dut.dma_rd_data_last.value = 1 if (beat_idx + 1) == total_beats else 0
+        else:
+            dut.dma_rd_data_valid.value = 0
+            dut.dma_rd_data_last.value = 0
 
 
 async def capture_dma_writes(dut, mem):
@@ -240,6 +310,51 @@ async def capture_dma_writes(dut, mem):
                         wr_addr = addr + i * bytes_per_beat
                         mem.mem[wr_addr] = int(dut.dma_wr_data.value)
                         break
+
+
+async def capture_dma_writes_toplike(dut, mem):
+    """Model the visible ready timing of the top-level DMA writer."""
+    bytes_per_beat = BUS_W // 8
+    dut.dma_wr_cmd_ready.value = 1
+    dut.dma_wr_data_ready.value = 0
+
+    active = False
+    resp_gap = 0
+    wr_addr = 0
+    wr_len = 0
+    wr_idx = 0
+    while True:
+        await RisingEdge(dut.clk)
+
+        if active and int(dut.dma_wr_data_valid.value) and int(dut.dma_wr_data_ready.value):
+            mem.mem[wr_addr + wr_idx * bytes_per_beat] = int(dut.dma_wr_data.value)
+            wr_idx += 1
+            if wr_idx >= wr_len or int(dut.dma_wr_data_last.value):
+                active = False
+                resp_gap = 1
+                dut.dma_wr_data_ready.value = 0
+
+        if (not active) and resp_gap == 0 and int(dut.dma_wr_cmd_valid.value) and int(dut.dma_wr_cmd_ready.value):
+            wr_addr = int(dut.dma_wr_cmd_addr.value)
+            wr_len = int(dut.dma_wr_cmd_len.value) + 1
+            wr_idx = 0
+            active = True
+            dut.dma_wr_cmd_ready.value = 0
+            dut.dma_wr_data_ready.value = 0
+            resp_gap = -1  # address phase bubble before W data
+
+        if active:
+            if resp_gap == -1:
+                resp_gap = 0
+                dut.dma_wr_data_ready.value = 1
+            else:
+                dut.dma_wr_data_ready.value = 1
+        else:
+            dut.dma_wr_data_ready.value = 0
+            if resp_gap > 0:
+                resp_gap -= 1
+                if resp_gap == 0:
+                    dut.dma_wr_cmd_ready.value = 1
 
 
 @cocotb.test(timeout_time=600000, timeout_unit="ms")
@@ -264,12 +379,14 @@ async def test_attention_core_small(dut):
     dut.i_v_base.value = 0
     dut.i_o_base.value = 0
     dut.i_stride_bytes.value = 0
+    toplike_rd = int(os.environ.get('CORE_TOPLIKE_RD', os.environ.get('CORE_TOPLIKE_DMA', '0'))) != 0
+    toplike_wr = int(os.environ.get('CORE_TOPLIKE_WR', os.environ.get('CORE_TOPLIKE_DMA', '0'))) != 0
     dut.dma_rd_cmd_ready.value = 1
     dut.dma_rd_data_valid.value = 0
     dut.dma_rd_data.value = 0
     dut.dma_rd_data_last.value = 0
     dut.dma_wr_cmd_ready.value = 1
-    dut.dma_wr_data_ready.value = 1
+    dut.dma_wr_data_ready.value = 1 if not toplike_wr else 0
     await RisingEdge(dut.clk)
     await RisingEdge(dut.clk)
     dut.rst_n.value = 1
@@ -289,10 +406,19 @@ async def test_attention_core_small(dut):
     seed = int(os.environ.get('CORE_TEST_SEED', '2025'))
     data_min = int(os.environ.get('CORE_TEST_DATA_MIN', '-32'))
     data_max = int(os.environ.get('CORE_TEST_DATA_MAX', '31'))
+    split_beats = int(os.environ.get('CORE_RD_STREAM_SPLIT_BEATS', '0'))
+    split_gap_cycles = int(os.environ.get('CORE_RD_STREAM_GAP_CYCLES', '0'))
+    toplike_rd = int(os.environ.get('CORE_TOPLIKE_RD', os.environ.get('CORE_TOPLIKE_DMA', '0'))) != 0
+    toplike_wr = int(os.environ.get('CORE_TOPLIKE_WR', os.environ.get('CORE_TOPLIKE_DMA', '0'))) != 0
 
     # Generate random Q/K/V (small values to stay in Q8.8 range)
     random.seed(seed)
-    dut._log.info(f"stimulus config: seed={seed} range=[{data_min},{data_max}] causal={int(causal)} neg_large_q8_8={neg_large}")
+    dut._log.info(
+        f"stimulus config: seed={seed} range=[{data_min},{data_max}] "
+        f"causal={int(causal)} neg_large_q8_8={neg_large} "
+        f"split_beats={split_beats} gap_cycles={split_gap_cycles} "
+        f"toplike_rd={int(toplike_rd)} toplike_wr={int(toplike_wr)}"
+    )
     Q = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
     K = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
     V = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
@@ -309,8 +435,15 @@ async def test_attention_core_small(dut):
     O_fp32 = python_fp32_attention(Q, K, V, causal=causal)
 
     # Start DMA response coroutines
-    dma_rd_task = cocotb.start_soon(drive_dma_read_responses(dut, mem))
-    dma_wr_task = cocotb.start_soon(capture_dma_writes(dut, mem))
+    if toplike_rd:
+        dma_rd_task = cocotb.start_soon(drive_dma_read_responses_toplike(dut, mem))
+    else:
+        dma_rd_task = cocotb.start_soon(drive_dma_read_responses(dut, mem))
+
+    if toplike_wr:
+        dma_wr_task = cocotb.start_soon(capture_dma_writes_toplike(dut, mem))
+    else:
+        dma_wr_task = cocotb.start_soon(capture_dma_writes(dut, mem))
 
     # Configure and start
     dut.i_q_base.value = Q_BASE

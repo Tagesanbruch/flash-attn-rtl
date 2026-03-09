@@ -131,6 +131,7 @@ std::vector<ModeResult> run_one_seed(const Config& cfg, int seed) {
     bool hard_mask = (cfg.mask_mode == "hard");
     int16_t neg_large = static_cast<int16_t>(cfg.neg_large_q8_8);
 
+    MatrixF rtl_strict_f = dequant_q8_8(online_rtl_like(q_q, k_q, v_q, cfg.TQ, cfg.TK, cfg.causal, Mode::RTL_STRICT, neg_large, hard_mask));
     MatrixF rtl_exact_f = dequant_q8_8(online_rtl_like(q_q, k_q, v_q, cfg.TQ, cfg.TK, cfg.causal, Mode::RTL_EXACT, neg_large, hard_mask));
     MatrixF rtl_realexp_f = dequant_q8_8(online_rtl_like(q_q, k_q, v_q, cfg.TQ, cfg.TK, cfg.causal, Mode::RTL_REAL_EXP, neg_large, hard_mask));
     MatrixF rtl_realexp_floatnorm_f = dequant_q8_8(online_rtl_like(q_q, k_q, v_q, cfg.TQ, cfg.TK, cfg.causal, Mode::RTL_REAL_EXP_FLOAT_NORM, neg_large, hard_mask));
@@ -142,6 +143,7 @@ std::vector<ModeResult> run_one_seed(const Config& cfg, int seed) {
     MatrixF fp32_then_q8_f = dequant_q8_8(quant_q8_8(fp32_ref));
 
     std::vector<ModeResult> out;
+    out.push_back({"rtl_strict", calc_metrics(rtl_strict_f, fp32_ref)});
     out.push_back({"rtl_exact", calc_metrics(rtl_exact_f, fp32_ref)});
     out.push_back({"rtl_real_exp", calc_metrics(rtl_realexp_f, fp32_ref)});
     out.push_back({"rtl_real_exp_float_norm", calc_metrics(rtl_realexp_floatnorm_f, fp32_ref)});
