@@ -167,6 +167,36 @@ def python_flash_attention(Q, K, V, scale, neg_large, causal=False):
     return O
 
 
+def python_fp32_attention(Q, K, V, causal=False):
+    out = [[0.0] * D for _ in range(SEQ_LEN)]
+    scale = 1.0 / math.sqrt(D)
+    for i in range(SEQ_LEN):
+        scores = [0.0] * SEQ_LEN
+        max_s = -1e30
+        for j in range(SEQ_LEN):
+            dot = 0.0
+            for d in range(D):
+                dot += q8_8_float(Q[i][d]) * q8_8_float(K[j][d])
+            s = dot * scale
+            if causal and j > i:
+                s = -1e9
+            scores[j] = s
+            if s > max_s:
+                max_s = s
+        denom = 0.0
+        for j in range(SEQ_LEN):
+            scores[j] = math.exp(scores[j] - max_s)
+            denom += scores[j]
+        for j in range(SEQ_LEN):
+            scores[j] /= denom
+        for d in range(D):
+            acc = 0.0
+            for j in range(SEQ_LEN):
+                acc += scores[j] * q8_8_float(V[j][d])
+            out[i][d] = acc
+    return out
+
+
 async def drive_dma_read_responses(dut, mem):
     """Coroutine: watches for DMA read commands and responds with data."""
     while True:
@@ -254,13 +284,18 @@ async def test_attention_core_small(dut):
     V_BASE = 0x0002_0000
     O_BASE = 0x0003_0000
     scale = float_to_q8_8(1.0 / math.sqrt(D))
-    neg_large = to_s16(float_to_q8_8(-8.0))
+    neg_large = to_s16(int(os.environ.get('CORE_TEST_NEG_LARGE_Q8_8', str(float_to_q8_8(-8.0)))))
+    causal = int(os.environ.get('CORE_TEST_CAUSAL', '0')) != 0
+    seed = int(os.environ.get('CORE_TEST_SEED', '2025'))
+    data_min = int(os.environ.get('CORE_TEST_DATA_MIN', '-32'))
+    data_max = int(os.environ.get('CORE_TEST_DATA_MAX', '31'))
 
     # Generate random Q/K/V (small values to stay in Q8.8 range)
-    random.seed(2025)
-    Q = [[random.randint(-32, 31) for _ in range(D)] for _ in range(S)]
-    K = [[random.randint(-32, 31) for _ in range(D)] for _ in range(S)]
-    V = [[random.randint(-32, 31) for _ in range(D)] for _ in range(S)]
+    random.seed(seed)
+    dut._log.info(f"stimulus config: seed={seed} range=[{data_min},{data_max}] causal={int(causal)} neg_large_q8_8={neg_large}")
+    Q = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
+    K = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
+    V = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
 
     # Store in memory
     mem = DmaMemory()
@@ -270,7 +305,8 @@ async def test_attention_core_small(dut):
 
     # Compute golden reference
     dut._log.info(f"Computing Python golden (S={S}, D={D}, TQ={TQ}, TK={TK})...")
-    O_golden = python_flash_attention(Q, K, V, scale, neg_large, causal=False)
+    O_golden = python_flash_attention(Q, K, V, scale, neg_large, causal=causal)
+    O_fp32 = python_fp32_attention(Q, K, V, causal=causal)
 
     # Start DMA response coroutines
     dma_rd_task = cocotb.start_soon(drive_dma_read_responses(dut, mem))
@@ -284,7 +320,7 @@ async def test_attention_core_small(dut):
     dut.i_stride_bytes.value = stride_bytes
     dut.i_scale_q8_8.value = scale & 0xFFFF
     dut.i_neg_large_q8_8.value = neg_large & 0xFFFF
-    dut.i_causal_en.value = 0
+    dut.i_causal_en.value = 1 if causal else 0
     await RisingEdge(dut.clk)
 
     dut.i_start.value = 1
@@ -332,13 +368,15 @@ async def test_attention_core_small(dut):
             f.write(f"TK={TK}\n")
             f.write(f"scale_q8_8={scale}\n")
             f.write(f"neg_large_q8_8={neg_large}\n")
-            f.write("causal=0\n")
-            f.write("seed=2025\n")
+            f.write(f"causal={int(causal)}\n")
+            f.write(f"seed={seed}\n")
         dut._log.info(f"Dumped RTL vectors to: {dump_dir}")
 
     # Compare
     max_err = 0
     total_err = 0
+    fp32_max_err = 0.0
+    fp32_total_err = 0.0
     count = 0
     for r in range(S):
         for c in range(D):
@@ -347,10 +385,16 @@ async def test_attention_core_small(dut):
             err = abs(got - exp)
             max_err = max(max_err, err)
             total_err += err
+            got_f = q8_8_float(got)
+            fp32_err = abs(got_f - O_fp32[r][c])
+            fp32_max_err = max(fp32_max_err, fp32_err)
+            fp32_total_err += fp32_err
             count += 1
 
     mae = total_err / count if count > 0 else 0
-    dut._log.info(f"MAX_AE={max_err}, MAE={mae:.2f}, count={count}")
+    fp32_mae = fp32_total_err / count if count > 0 else 0.0
+    dut._log.info(f"RTL vs fixed-like: MAX_AE={max_err}, MAE={mae:.4f}, count={count}")
+    dut._log.info(f"RTL vs FP32: MAX_AE={fp32_max_err:.6f}, MAE={fp32_mae:.6f}, count={count}")
     # Allow some tolerance due to fixed-point arithmetic differences
     assert max_err < 256, f"Max error too large: {max_err} (>{256})"
     dut._log.info("test_attention_core_small PASS")

@@ -237,3 +237,321 @@
 - 仿真场景微差
 
 而不是 perf counter 模块本身改变了 datapath 延迟周期。
+
+## 11. DMA_RD_BEAT_COUNT 异常的进一步排查结论
+
+当前最可疑、且与实测高度吻合的根因是 **DMA burst len 位宽截断**。
+
+### 11.1 代码证据
+
+- `fa_attention_core` 输出：
+  - `dma_rd_cmd_len` / `dma_wr_cmd_len` 为 `logic [15:0]`
+- `fa_dma_reader` / `fa_dma_writer` 默认参数：
+  - `AXI_LEN_W = 8`
+  - `cmd_len` / `m_axi_arlen` / `m_axi_awlen` 只有 8 bit
+
+而 core 内部赋值为：
+
+- Q tile：`BEATS_PER_TILE_Q - 1 = 255`，可被 8 bit 正常表示
+- K/V tile：`BEATS_PER_TILE_KV - 1 = 511`，会被 8 bit 截成 `255`
+
+于是顶层实际行为会变成：
+
+- Q burst：`256 beat`（正确）
+
+## 12. 后续修复闭环（已完成）
+
+### 12.1 修复策略
+
+后续没有简单去“放大 `ARLEN` 位宽”，因为 AXI4 本身就只允许 `8 bit` 的 burst len 字段。
+
+因此实际修复方式为：
+
+- 在 [rtl/bus/fa_dma_reader.sv](rtl/bus/fa_dma_reader.sv) 中把上游 `cmd_len` 解释为**逻辑总长度**；
+- 当逻辑读长度超过 `256 beat` 时，自动拆成多个合法 AXI4 burst；
+- 读数据对下游 core 仍表现为**一个连续逻辑数据流**；
+- `out_last` 仅在整个逻辑命令的最后一个 beat 拉高，而不是在中间 burst 结束时提前拉高。
+
+这使得：
+
+- core 侧无需重写 `S_LOAD_K/S_LOAD_V/PF_DATA_K/PF_DATA_V` 的 tile 装载流程；
+- 总线侧行为满足 AXI4 规范；
+- K/V tile 可以完整读取 `512 beat`。
+
+### 12.2 性能计数器口径调整
+
+修复后，`DMA_RD_CMD_COUNT` 若仍然统计 core 侧逻辑命令，则会继续得到 `72`；
+但 AXI 总线上的真实 `AR` 次数会变成 `136`。
+
+为保证 perf 结果与总线观测一致，顶层 [rtl/top/fa_attention_ip_top.sv](rtl/top/fa_attention_ip_top.sv) 已改为统计：
+
+- `m_axi_arvalid && m_axi_arready`
+- `m_axi_awvalid && m_axi_awready`
+
+即 `DMA_RD_CMD_COUNT / DMA_WR_CMD_COUNT` 现在表示**物理 AXI burst 次数**。
+
+### 12.3 新增验证
+
+1. 在 [dv/cocotb/tests/test_fa_dma_reader.py](dv/cocotb/tests/test_fa_dma_reader.py) 新增长命令单测：
+  - 逻辑 `300 beat` 读命令会被拆成 `256 + 44`
+  - 校验第二个 burst 的地址连续性
+  - 校验 `out_last` 只在最终逻辑末拍拉高
+
+2. 在 [dv/cocotb/tests/test_fa_attention_ip_top_regs.py](dv/cocotb/tests/test_fa_attention_ip_top_regs.py) 的 `test_perf_counters_full_run` 中新增顶层**精确数值校验**：
+  - 使用与 core-level 一致的 fixed-point golden reference
+  - 不再只检查输出非零，而是直接比较整个 `O` 矩阵
+
+### 12.4 修复后最新结果
+
+最新顶层 full-run 结果为：
+
+- `CYCLES = 148736`
+- `BUSY_CYCLES = 148736`
+- `DMA_RD_CMD_COUNT = 136`
+- `DMA_RD_BEAT_COUNT = 34816`
+- `DMA_WR_CMD_COUNT = 8`
+- `DMA_WR_BEAT_COUNT = 2048`
+- `COMP_LAUNCH_COUNT = 64`
+- `EXP_EVAL_COUNT = 131072`
+- `MUL_EVAL_COUNT = 65536`
+- `RECIP_REQ_COUNT = 256`
+- `RECIP_RSP_COUNT = 256`
+
+主状态周期：
+
+- `MS_LOAD_Q = 2072`
+- `MS_INIT_CONTEXT = 8`
+- `MS_LOAD_K = 4128`
+- `MS_LOAD_V = 4128`
+- `MS_COMPUTE = 131200`
+- `MS_NORMALIZE = 5120`
+- `MS_WRITE_O = 2072`
+- `MS_NEXT_Q = 8`
+
+顶层数值对比结果：
+
+- `MAE = 4.6394`
+- `MAX_ERR = 114`
+
+仍满足此前 core-level 采用的 `max_err < 256` 判据。
+
+### 12.5 回归状态
+
+- `fa_attention_ip_top`：`4/4 PASS`
+- `fa_dma_reader`：`5/5 PASS`
+
+至此可以确认：
+
+1. 之前的 `DMA_RD_BEAT_COUNT = 18432` 确实对应 K/V 只读半 tile；
+2. 该问题会影响顶层数值正确性可信度；
+3. 通过 AXI 合法 burst 拆分后，访存统计恢复为理论值；
+4. 顶层已重新通过精确数值校验。
+- K/V burst：本应 `512 beat`，实际也只发出 `256 beat`
+
+这与本次 perf 读回的结果完全一致：
+
+- `72` 条读命令不变
+- 每条平均 `256 beat`
+- 总读 beat 变为 `72 * 256 = 18432`
+
+### 11.2 结论
+
+因此，`DMA_RD_BEAT_COUNT = 18432` 不是 perf 计数错误，而是 **当前 top-level K/V DMA 读长度被截断后的真实总线行为**。
+
+### 11.3 额外风险
+
+`cfg/sta_modules.mk` 中虽然把 `fa_attention_ip_top` 列为了可跑 STA 的模块，但当前依赖清单尚未包含新增的 `rtl/top/fa_perf_counters.sv`。这意味着：
+
+- 现有 STA 配置本身也还没有随本次 perf 改动完全更新；
+- 即使现在直接跑 top STA，也需要先补齐依赖文件表。
+
+## 12. `fa_attention_core` / `fa_attention_ip_top` 的 STA 覆盖现状
+
+### 12.1 当前是否做过 `fa_attention_core` 的独立 STA
+
+从现有流程与产物看，**没有看到 `fa_attention_core` 的独立综合/STA 结果目录**。
+
+当前仓库已确认有模块级综合/STA产物的，主要是：
+
+- `fa_mul_sat_q8_8`
+- `fa_recip_nr_q16_16`
+- `fa_axi_lite_regs`
+- `fa_online_softmax_update`
+- `fa_row_reduction_core`
+- 若干 20260306 的实验模块
+
+但主线 `fa_attention_core` 本身没有作为独立 STA 模块纳入 `cfg/sta_modules.mk`。
+
+### 12.2 当前是否做过 `fa_attention_ip_top` 的完整 STA
+
+结论也基本是：**流程上列了入口，但没有形成有效闭环结果**。
+
+原因包括：
+
+1. 早期文档明确写过“top 级当前不做 STA”；
+2. `syn/` 下也没有看到对应的 `fa_attention_ip_top_*` 产物目录；
+3. 现在 `cfg/sta_modules.mk` 对 top 的文件列表还是旧的，未包含 `fa_perf_counters.sv`，说明至少当前这版 top 配置还不是最新可直接跑的状态。
+
+### 12.3 这是否意味着存在 PPA 隐患
+
+是的，**存在明显的 PPA 不确定性/隐患**。
+
+原因不是 perf，而是 `fa_attention_core` 的主线算术结构本身非常“硬展开”：
+
+- 只有少数运算被封装成独立模块：
+  - 2 个 `fa_mul_sat_q8_8`（score scale）
+  - 4 个 `fa_exp_pwl_8seg_q1_15`
+  - 1 个 `fa_recip_nr_q16_16`
+- 其余大部分乘法/乘加是在 `fa_attention_core` 内通过显式 `*` 和 `for` 循环直接写出的，综合后通常会被**并行展开为大量推断算术单元**，并不会自动“复用成一个共享乘法器”。
+
+这意味着：
+
+- 当前周期好，不等于当前 PPA 一定好；
+- 面积、关键路径、布线扇出，尤其是 `C_SOFTMAX_PREP` 与 dot-product 局部，很可能比较重；
+- 如果不做独立 `fa_attention_core` / top STA，仅靠小模块 STA，无法真正评估主线实现的综合可行性。
+
+## 13. `fa_attention_core` 中可能的 PPA 热点
+
+### 13.1 `C_DP_RUN`：点积并行阵列
+
+源码里 `DP_LANES = 32`，`ROW_PAR = 2`，在 `always_comb` 中对 `dp_partial_sum0/1` 做循环累加。
+
+这等价于每个 cycle 对两行并行做 32 lane 点积：
+
+- 行 0：32 个乘法
+- 行 1：32 个乘法
+- 合计：约 64 个 Q8.8×Q8.8 乘法 + 对应加法树
+
+也就是说，`DP_CHUNKS = D / DP_LANES = 2` 换来的正是：
+
+- 周期上只需 2 个 `DP_RUN` cycle / score pair
+- 代价是一次性并行乘法器和加法树规模很大
+
+### 13.2 `C_SCORE_DONE`：相对轻，但受 `ROW_PAR` 影响
+
+这一拍主要做：
+
+- `dp_acc -> q8.8` 提取
+- 2 个 `fa_mul_sat_q8_8` 缩放
+- causal compare / mux
+
+它本身是 1 cycle / score pair。若提升 `ROW_PAR`，这里的硬件也需要同比扩张，否则周期不会下降。
+
+### 13.3 `C_SOFTMAX_PREP`：主线最值得警惕的 PPA 热点
+
+这一拍虽然周期上只占 1 cycle / score pair，但硬件量非常大，因为对 `D=64` 全向量做并行更新。
+
+按 `ROW_PAR=2`、两行都有效时，单拍会推断出近似如下规模：
+
+- `l_scaled_wide0/1`：2 个 `32x16` 乘法
+- 对每个 `k in [0,63]`：
+  - row0: `row_acc * exp_old` 1 个宽乘法 + `exp_new * V` 1 个乘法
+  - row1: 再来一组
+
+即单拍内约：
+
+- `64 * 4 = 256` 个与 `acc/PV` 更新相关的乘法（宽度不完全相同，但数量级很大）
+
+这也是为什么：
+
+- 从“周期画像”看 `C_SOFTMAX_PREP` 只占 `32768` cycles；
+- 但从“PPA 画像”看，它反而可能是最重的一拍之一。
+
+### 13.4 `S_NORMALIZE`：周期不是最大头，但也有显式并行乘法
+
+`NORM_LANES = 8`，每拍最多并行 8 个 `num * recip`。这部分周期不是最大头，但也不是零成本。
+
+## 14. `CS_DP_RUN / CS_SCORE_DONE / CS_SOFTMAX_PREP` 的具体构成
+
+### 14.1 基本公式
+
+设：
+
+- `NUM_Q_TILES = 8`
+- `NUM_K_TILES = 4`
+- `QPAIR_PER_TILE = TQ / ROW_PAR = 32 / 2 = 16`
+- `TK = 64`
+- `DP_CHUNKS = D / DP_LANES = 64 / 32 = 2`
+
+则每个 `K tile` 内共有：
+
+$$16 \times 64 = 1024$$
+
+个 `score pair` 需要处理。
+
+对每个 `score pair`：
+
+- `C_DP_RUN` 固定跑 `DP_CHUNKS = 2` 个 cycle
+- `C_SCORE_DONE` 固定跑 `1` 个 cycle
+- `C_SOFTMAX_PREP` 固定跑 `1` 个 cycle
+
+所以全局就是：
+
+$$CS\_DP\_RUN = 8 \times 4 \times 16 \times 64 \times 2 = 65536$$
+
+$$CS\_SCORE\_DONE = 8 \times 4 \times 16 \times 64 = 32768$$
+
+$$CS\_SOFTMAX\_PREP = 8 \times 4 \times 16 \times 64 = 32768$$
+
+### 14.2 与内部并行化参数的关系
+
+这三个值与并行化强相关：
+
+1. `CS_DP_RUN`
+   - 与 `DP_CHUNKS = D / DP_LANES` 成正比
+   - 增大 `DP_LANES` → 周期下降，面积/功耗/布线压力上升
+
+2. `CS_SCORE_DONE`
+   - 当前是 1 cycle / score pair
+   - 若保持每个 score pair 只做两行，则它主要随 `ROW_PAR` 变化：
+     - `ROW_PAR` 翻倍，score pair 数减半，周期减半
+     - 但相应算子并行度也要增加
+
+3. `CS_SOFTMAX_PREP`
+   - 也是 1 cycle / score pair
+   - 其周期和 `ROW_PAR` 直接相关，但更重要的是其**单拍硬件规模**会随 `ROW_PAR` 近似线性放大
+
+### 14.3 为什么 `MS_COMPUTE = 131200` 比三者和多 `128`
+
+本次实测：
+
+- `MS_COMPUTE = 131200`
+- `CS_DP_RUN + CS_SCORE_DONE + CS_SOFTMAX_PREP = 131072`
+- 差值 `128`
+
+这 `128` cycle 对应的是 compute 外围控制开销，平均到 `32` 个 `K tile` 上是：
+
+$$128 / 32 = 4$$
+
+cycle / `K tile`。
+
+它与当前 `comp_start` 的寄存式双拍启动、`C_DONE -> C_IDLE` 回切以及 tile 间控制衔接是一致的，属于小的控制气泡，不是主矛盾。
+
+## 15. 对（2）和（3）的工程判断
+
+### 15.1 只看周期，当前架构是合理的
+
+- `DP_LANES=32` 把 dot-product 压到 2 cycles / pair
+- `ROW_PAR=2` 让 score/softmax/PV 以两行为粒度推进
+- 总周期可维持在约 `145k`
+
+### 15.2 只看 PPA，当前主线是有隐患的
+
+因为主线用的是“高并行 + 大量推断乘法器”的写法：
+
+- 周期很漂亮；
+- 但主线 `fa_attention_core` 没有形成独立 STA 闭环；
+- top 也没有最新版本的完整 STA 产物；
+- 因此**不能仅凭功能仿真周期就判断其面积/频率一定可接受**。
+
+### 15.3 是否需要合理拆解
+
+从分析角度看，答案是：**非常值得考虑**。
+
+优先级上最值得结构化拆解的是：
+
+1. `C_SOFTMAX_PREP` 内的 `acc rescale + PV` 更新
+2. `C_DP_RUN` 的 32-lane 点积阵列
+3. `S_NORMALIZE` 的向量除法乘回路径
+
+但这一步属于架构优化，不是本轮 perf counter 验证本身的必要修改。

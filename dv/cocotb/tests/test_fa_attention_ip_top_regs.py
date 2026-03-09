@@ -3,9 +3,10 @@ from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge
 import random
 import math
+import os
 
 from axilite_master import AxiLiteMaster
-from fp_ref import to_s16
+from fp_ref import to_s16, to_u32, q8_8_mul_sat, exp_pwl_q1_15
 
 
 REG_CTRL = 0x00
@@ -90,6 +91,103 @@ def _fp32_ref(Q, K, V, causal):
     return out
 
 
+def _fixed_flash_attention_ref(Q, K, V, scale, neg_large, causal=False):
+    out = [[0] * D for _ in range(S)]
+    num_q_tiles = S // TQ
+    num_k_tiles = S // TK
+
+    for qt in range(num_q_tiles):
+        q_start = qt * TQ
+        row_m = [neg_large] * TQ
+        row_l = [0] * TQ
+        row_acc = [[0] * D for _ in range(TQ)]
+
+        for kt in range(num_k_tiles):
+            k_start = kt * TK
+            for qi in range(TQ):
+                for kj in range(TK):
+                    dp = 0
+                    for d in range(D):
+                        dp += to_s16(Q[q_start + qi][d]) * to_s16(K[k_start + kj][d])
+
+                    dp_q8_8 = (dp >> 8) & 0xFFFF
+                    score = q8_8_mul_sat(to_s16(dp_q8_8), scale)
+
+                    if causal and (q_start + qi) < (k_start + kj):
+                        score = neg_large
+
+                    m_old = row_m[qi]
+                    m_new = score if score > m_old else m_old
+                    diff_old = to_s16(m_old - m_new)
+                    diff_new = to_s16(score - m_new)
+                    exp_old = exp_pwl_q1_15(diff_old)
+                    exp_new = exp_pwl_q1_15(diff_new)
+
+                    l_scaled = (to_u32(row_l[qi]) * exp_old) >> 15
+                    l_term = (exp_new << 1) & 0xFFFFFFFF
+                    row_l[qi] = to_u32(l_scaled + l_term)
+
+                    for d in range(D):
+                        acc_scaled_wide = row_acc[qi][d] * exp_old
+                        acc_old_sc = acc_scaled_wide >> 15
+                        pv_mul = exp_new * to_s16(V[k_start + kj][d])
+                        pv_term = pv_mul << 1
+                        row_acc[qi][d] = acc_old_sc + pv_term
+
+                    row_m[qi] = to_s16(m_new)
+
+        for qi in range(TQ):
+            den = to_u32(row_l[qi])
+            for d in range(D):
+                num = row_acc[qi][d]
+                if den == 0:
+                    norm_result = 32767 if num >= 0 else -32768
+                else:
+                    half = den >> 1
+                    num_adj = num + half if num >= 0 else num - half
+                    norm_result = int(num_adj / den)
+
+                if norm_result > 32767:
+                    out[q_start + qi][d] = 32767
+                elif norm_result < -32768:
+                    out[q_start + qi][d] = -32768
+                else:
+                    out[q_start + qi][d] = norm_result
+
+    return out
+
+
+def _calc_i16_metrics(got, ref):
+    max_err = 0
+    sum_abs_err = 0
+    worst = None
+    for i in range(S):
+        for d in range(D):
+            err = abs(to_s16(got[i][d]) - to_s16(ref[i][d]))
+            sum_abs_err += err
+            if err > max_err:
+                max_err = err
+                worst = (i, d, to_s16(got[i][d]), to_s16(ref[i][d]))
+    mae = sum_abs_err / (S * D)
+    return mae, max_err, worst
+
+
+def _calc_fp32_metrics(got, ref_fp32):
+    max_err = 0.0
+    sum_abs_err = 0.0
+    worst = None
+    for i in range(S):
+        for d in range(D):
+            got_f = _q8_8_to_float(got[i][d])
+            err = abs(got_f - ref_fp32[i][d])
+            sum_abs_err += err
+            if err > max_err:
+                max_err = err
+                worst = (i, d, got_f, ref_fp32[i][d])
+    mae = sum_abs_err / (S * D)
+    return mae, max_err, worst
+
+
 class AxiMemoryModel:
     def __init__(self, dut):
         self.dut = dut
@@ -103,6 +201,7 @@ class AxiMemoryModel:
         self._rd_addr = 0
         self._rd_len = 0
         self._rd_idx = 0
+        self._rd_just_started = False
 
         self._wr_active = False
         self._wr_addr = 0
@@ -171,6 +270,7 @@ class AxiMemoryModel:
                 self._rd_addr = int(self.dut.m_axi_araddr.value)
                 self._rd_len = int(self.dut.m_axi_arlen.value) + 1
                 self._rd_idx = 0
+                self._rd_just_started = True
                 self.rd_cmds += 1
 
             if (not self._wr_active) and (not self._wr_resp_pending) and int(self.dut.m_axi_awvalid.value) and int(self.dut.m_axi_awready.value):
@@ -183,7 +283,7 @@ class AxiMemoryModel:
             self.dut.m_axi_arready.value = 0 if self._rd_active else 1
             self.dut.m_axi_awready.value = 0 if (self._wr_active or self._wr_resp_pending) else 1
 
-            if self._rd_active:
+            if self._rd_active and not self._rd_just_started:
                 addr = self._rd_addr + self._rd_idx * bytes_per_beat
                 self.dut.m_axi_rvalid.value = 1
                 self.dut.m_axi_rdata.value = self.mem.get(addr, 0)
@@ -191,6 +291,9 @@ class AxiMemoryModel:
             else:
                 self.dut.m_axi_rvalid.value = 0
                 self.dut.m_axi_rlast.value = 0
+
+            if self._rd_just_started:
+                self._rd_just_started = False
 
             self.dut.m_axi_wready.value = 1 if self._wr_active else 0
             self.dut.m_axi_bvalid.value = 1 if self._wr_resp_pending else 0
@@ -395,16 +498,29 @@ async def test_perf_counters_full_run(dut):
     dut.rst_n.value = 1
     await RisingEdge(dut.clk)
 
-    random.seed(20260309)
+    seed = int(os.environ.get("TOP_TEST_SEED", "20260309"))
+    data_min = int(os.environ.get("TOP_TEST_DATA_MIN", "-64"))
+    data_max = int(os.environ.get("TOP_TEST_DATA_MAX", "64"))
+    scale_q8_8 = int(os.environ.get("TOP_TEST_SCALE_Q8_8", "32"))
+    neg_large_q8_8 = int(os.environ.get("TOP_TEST_NEG_LARGE_Q8_8", str(to_s16(0xE000))))
+    cocotb.log.info(
+        "top stimulus config: seed=%d range=[%d,%d] causal=1 scale_q8_8=%d neg_large_q8_8=%d",
+        seed,
+        data_min,
+        data_max,
+        scale_q8_8,
+        neg_large_q8_8,
+    )
+    random.seed(seed)
     q_base = 0x00000000
     k_base = 0x00010000
     v_base = 0x00020000
     o_base = 0x00030000
     stride_bytes = D * 2
 
-    Q = [[random.randint(-64, 64) for _ in range(D)] for _ in range(S)]
-    K = [[random.randint(-64, 64) for _ in range(D)] for _ in range(S)]
-    V = [[random.randint(-64, 64) for _ in range(D)] for _ in range(S)]
+    Q = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
+    K = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
+    V = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
 
     mem.store_matrix_q8_8(q_base, Q, stride_bytes)
     mem.store_matrix_q8_8(k_base, K, stride_bytes)
@@ -419,8 +535,8 @@ async def test_perf_counters_full_run(dut):
     await master.write(REG_O_BASE_L, o_base)
     await master.write(REG_O_BASE_H, 0)
     await master.write(REG_STRIDE_BYTES, stride_bytes)
-    await master.write(REG_SCALE, 0x00000020)
-    await master.write(REG_NEG_LARGE, 0xFFFFE000)
+    await master.write(REG_SCALE, scale_q8_8 & 0xFFFF)
+    await master.write(REG_NEG_LARGE, neg_large_q8_8 & 0xFFFFFFFF)
     await master.write(REG_CFG, 0x1)
 
     await master.write(REG_CTRL, 0x1)
@@ -567,3 +683,25 @@ async def test_perf_counters_full_run(dut):
     out = mem.load_matrix_q8_8(o_base, S, D, stride_bytes)
     non_zero_outputs = sum(1 for row in out for v in row if v != 0)
     assert non_zero_outputs > 0, "output buffer should contain non-zero results after full run"
+
+    golden_fixed = _fixed_flash_attention_ref(Q, K, V, scale=scale_q8_8, neg_large=to_s16(neg_large_q8_8), causal=True)
+    golden_fp32 = _fp32_ref(Q, K, V, causal=True)
+
+    mae_i16, max_err_i16, worst_i16 = _calc_i16_metrics(out, golden_fixed)
+    mae_fp32, max_err_fp32, worst_fp32 = _calc_fp32_metrics(out, golden_fp32)
+
+    cocotb.log.info(
+        "top numeric check (rtl vs fixed-q8.8): mae_lsb=%.4f mae=%.6f max_err_lsb=%d max_err=%.6f worst=%s",
+        mae_i16,
+        mae_i16 / 256.0,
+        max_err_i16,
+        max_err_i16 / 256.0,
+        worst_i16,
+    )
+    cocotb.log.info(
+        "top numeric check (rtl vs fp32): mae=%.6f max_err=%.6f worst=%s",
+        mae_fp32,
+        max_err_fp32,
+        worst_fp32,
+    )
+    assert max_err_i16 < 256, f"top output mismatch too large: max_err={max_err_i16}, worst={worst_i16}, mae={mae_i16:.4f}"

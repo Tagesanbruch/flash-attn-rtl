@@ -202,3 +202,117 @@ async def test_back_to_back_commands(dut):
         await RisingEdge(dut.clk)
 
     dut._log.info("test_back_to_back_commands PASS")
+
+
+@cocotb.test()
+async def test_split_long_command(dut):
+    """A logical command longer than 256 beats should split into multiple AXI bursts."""
+    clock = Clock(dut.clk, 10, units="ns")
+    cocotb.start_soon(clock.start())
+    await reset(dut)
+
+    addr = 0x4000
+    total_beats = 300
+
+    dut.cmd_valid.value = 1
+    dut.cmd_addr.value = addr
+    dut.cmd_len.value = total_beats - 1
+    await RisingEdge(dut.clk)
+    assert int(dut.cmd_ready.value) == 1
+    dut.cmd_valid.value = 0
+
+    ar_addrs = []
+    ar_lens = []
+    received = []
+    dut.out_ready.value = 1
+
+    for burst_idx, burst_beats in enumerate((256, 44)):
+        for _ in range(10):
+            if int(dut.m_axi_arvalid.value) == 1:
+                break
+            await RisingEdge(dut.clk)
+        assert int(dut.m_axi_arvalid.value) == 1, f"ARVALID missing for burst {burst_idx}"
+        ar_addrs.append(int(dut.m_axi_araddr.value))
+        ar_lens.append(int(dut.m_axi_arlen.value))
+
+        dut.m_axi_arready.value = 1
+        await RisingEdge(dut.clk)
+        dut.m_axi_arready.value = 0
+
+        for beat in range(burst_beats):
+            dut.m_axi_rvalid.value = 1
+            dut.m_axi_rdata.value = (burst_idx << 16) + beat
+            dut.m_axi_rresp.value = 0
+            dut.m_axi_rlast.value = 1 if beat == (burst_beats - 1) else 0
+            await RisingEdge(dut.clk)
+            assert int(dut.out_valid.value) == 1, f"out_valid missing on burst {burst_idx} beat {beat}"
+            received.append(int(dut.out_data.value))
+            assert received[-1] == ((burst_idx << 16) + beat), \
+                f"out_data mismatch on burst {burst_idx} beat {beat}: got {received[-1]:#x} exp {((burst_idx << 16) + beat):#x}"
+            expect_last = 1 if (burst_idx == 1 and beat == burst_beats - 1) else 0
+            assert int(dut.out_last.value) == expect_last, \
+                f"out_last mismatch on burst {burst_idx} beat {beat}: got {int(dut.out_last.value)} exp {expect_last}"
+
+        dut.m_axi_rvalid.value = 0
+        dut.m_axi_rlast.value = 0
+        await RisingEdge(dut.clk)
+
+    assert ar_addrs == [addr, addr + 256 * 16], f"split ARADDR mismatch: {ar_addrs}"
+    assert ar_lens == [255, 43], f"split ARLEN mismatch: {ar_lens}"
+    assert len(received) == total_beats, f"received beats mismatch: {len(received)} != {total_beats}"
+    assert int(dut.rd_bytes.value) == total_beats * 16, f"rd_bytes mismatch: {int(dut.rd_bytes.value)}"
+    dut._log.info("test_split_long_command PASS")
+
+
+@cocotb.test()
+async def test_split_exact_512_command(dut):
+    """A 512-beat logical command should split into exactly two 256-beat AXI bursts."""
+    clock = Clock(dut.clk, 10, units="ns")
+    cocotb.start_soon(clock.start())
+    await reset(dut)
+
+    addr = 0x8000
+    total_beats = 512
+    dut.cmd_valid.value = 1
+    dut.cmd_addr.value = addr
+    dut.cmd_len.value = total_beats - 1
+    await RisingEdge(dut.clk)
+    dut.cmd_valid.value = 0
+    dut.out_ready.value = 1
+
+    received = []
+    ar_addrs = []
+    ar_lens = []
+    for burst_idx in range(2):
+        for _ in range(10):
+            if int(dut.m_axi_arvalid.value) == 1:
+                break
+            await RisingEdge(dut.clk)
+        assert int(dut.m_axi_arvalid.value) == 1, f"ARVALID missing for burst {burst_idx}"
+        ar_addrs.append(int(dut.m_axi_araddr.value))
+        ar_lens.append(int(dut.m_axi_arlen.value))
+        dut.m_axi_arready.value = 1
+        await RisingEdge(dut.clk)
+        dut.m_axi_arready.value = 0
+
+        for beat in range(256):
+            dut.m_axi_rvalid.value = 1
+            dut.m_axi_rdata.value = (burst_idx << 16) + beat
+            dut.m_axi_rresp.value = 0
+            dut.m_axi_rlast.value = 1 if beat == 255 else 0
+            await RisingEdge(dut.clk)
+            assert int(dut.out_valid.value) == 1
+            received.append(int(dut.out_data.value))
+            assert received[-1] == ((burst_idx << 16) + beat)
+            expect_last = 1 if (burst_idx == 1 and beat == 255) else 0
+            assert int(dut.out_last.value) == expect_last
+
+        dut.m_axi_rvalid.value = 0
+        dut.m_axi_rlast.value = 0
+        await RisingEdge(dut.clk)
+
+    assert ar_addrs == [addr, addr + 256 * 16], f"ARADDR mismatch: {ar_addrs}"
+    assert ar_lens == [255, 255], f"ARLEN mismatch: {ar_lens}"
+    assert len(received) == total_beats, f"received beats mismatch: {len(received)} != {total_beats}"
+    assert int(dut.rd_bytes.value) == total_beats * 16, f"rd_bytes mismatch: {int(dut.rd_bytes.value)}"
+    dut._log.info("test_split_exact_512_command PASS")
