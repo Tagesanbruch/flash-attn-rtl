@@ -8,7 +8,17 @@ from cocotb.triggers import RisingEdge
 
 def latency() -> int:
     exp = os.environ.get("EXP_NAME", "base")
-    return {"base": 1, "exp_a": 2, "exp_b": 3, "exp_c": 2, "exp_d": 3, "exp_e": 4}[exp]
+    return {
+        "base": 1,
+        "exp_a": 2,
+        "exp_b": 3,
+        "exp_c": 2,
+        "exp_d": 3,
+        "exp_e": 4,
+        "exp_f": 6,
+        "exp_g": 7,
+        "exp_h": 8,
+    }[exp]
 
 
 def to_signed(value: int, bits: int) -> int:

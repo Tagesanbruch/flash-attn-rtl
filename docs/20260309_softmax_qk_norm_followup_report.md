@@ -1,5 +1,7 @@
 # 2026-03-09 Follow-up：Online Softmax / QK / Norm 第二轮实验与架构取舍
 
+> 2026-03-10 补充：QK 全流水乘法-加法树实验见 [docs/20260310_qk_full_pipeline_experiments.md](docs/20260310_qk_full_pipeline_experiments.md)。新实验表明在保持 `32-lane` 与 `II=1` 前提下，`mult-only` 首拍 + 全流水 adder-tree 已把独立 QK 模块推到约 `381.9MHz`。
+
 ## 1. 背景
 
 本轮是在第一版实验总结 [docs/20260309_design_report_driven_experiments.md](docs/20260309_design_report_driven_experiments.md) 基础上继续推进，目标是：

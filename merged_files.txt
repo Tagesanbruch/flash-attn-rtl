@@ -1,0 +1,2829 @@
+module fa_perf_counters (
+  input  logic        clk,
+  input  logic        rst_n,
+  input  logic        i_run_start,
+  input  logic        i_soft_reset,
+
+  input  logic        i_ms_load_q,
+  input  logic        i_ms_init_context,
+  input  logic        i_ms_load_k,
+  input  logic        i_ms_load_v,
+  input  logic        i_ms_compute,
+  input  logic        i_ms_normalize,
+  input  logic        i_ms_write_o,
+  input  logic        i_ms_next_q,
+
+  input  logic        i_cs_dp_run,
+  input  logic        i_cs_score_done,
+  input  logic        i_cs_softmax_prep,
+  input  logic        i_comp_launch,
+  input  logic [1:0]  i_active_rows,
+
+  input  logic        i_norm_recip_req,
+  input  logic        i_norm_recip_rsp,
+
+  input  logic        i_dma_rd_cmd_fire,
+  input  logic        i_dma_rd_beat_fire,
+  input  logic        i_dma_wr_cmd_fire,
+  input  logic        i_dma_wr_beat_fire,
+
+  output logic [31:0] o_run_count,
+  output logic [31:0] o_busy_cycles,
+  output logic [31:0] o_dma_rd_cmd_count,
+  output logic [31:0] o_dma_rd_beat_count,
+  output logic [31:0] o_dma_wr_cmd_count,
+  output logic [31:0] o_dma_wr_beat_count,
+  output logic [31:0] o_comp_launch_count,
+  output logic [31:0] o_exp_eval_count,
+  output logic [31:0] o_mul_eval_count,
+  output logic [31:0] o_recip_req_count,
+  output logic [31:0] o_recip_rsp_count,
+  output logic [31:0] o_ms_load_q_cycles,
+  output logic [31:0] o_ms_init_context_cycles,
+  output logic [31:0] o_ms_load_k_cycles,
+  output logic [31:0] o_ms_load_v_cycles,
+  output logic [31:0] o_ms_compute_cycles,
+  output logic [31:0] o_ms_normalize_cycles,
+  output logic [31:0] o_ms_write_o_cycles,
+  output logic [31:0] o_ms_next_q_cycles,
+  output logic [31:0] o_cs_dp_run_cycles,
+  output logic [31:0] o_cs_score_done_cycles,
+  output logic [31:0] o_cs_softmax_prep_cycles
+);
+  logic perf_active;
+  logic [31:0] exp_inc;
+  logic [31:0] mul_inc;
+
+  always_comb begin
+    perf_active = i_ms_load_q || i_ms_init_context || i_ms_load_k || i_ms_load_v ||
+                  i_ms_compute || i_ms_normalize || i_ms_write_o || i_ms_next_q;
+
+    unique case (i_active_rows)
+      2'd2: begin
+        exp_inc = 32'd4;
+        mul_inc = 32'd2;
+      end
+      2'd1: begin
+        exp_inc = 32'd2;
+        mul_inc = 32'd1;
+      end
+      default: begin
+        exp_inc = 32'd0;
+        mul_inc = 32'd0;
+      end
+    endcase
+  end
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      o_run_count <= 32'd0;
+      o_busy_cycles <= 32'd0;
+      o_dma_rd_cmd_count <= 32'd0;
+      o_dma_rd_beat_count <= 32'd0;
+      o_dma_wr_cmd_count <= 32'd0;
+      o_dma_wr_beat_count <= 32'd0;
+      o_comp_launch_count <= 32'd0;
+      o_exp_eval_count <= 32'd0;
+      o_mul_eval_count <= 32'd0;
+      o_recip_req_count <= 32'd0;
+      o_recip_rsp_count <= 32'd0;
+      o_ms_load_q_cycles <= 32'd0;
+      o_ms_init_context_cycles <= 32'd0;
+      o_ms_load_k_cycles <= 32'd0;
+      o_ms_load_v_cycles <= 32'd0;
+      o_ms_compute_cycles <= 32'd0;
+      o_ms_normalize_cycles <= 32'd0;
+      o_ms_write_o_cycles <= 32'd0;
+      o_ms_next_q_cycles <= 32'd0;
+      o_cs_dp_run_cycles <= 32'd0;
+      o_cs_score_done_cycles <= 32'd0;
+      o_cs_softmax_prep_cycles <= 32'd0;
+    end else if (i_soft_reset) begin
+      o_busy_cycles <= 32'd0;
+      o_dma_rd_cmd_count <= 32'd0;
+      o_dma_rd_beat_count <= 32'd0;
+      o_dma_wr_cmd_count <= 32'd0;
+      o_dma_wr_beat_count <= 32'd0;
+      o_comp_launch_count <= 32'd0;
+      o_exp_eval_count <= 32'd0;
+      o_mul_eval_count <= 32'd0;
+      o_recip_req_count <= 32'd0;
+      o_recip_rsp_count <= 32'd0;
+      o_ms_load_q_cycles <= 32'd0;
+      o_ms_init_context_cycles <= 32'd0;
+      o_ms_load_k_cycles <= 32'd0;
+      o_ms_load_v_cycles <= 32'd0;
+      o_ms_compute_cycles <= 32'd0;
+      o_ms_normalize_cycles <= 32'd0;
+      o_ms_write_o_cycles <= 32'd0;
+      o_ms_next_q_cycles <= 32'd0;
+      o_cs_dp_run_cycles <= 32'd0;
+      o_cs_score_done_cycles <= 32'd0;
+      o_cs_softmax_prep_cycles <= 32'd0;
+    end else begin
+      if (i_run_start) begin
+        o_run_count <= o_run_count + 32'd1;
+        o_busy_cycles <= 32'd0;
+        o_dma_rd_cmd_count <= 32'd0;
+        o_dma_rd_beat_count <= 32'd0;
+        o_dma_wr_cmd_count <= 32'd0;
+        o_dma_wr_beat_count <= 32'd0;
+        o_comp_launch_count <= 32'd0;
+        o_exp_eval_count <= 32'd0;
+        o_mul_eval_count <= 32'd0;
+        o_recip_req_count <= 32'd0;
+        o_recip_rsp_count <= 32'd0;
+        o_ms_load_q_cycles <= 32'd0;
+        o_ms_init_context_cycles <= 32'd0;
+        o_ms_load_k_cycles <= 32'd0;
+        o_ms_load_v_cycles <= 32'd0;
+        o_ms_compute_cycles <= 32'd0;
+        o_ms_normalize_cycles <= 32'd0;
+        o_ms_write_o_cycles <= 32'd0;
+        o_ms_next_q_cycles <= 32'd0;
+        o_cs_dp_run_cycles <= 32'd0;
+        o_cs_score_done_cycles <= 32'd0;
+        o_cs_softmax_prep_cycles <= 32'd0;
+      end else begin
+        if (perf_active) begin
+          o_busy_cycles <= o_busy_cycles + 32'd1;
+        end
+        if (i_ms_load_q) begin
+          o_ms_load_q_cycles <= o_ms_load_q_cycles + 32'd1;
+        end
+        if (i_ms_init_context) begin
+          o_ms_init_context_cycles <= o_ms_init_context_cycles + 32'd1;
+        end
+        if (i_ms_load_k) begin
+          o_ms_load_k_cycles <= o_ms_load_k_cycles + 32'd1;
+        end
+        if (i_ms_load_v) begin
+          o_ms_load_v_cycles <= o_ms_load_v_cycles + 32'd1;
+        end
+        if (i_ms_compute) begin
+          o_ms_compute_cycles <= o_ms_compute_cycles + 32'd1;
+        end
+        if (i_ms_normalize) begin
+          o_ms_normalize_cycles <= o_ms_normalize_cycles + 32'd1;
+        end
+        if (i_ms_write_o) begin
+          o_ms_write_o_cycles <= o_ms_write_o_cycles + 32'd1;
+        end
+        if (i_ms_next_q) begin
+          o_ms_next_q_cycles <= o_ms_next_q_cycles + 32'd1;
+        end
+        if (i_cs_dp_run) begin
+          o_cs_dp_run_cycles <= o_cs_dp_run_cycles + 32'd1;
+        end
+        if (i_cs_score_done) begin
+          o_cs_score_done_cycles <= o_cs_score_done_cycles + 32'd1;
+          o_mul_eval_count <= o_mul_eval_count + mul_inc;
+        end
+        if (i_cs_softmax_prep) begin
+          o_cs_softmax_prep_cycles <= o_cs_softmax_prep_cycles + 32'd1;
+          o_exp_eval_count <= o_exp_eval_count + exp_inc;
+        end
+        if (i_comp_launch) begin
+          o_comp_launch_count <= o_comp_launch_count + 32'd1;
+        end
+        if (i_norm_recip_req) begin
+          o_recip_req_count <= o_recip_req_count + 32'd1;
+        end
+        if (i_norm_recip_rsp) begin
+          o_recip_rsp_count <= o_recip_rsp_count + 32'd1;
+        end
+        if (i_dma_rd_cmd_fire) begin
+          o_dma_rd_cmd_count <= o_dma_rd_cmd_count + 32'd1;
+        end
+        if (i_dma_rd_beat_fire) begin
+          o_dma_rd_beat_count <= o_dma_rd_beat_count + 32'd1;
+        end
+        if (i_dma_wr_cmd_fire) begin
+          o_dma_wr_cmd_count <= o_dma_wr_cmd_count + 32'd1;
+        end
+        if (i_dma_wr_beat_fire) begin
+          o_dma_wr_beat_count <= o_dma_wr_beat_count + 32'd1;
+        end
+      end
+    end
+  end
+endmodule
+module fa_attention_ip_top #(
+  parameter int AXIL_ADDR_W = 32,
+  parameter int AXIL_DATA_W = 32,
+  parameter int AXI_DATA_W  = 128,
+  parameter int AXI_ADDR_W  = 32,
+  parameter int AXI_ID_W    = 4
+) (
+  input  logic                        clk,
+  input  logic                        rst_n,
+
+  // ==== AXI4-Lite slave (control) ====
+  input  logic [AXIL_ADDR_W-1:0]      s_axil_awaddr,
+  input  logic                        s_axil_awvalid,
+  output logic                        s_axil_awready,
+  input  logic [AXIL_DATA_W-1:0]      s_axil_wdata,
+  input  logic [AXIL_DATA_W/8-1:0]    s_axil_wstrb,
+  input  logic                        s_axil_wvalid,
+  output logic                        s_axil_wready,
+  output logic [1:0]                  s_axil_bresp,
+  output logic                        s_axil_bvalid,
+  input  logic                        s_axil_bready,
+
+  input  logic [AXIL_ADDR_W-1:0]      s_axil_araddr,
+  input  logic                        s_axil_arvalid,
+  output logic                        s_axil_arready,
+  output logic [AXIL_DATA_W-1:0]      s_axil_rdata,
+  output logic [1:0]                  s_axil_rresp,
+  output logic                        s_axil_rvalid,
+  input  logic                        s_axil_rready,
+
+  // ==== AXI4 Master (data DMA) ====
+  // -- AR --
+  output logic [AXI_ID_W-1:0]        m_axi_arid,
+  output logic [AXI_ADDR_W-1:0]      m_axi_araddr,
+  output logic [7:0]                  m_axi_arlen,
+  output logic [2:0]                  m_axi_arsize,
+  output logic [1:0]                  m_axi_arburst,
+  output logic                        m_axi_arvalid,
+  input  logic                        m_axi_arready,
+  // -- R --
+  input  logic [AXI_ID_W-1:0]        m_axi_rid,
+  input  logic [AXI_DATA_W-1:0]      m_axi_rdata,
+  input  logic [1:0]                  m_axi_rresp,
+  input  logic                        m_axi_rlast,
+  input  logic                        m_axi_rvalid,
+  output logic                        m_axi_rready,
+  // -- AW --
+  output logic [AXI_ID_W-1:0]        m_axi_awid,
+  output logic [AXI_ADDR_W-1:0]      m_axi_awaddr,
+  output logic [7:0]                  m_axi_awlen,
+  output logic [2:0]                  m_axi_awsize,
+  output logic [1:0]                  m_axi_awburst,
+  output logic                        m_axi_awvalid,
+  input  logic                        m_axi_awready,
+  // -- W --
+  output logic [AXI_DATA_W-1:0]      m_axi_wdata,
+  output logic [AXI_DATA_W/8-1:0]    m_axi_wstrb,
+  output logic                        m_axi_wlast,
+  output logic                        m_axi_wvalid,
+  input  logic                        m_axi_wready,
+  // -- B --
+  input  logic [AXI_ID_W-1:0]        m_axi_bid,
+  input  logic [1:0]                  m_axi_bresp,
+  input  logic                        m_axi_bvalid,
+  output logic                        m_axi_bready
+);
+
+  // ---- Internal wires ----
+  logic        start_pulse;
+  logic        soft_reset;
+  logic        irq_en;
+  logic        causal_en;
+  logic [63:0] q_base, k_base, v_base, o_base;
+  logic [31:0] stride_bytes;
+  logic [15:0] neg_large_q8_8;
+  logic [15:0] scale_q8_8;
+  logic        core_busy, core_done, core_error;
+  logic [31:0] core_cycles;
+
+  logic        perf_ms_load_q;
+  logic        perf_ms_init_context;
+  logic        perf_ms_load_k;
+  logic        perf_ms_load_v;
+  logic        perf_ms_compute;
+  logic        perf_ms_normalize;
+  logic        perf_ms_write_o;
+  logic        perf_ms_next_q;
+  logic        perf_cs_dp_run;
+  logic        perf_cs_score_done;
+  logic        perf_cs_softmax_prep;
+  logic        perf_comp_launch;
+  logic [1:0]  perf_active_rows;
+  logic        perf_norm_recip_req;
+  logic        perf_norm_recip_rsp;
+
+  logic [31:0] perf_run_count;
+  logic [31:0] perf_busy_cycles;
+  logic [31:0] perf_dma_rd_cmd_count;
+  logic [31:0] perf_dma_rd_beat_count;
+  logic [31:0] perf_dma_wr_cmd_count;
+  logic [31:0] perf_dma_wr_beat_count;
+  logic [31:0] perf_comp_launch_count;
+  logic [31:0] perf_exp_eval_count;
+  logic [31:0] perf_mul_eval_count;
+  logic [31:0] perf_recip_req_count;
+  logic [31:0] perf_recip_rsp_count;
+  logic [31:0] perf_ms_load_q_cycles;
+  logic [31:0] perf_ms_init_context_cycles;
+  logic [31:0] perf_ms_load_k_cycles;
+  logic [31:0] perf_ms_load_v_cycles;
+  logic [31:0] perf_ms_compute_cycles;
+  logic [31:0] perf_ms_normalize_cycles;
+  logic [31:0] perf_ms_write_o_cycles;
+  logic [31:0] perf_ms_next_q_cycles;
+  logic [31:0] perf_cs_dp_run_cycles;
+  logic [31:0] perf_cs_score_done_cycles;
+  logic [31:0] perf_cs_softmax_prep_cycles;
+
+  // DMA reader <-> core
+  logic        dma_rd_cmd_valid, dma_rd_cmd_ready;
+  logic [31:0] dma_rd_cmd_addr;
+  logic [15:0] dma_rd_cmd_len;
+  logic        dma_rd_out_valid, dma_rd_out_ready;
+  logic [AXI_DATA_W-1:0] dma_rd_out_data;
+  logic        dma_rd_out_last;
+  logic        dma_rd_error;
+  logic [31:0] rd_bytes;
+
+  // DMA writer <-> core
+  logic        dma_wr_cmd_valid, dma_wr_cmd_ready;
+  logic [31:0] dma_wr_cmd_addr;
+  logic [15:0] dma_wr_cmd_len;
+  logic        dma_wr_in_valid, dma_wr_in_ready;
+  logic [AXI_DATA_W-1:0] dma_wr_in_data;
+  logic        dma_wr_in_last;
+  logic        dma_wr_error;
+  logic [31:0] wr_bytes;
+
+  // ==== Register file ====
+  fa_axi_lite_regs u_regs (
+    .clk(clk), .rst_n(rst_n),
+    .s_axil_awaddr(s_axil_awaddr), .s_axil_awvalid(s_axil_awvalid), .s_axil_awready(s_axil_awready),
+    .s_axil_wdata(s_axil_wdata), .s_axil_wstrb(s_axil_wstrb), .s_axil_wvalid(s_axil_wvalid), .s_axil_wready(s_axil_wready),
+    .s_axil_bresp(s_axil_bresp), .s_axil_bvalid(s_axil_bvalid), .s_axil_bready(s_axil_bready),
+    .s_axil_araddr(s_axil_araddr), .s_axil_arvalid(s_axil_arvalid), .s_axil_arready(s_axil_arready),
+    .s_axil_rdata(s_axil_rdata), .s_axil_rresp(s_axil_rresp), .s_axil_rvalid(s_axil_rvalid), .s_axil_rready(s_axil_rready),
+    .i_busy(core_busy), .i_done(core_done), .i_error(core_error), .i_cycles(core_cycles),
+    .i_perf_run_count(perf_run_count), .i_perf_busy_cycles(perf_busy_cycles),
+    .i_perf_dma_rd_cmd_count(perf_dma_rd_cmd_count), .i_perf_dma_rd_beat_count(perf_dma_rd_beat_count),
+    .i_perf_dma_wr_cmd_count(perf_dma_wr_cmd_count), .i_perf_dma_wr_beat_count(perf_dma_wr_beat_count),
+    .i_perf_comp_launch_count(perf_comp_launch_count), .i_perf_exp_eval_count(perf_exp_eval_count),
+    .i_perf_mul_eval_count(perf_mul_eval_count), .i_perf_recip_req_count(perf_recip_req_count),
+    .i_perf_recip_rsp_count(perf_recip_rsp_count), .i_perf_ms_load_q_cycles(perf_ms_load_q_cycles),
+    .i_perf_ms_init_context_cycles(perf_ms_init_context_cycles), .i_perf_ms_load_k_cycles(perf_ms_load_k_cycles),
+    .i_perf_ms_load_v_cycles(perf_ms_load_v_cycles), .i_perf_ms_compute_cycles(perf_ms_compute_cycles),
+    .i_perf_ms_normalize_cycles(perf_ms_normalize_cycles), .i_perf_ms_write_o_cycles(perf_ms_write_o_cycles),
+    .i_perf_ms_next_q_cycles(perf_ms_next_q_cycles), .i_perf_cs_dp_run_cycles(perf_cs_dp_run_cycles),
+    .i_perf_cs_score_done_cycles(perf_cs_score_done_cycles), .i_perf_cs_softmax_prep_cycles(perf_cs_softmax_prep_cycles),
+    .o_start_pulse(start_pulse), .o_soft_reset(soft_reset), .o_irq_en(irq_en), .o_causal_en(causal_en),
+    .o_q_base(q_base), .o_k_base(k_base), .o_v_base(v_base), .o_o_base(o_base),
+    .o_stride_bytes(stride_bytes), .o_neg_large_q8_8(neg_large_q8_8), .o_scale_q8_8(scale_q8_8)
+  );
+
+  fa_perf_counters u_perf (
+    .clk(clk),
+    .rst_n(rst_n),
+    .i_run_start(start_pulse),
+    .i_soft_reset(soft_reset),
+    .i_ms_load_q(perf_ms_load_q),
+    .i_ms_init_context(perf_ms_init_context),
+    .i_ms_load_k(perf_ms_load_k),
+    .i_ms_load_v(perf_ms_load_v),
+    .i_ms_compute(perf_ms_compute),
+    .i_ms_normalize(perf_ms_normalize),
+    .i_ms_write_o(perf_ms_write_o),
+    .i_ms_next_q(perf_ms_next_q),
+    .i_cs_dp_run(perf_cs_dp_run),
+    .i_cs_score_done(perf_cs_score_done),
+    .i_cs_softmax_prep(perf_cs_softmax_prep),
+    .i_comp_launch(perf_comp_launch),
+    .i_active_rows(perf_active_rows),
+    .i_norm_recip_req(perf_norm_recip_req),
+    .i_norm_recip_rsp(perf_norm_recip_rsp),
+    .i_dma_rd_cmd_fire(m_axi_arvalid && m_axi_arready),
+    .i_dma_rd_beat_fire(dma_rd_out_valid && dma_rd_out_ready),
+    .i_dma_wr_cmd_fire(m_axi_awvalid && m_axi_awready),
+    .i_dma_wr_beat_fire(dma_wr_in_valid && dma_wr_in_ready),
+    .o_run_count(perf_run_count),
+    .o_busy_cycles(perf_busy_cycles),
+    .o_dma_rd_cmd_count(perf_dma_rd_cmd_count),
+    .o_dma_rd_beat_count(perf_dma_rd_beat_count),
+    .o_dma_wr_cmd_count(perf_dma_wr_cmd_count),
+    .o_dma_wr_beat_count(perf_dma_wr_beat_count),
+    .o_comp_launch_count(perf_comp_launch_count),
+    .o_exp_eval_count(perf_exp_eval_count),
+    .o_mul_eval_count(perf_mul_eval_count),
+    .o_recip_req_count(perf_recip_req_count),
+    .o_recip_rsp_count(perf_recip_rsp_count),
+    .o_ms_load_q_cycles(perf_ms_load_q_cycles),
+    .o_ms_init_context_cycles(perf_ms_init_context_cycles),
+    .o_ms_load_k_cycles(perf_ms_load_k_cycles),
+    .o_ms_load_v_cycles(perf_ms_load_v_cycles),
+    .o_ms_compute_cycles(perf_ms_compute_cycles),
+    .o_ms_normalize_cycles(perf_ms_normalize_cycles),
+    .o_ms_write_o_cycles(perf_ms_write_o_cycles),
+    .o_ms_next_q_cycles(perf_ms_next_q_cycles),
+    .o_cs_dp_run_cycles(perf_cs_dp_run_cycles),
+    .o_cs_score_done_cycles(perf_cs_score_done_cycles),
+    .o_cs_softmax_prep_cycles(perf_cs_softmax_prep_cycles)
+  );
+
+  // ==== DMA Reader ====
+  fa_dma_reader #(
+    .AXI_ADDR_W(AXI_ADDR_W), .AXI_DATA_W(AXI_DATA_W), .AXI_ID_W(AXI_ID_W)
+  ) u_dma_rd (
+    .clk(clk), .rst_n(rst_n),
+    .cmd_valid(dma_rd_cmd_valid), .cmd_ready(dma_rd_cmd_ready),
+    .cmd_addr(dma_rd_cmd_addr), .cmd_len(dma_rd_cmd_len),
+    .m_axi_arid(m_axi_arid), .m_axi_araddr(m_axi_araddr), .m_axi_arlen(m_axi_arlen),
+    .m_axi_arsize(m_axi_arsize), .m_axi_arburst(m_axi_arburst),
+    .m_axi_arvalid(m_axi_arvalid), .m_axi_arready(m_axi_arready),
+    .m_axi_rid(m_axi_rid), .m_axi_rdata(m_axi_rdata), .m_axi_rresp(m_axi_rresp),
+    .m_axi_rlast(m_axi_rlast), .m_axi_rvalid(m_axi_rvalid), .m_axi_rready(m_axi_rready),
+    .out_valid(dma_rd_out_valid), .out_data(dma_rd_out_data),
+    .out_last(dma_rd_out_last), .out_ready(dma_rd_out_ready),
+    .error(dma_rd_error), .rd_bytes(rd_bytes)
+  );
+
+  // ==== DMA Writer ====
+  fa_dma_writer #(
+    .AXI_ADDR_W(AXI_ADDR_W), .AXI_DATA_W(AXI_DATA_W), .AXI_ID_W(AXI_ID_W)
+  ) u_dma_wr (
+    .clk(clk), .rst_n(rst_n),
+    .cmd_valid(dma_wr_cmd_valid), .cmd_ready(dma_wr_cmd_ready),
+    .cmd_addr(dma_wr_cmd_addr), .cmd_len(dma_wr_cmd_len),
+    .in_valid(dma_wr_in_valid), .in_ready(dma_wr_in_ready),
+    .in_data(dma_wr_in_data), .in_last(dma_wr_in_last),
+    .m_axi_awid(m_axi_awid), .m_axi_awaddr(m_axi_awaddr), .m_axi_awlen(m_axi_awlen),
+    .m_axi_awsize(m_axi_awsize), .m_axi_awburst(m_axi_awburst),
+    .m_axi_awvalid(m_axi_awvalid), .m_axi_awready(m_axi_awready),
+    .m_axi_wdata(m_axi_wdata), .m_axi_wstrb(m_axi_wstrb), .m_axi_wlast(m_axi_wlast),
+    .m_axi_wvalid(m_axi_wvalid), .m_axi_wready(m_axi_wready),
+    .m_axi_bid(m_axi_bid), .m_axi_bresp(m_axi_bresp),
+    .m_axi_bvalid(m_axi_bvalid), .m_axi_bready(m_axi_bready),
+    .error(dma_wr_error), .wr_bytes(wr_bytes)
+  );
+
+  // ==== Attention Core ====
+  fa_attention_core u_core (
+    .clk(clk), .rst_n(rst_n),
+    .i_start(start_pulse), .i_soft_reset(soft_reset),
+    .i_causal_en(causal_en), .i_scale_q8_8(scale_q8_8),
+    .i_neg_large_q8_8(neg_large_q8_8),
+    .o_busy(core_busy), .o_done(core_done), .o_error(core_error), .o_cycles(core_cycles),
+    .i_q_base(q_base), .i_k_base(k_base), .i_v_base(v_base), .i_o_base(o_base),
+    .i_stride_bytes(stride_bytes),
+    .dma_rd_cmd_valid(dma_rd_cmd_valid), .dma_rd_cmd_ready(dma_rd_cmd_ready),
+    .dma_rd_cmd_addr(dma_rd_cmd_addr), .dma_rd_cmd_len(dma_rd_cmd_len),
+    .dma_rd_data_valid(dma_rd_out_valid), .dma_rd_data_ready(dma_rd_out_ready),
+    .dma_rd_data(dma_rd_out_data), .dma_rd_data_last(dma_rd_out_last),
+    .dma_wr_cmd_valid(dma_wr_cmd_valid), .dma_wr_cmd_ready(dma_wr_cmd_ready),
+    .dma_wr_cmd_addr(dma_wr_cmd_addr), .dma_wr_cmd_len(dma_wr_cmd_len),
+    .dma_wr_data_valid(dma_wr_in_valid), .dma_wr_data_ready(dma_wr_in_ready),
+    .dma_wr_data(dma_wr_in_data), .dma_wr_data_last(dma_wr_in_last),
+    .o_perf_ms_load_q(perf_ms_load_q),
+    .o_perf_ms_init_context(perf_ms_init_context),
+    .o_perf_ms_load_k(perf_ms_load_k),
+    .o_perf_ms_load_v(perf_ms_load_v),
+    .o_perf_ms_compute(perf_ms_compute),
+    .o_perf_ms_normalize(perf_ms_normalize),
+    .o_perf_ms_write_o(perf_ms_write_o),
+    .o_perf_ms_next_q(perf_ms_next_q),
+    .o_perf_cs_dp_run(perf_cs_dp_run),
+    .o_perf_cs_score_done(perf_cs_score_done),
+    .o_perf_cs_softmax_prep(perf_cs_softmax_prep),
+    .o_perf_comp_launch(perf_comp_launch),
+    .o_perf_active_rows(perf_active_rows),
+    .o_perf_norm_recip_req(perf_norm_recip_req),
+    .o_perf_norm_recip_rsp(perf_norm_recip_rsp)
+  );
+
+  // Error aggregation
+  logic unused_irq;
+  assign unused_irq = irq_en;
+endmodule
+module fa_qk_dotprod_slice #(
+  parameter int D        = 64,
+  parameter int DP_LANES = 32
+) (
+  input  logic signed [15:0] i_q_row0 [D],
+  input  logic signed [15:0] i_q_row1 [D],
+  input  logic               i_row1_valid,
+  input  logic signed [15:0] i_k_row  [D],
+  input  logic [$clog2(D)-1:0] i_chunk_idx,
+  output logic signed [39:0] o_partial_sum0,
+  output logic signed [39:0] o_partial_sum1
+);
+
+  always_comb begin
+    int d_idx;
+    o_partial_sum0 = '0;
+    o_partial_sum1 = '0;
+    for (int lane = 0; lane < DP_LANES; lane++) begin
+      d_idx = i_chunk_idx * DP_LANES + lane;
+      o_partial_sum0 = o_partial_sum0 + 40'(i_q_row0[d_idx]) * 40'(i_k_row[d_idx]);
+      if (i_row1_valid)
+        o_partial_sum1 = o_partial_sum1 + 40'(i_q_row1[d_idx]) * 40'(i_k_row[d_idx]);
+    end
+  end
+endmodulemodule fa_o_normalize_block #(
+  parameter int NORM_LANES = 8
+) (
+  input  logic                     i_den_zero,
+  input  logic [31:0]              i_recip_q16_16,
+  input  logic signed [63:0]       i_acc [NORM_LANES],
+  output logic signed [15:0]       o_data [NORM_LANES]
+);
+
+  always_comb begin
+    for (int lane = 0; lane < NORM_LANES; lane++) begin
+      logic signed [63:0] num;
+      logic signed [95:0] norm_mul_q32_32;
+      logic signed [95:0] norm_rounded_q32_32;
+      logic signed [79:0] norm_result;
+
+      num = i_acc[lane];
+      norm_mul_q32_32 = '0;
+      norm_rounded_q32_32 = '0;
+      norm_result = '0;
+      if (i_den_zero) begin
+        norm_result = (num >= 0) ? 80'sd32767 : -80'sd32768;
+      end else begin
+        norm_mul_q32_32 = num * $signed({1'b0, i_recip_q16_16});
+        if (norm_mul_q32_32 >= 0)
+          norm_rounded_q32_32 = norm_mul_q32_32 + 96'sd2147483648;
+        else
+          norm_rounded_q32_32 = norm_mul_q32_32 - 96'sd2147483648;
+        norm_result = norm_rounded_q32_32 >>> 32;
+      end
+
+      if (norm_result > 80'sd32767)
+        o_data[lane] = 16'sd32767;
+      else if (norm_result < -80'sd32768)
+        o_data[lane] = -16'sd32768;
+      else
+        o_data[lane] = norm_result[15:0];
+    end
+  end
+endmodule// ============================================================================
+// fa_row_context_rf.sv
+// Per-row register file for online softmax state: m, l, acc[D].
+// Supports multi-tile accumulation: state persists across K/V tiles.
+// ============================================================================
+module fa_row_context_rf #(
+  parameter int NUM_ROWS = 32,     // Tq: rows of Q tile
+  parameter int D        = 64,
+  parameter int M_W      = 16,     // width of m (Q8.8)
+  parameter int L_W      = 32,     // width of l (Q16.16)
+  parameter int ACC_W    = 32      // width of each acc element (Q16.16)
+) (
+  input  logic                      clk,
+  input  logic                      rst_n,
+
+  // ---- Init: reset row state (called at start of Q tile) ----
+  input  logic                      init,         // pulse: init all rows
+  input  logic signed [M_W-1:0]     init_m,       // typically NEG_LARGE
+
+  // ---- Read row state ----
+  input  logic [$clog2(NUM_ROWS)-1:0] rd_row,
+  output logic signed [M_W-1:0]      rd_m,
+  output logic [L_W-1:0]             rd_l,
+  output logic signed [ACC_W-1:0]    rd_acc [D],
+
+  // ---- Write row state ----
+  input  logic                        wr_en,
+  input  logic [$clog2(NUM_ROWS)-1:0] wr_row,
+  input  logic signed [M_W-1:0]       wr_m,
+  input  logic [L_W-1:0]              wr_l,
+  input  logic signed [ACC_W-1:0]     wr_acc [D]
+);
+
+  logic signed [M_W-1:0]   m_rf   [NUM_ROWS];
+  logic [L_W-1:0]          l_rf   [NUM_ROWS];
+  logic signed [ACC_W-1:0] acc_rf [NUM_ROWS][D];
+
+  // Read
+  assign rd_m = m_rf[rd_row];
+  assign rd_l = l_rf[rd_row];
+  generate
+    for (genvar k = 0; k < D; k++) begin : gen_rd_acc
+      assign rd_acc[k] = acc_rf[rd_row][k];
+    end
+  endgenerate
+
+  // Write / Init
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      for (int r = 0; r < NUM_ROWS; r++) begin
+        m_rf[r] <= '0;
+        l_rf[r] <= '0;
+        for (int k = 0; k < D; k++)
+          acc_rf[r][k] <= '0;
+      end
+    end else if (init) begin
+      for (int r = 0; r < NUM_ROWS; r++) begin
+        m_rf[r] <= init_m;
+        l_rf[r] <= '0;
+        for (int k = 0; k < D; k++)
+          acc_rf[r][k] <= '0;
+      end
+    end else if (wr_en) begin
+      m_rf[wr_row]   <= wr_m;
+      l_rf[wr_row]   <= wr_l;
+      for (int k = 0; k < D; k++)
+        acc_rf[wr_row][k] <= wr_acc[k];
+    end
+  end
+endmodule
+// ============================================================================
+// fa_tile_compute_engine.sv
+// Tile-level compute engine for FlashAttention.
+// Processes one (Q_tile, K_tile, V_tile) combination:
+//   1) Computes score = Q_i · K_j / scale  for each (i,j)
+//   2) Online softmax update of m/l/acc per row
+// Reads K/V from tile buffers, Q from Q buffer.
+// Updates row context RF with new m/l/acc.
+// ============================================================================
+module fa_tile_compute_engine #(
+  parameter int TQ       = 32,   // Q tile rows
+  parameter int TK       = 64,   // K tile rows (= columns of score block)
+  parameter int D        = 64,   // head dim
+  parameter int SCORE_W  = 40    // dot-product accumulator width
+) (
+  input  logic                     clk,
+  input  logic                     rst_n,
+
+  // ---- Control ----
+  input  logic                     start,          // pulse: begin tile compute
+  output logic                     done,           // pulse: tile compute finished
+  input  logic                     causal_en,
+  input  logic signed [15:0]       neg_large_q8_8,
+  input  logic signed [15:0]       scale_q8_8,     // 1/sqrt(d) in Q8.8
+  input  logic [7:0]               q_tile_row_base,// global row offset for causal
+  input  logic [7:0]               k_tile_col_base,// global col offset for causal
+
+  // ---- Q buffer read ----
+  output logic [$clog2(TQ)-1:0]    q_rd_row,
+  output logic [$clog2(D)-1:0]     q_rd_col,
+  input  logic signed [15:0]       q_rd_data,
+
+  // ---- K buffer read ----
+  output logic [$clog2(TK)-1:0]    k_rd_row,
+  output logic [$clog2(D)-1:0]     k_rd_col,
+  input  logic signed [15:0]       k_rd_data,
+
+  // ---- V buffer read ----
+  output logic [$clog2(TK)-1:0]    v_rd_row,
+  output logic [$clog2(D)-1:0]     v_rd_col,
+  input  logic signed [15:0]       v_rd_data,
+
+  // ---- Row context RF interface ----
+  output logic [$clog2(TQ)-1:0]    ctx_rd_row,
+  input  logic signed [15:0]       ctx_rd_m,
+  input  logic [31:0]              ctx_rd_l,
+  input  logic signed [31:0]       ctx_rd_acc [D],
+
+  output logic                     ctx_wr_en,
+  output logic [$clog2(TQ)-1:0]    ctx_wr_row,
+  output logic signed [15:0]       ctx_wr_m,
+  output logic [31:0]              ctx_wr_l,
+  output logic signed [31:0]       ctx_wr_acc [D]
+);
+
+  // ---- State machine ----
+  typedef enum logic [3:0] {
+    IDLE,
+    DOTPROD_INIT,    // init dot product for (qi, kj)
+    DOTPROD_RUN,     // accumulate d elements
+    DOTPROD_SCALE,   // multiply by scale, apply causal mask
+    SOFTMAX_UPDATE,  // online softmax update with score & V
+    PV_INIT,         // init P*V accumulation for one (qi, kj) pair
+    PV_RUN,          // accumulate P_{ij} * V_j[k] for all k
+    NEXT_KJ,         // advance to next kj
+    NEXT_QI,         // advance to next qi (or done)
+    TILE_DONE
+  } state_t;
+  state_t state;
+
+  logic [$clog2(TQ)-1:0] qi;
+  logic [$clog2(TK)-1:0] kj;
+  logic [$clog2(D)-1:0]  d_cnt;
+
+  // Dot product accumulator
+  logic signed [SCORE_W-1:0] dp_acc;
+  logic signed [31:0]        score_q16_16;
+  logic signed [15:0]        score_q8_8;
+
+  // Online softmax intermediate
+  logic signed [15:0] m_old, m_new;
+  logic signed [15:0] diff_old, diff_new;
+  logic [15:0]        exp_old_q1_15, exp_new_q1_15;
+  logic [31:0]        l_old, l_new;
+  logic signed [31:0] acc_old [D];
+  logic signed [31:0] acc_new [D];
+
+  // Exp units
+  fa_exp_pwl_8seg_q1_15 u_exp_old (.i_x_q8_8(diff_old), .o_exp_q1_15(exp_old_q1_15));
+  fa_exp_pwl_8seg_q1_15 u_exp_new (.i_x_q8_8(diff_new), .o_exp_q1_15(exp_new_q1_15));
+
+  // Scale multiplication: score_raw * scale
+  logic signed [31:0] scaled_prod;
+  fa_mul_sat_q8_8 u_scale_mul (
+    .i_a_q8_8(dp_acc[23:8]),  // take Q8.8 portion of accumulator
+    .i_b_q8_8(scale_q8_8),
+    .o_y_q8_8(score_q8_8)
+  );
+
+  always_comb begin
+    scaled_prod = '0; // unused, kept for clarity
+
+    // Q/K address generation
+    q_rd_row = qi;
+    q_rd_col = d_cnt;
+    k_rd_row = kj;
+    k_rd_col = d_cnt;
+    v_rd_row = kj;
+    v_rd_col = d_cnt;
+
+    // Row context read
+    ctx_rd_row = qi;
+
+    // Softmax intermediates
+    m_old = ctx_rd_m;
+    if (score_q8_8 > m_old)
+      m_new = score_q8_8;
+    else
+      m_new = m_old;
+    diff_old = m_old - m_new;
+    diff_new = score_q8_8 - m_new;
+    l_old = ctx_rd_l;
+  end
+
+  // P*V accumulation address
+  always_comb begin
+    // Default: suppress writes
+    ctx_wr_en  = 1'b0;
+    ctx_wr_row = qi;
+    ctx_wr_m   = m_new;
+    ctx_wr_l   = l_new;
+    for (int k = 0; k < D; k++)
+      ctx_wr_acc[k] = acc_new[k];
+  end
+
+  // l update
+  always_comb begin
+    logic [63:0] l_scaled_wide;
+    logic [31:0] l_scaled;
+    logic [31:0] l_term;
+    l_scaled_wide = l_old * exp_old_q1_15;
+    l_scaled = l_scaled_wide[46:15];
+    l_term = {15'd0, exp_new_q1_15, 1'b0};
+    l_new = l_scaled + l_term;
+  end
+
+  // acc update
+  always_comb begin
+    for (int k = 0; k < D; k++) begin
+      logic signed [63:0] acc_scaled_wide;
+      logic signed [31:0] acc_scaled;
+      logic signed [33:0] v_mul;
+      logic signed [31:0] v_term;
+      acc_scaled_wide = ctx_rd_acc[k] * $signed({1'b0, exp_old_q1_15});
+      acc_scaled = acc_scaled_wide[46:15];
+      v_mul = $signed({1'b0, exp_new_q1_15}) * v_rd_data;
+      v_term = {{5{v_mul[33]}}, v_mul[33:7]};
+      acc_new[k] = acc_scaled + v_term;
+    end
+  end
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      state  <= IDLE;
+      qi     <= '0;
+      kj     <= '0;
+      d_cnt  <= '0;
+      dp_acc <= '0;
+      done   <= 1'b0;
+    end else begin
+      done <= 1'b0;
+
+      case (state)
+        IDLE: begin
+          if (start) begin
+            qi    <= '0;
+            kj    <= '0;
+            state <= DOTPROD_INIT;
+          end
+        end
+
+        DOTPROD_INIT: begin
+          dp_acc <= '0;
+          d_cnt  <= '0;
+          state  <= DOTPROD_RUN;
+        end
+
+        DOTPROD_RUN: begin
+          // Each cycle: read Q[qi][d_cnt] and K[kj][d_cnt], accumulate
+          dp_acc <= dp_acc + SCORE_W'(q_rd_data) * SCORE_W'(k_rd_data);
+          d_cnt  <= d_cnt + 1'b1;
+          if (d_cnt == D - 1) begin
+            state <= DOTPROD_SCALE;
+          end
+        end
+
+        DOTPROD_SCALE: begin
+          // score_q8_8 is ready from u_scale_mul
+          // Apply causal mask
+          if (causal_en && (q_tile_row_base + {3'b0, qi}) < (k_tile_col_base + {2'b0, kj})) begin
+            // Masked position
+            // Override score with neg_large - handled by forcing diff_new to large negative
+          end
+          state <= SOFTMAX_UPDATE;
+        end
+
+        SOFTMAX_UPDATE: begin
+          // Write back updated m/l/acc to context RF
+          // v_rd_data is used in acc_new computation combinationally
+          // For proper V accumulation, we need kj to index V
+          // The acc_new uses v_rd_data which is V[kj][d_cnt]
+          // Since we need all D elements of V_j, we do PV separately
+          // For now, write partial update (m, l only)
+          // Then do PV accumulation
+          ctx_wr_en <= 1'b1;
+          state     <= NEXT_KJ;
+        end
+
+        NEXT_KJ: begin
+          ctx_wr_en <= 1'b0;
+          if (kj == TK - 1) begin
+            kj    <= '0;
+            state <= NEXT_QI;
+          end else begin
+            kj    <= kj + 1'b1;
+            state <= DOTPROD_INIT;
+          end
+        end
+
+        NEXT_QI: begin
+          if (qi == TQ - 1) begin
+            state <= TILE_DONE;
+          end else begin
+            qi    <= qi + 1'b1;
+            kj    <= '0;
+            state <= DOTPROD_INIT;
+          end
+        end
+
+        TILE_DONE: begin
+          done  <= 1'b1;
+          state <= IDLE;
+        end
+
+        default: state <= IDLE;
+      endcase
+    end
+  end
+endmodule
+// ============================================================================
+// fa_attention_core.sv
+// FlashAttention core: tile-loop controller + compute engine + row context.
+// Orchestrates the outer Q-loop and inner K/V-loop, interfacing with
+// DMA reader/writer and tile buffers managed by the top level.
+// ============================================================================
+module fa_attention_core #(
+  parameter int SEQ_LEN   = 256,
+  parameter int D         = 64,
+  parameter int TQ        = 32,   // Q tile rows
+  parameter int TK        = 64,   // K/V tile rows
+  parameter int BUS_W     = 128
+) (
+  input  logic                     clk,
+  input  logic                     rst_n,
+
+  // ---- Control ----
+  input  logic                     i_start,
+  input  logic                     i_soft_reset,
+  input  logic                     i_causal_en,
+  input  logic signed [15:0]       i_scale_q8_8,
+  input  logic signed [15:0]       i_neg_large_q8_8,
+  output logic                     o_busy,
+  output logic                     o_done,
+  output logic                     o_error,
+  output logic [31:0]              o_cycles,
+
+  // ---- Address config ----
+  input  logic [63:0]              i_q_base,
+  input  logic [63:0]              i_k_base,
+  input  logic [63:0]              i_v_base,
+  input  logic [63:0]              i_o_base,
+  input  logic [31:0]              i_stride_bytes,
+
+  // ---- DMA reader command ----
+  output logic                     dma_rd_cmd_valid,
+  input  logic                     dma_rd_cmd_ready,
+  output logic [31:0]              dma_rd_cmd_addr,
+  output logic [15:0]              dma_rd_cmd_len,
+
+  // ---- DMA reader data (from external reader) ----
+  input  logic                     dma_rd_data_valid,
+  output logic                     dma_rd_data_ready,
+  input  logic [BUS_W-1:0]         dma_rd_data,
+  input  logic                     dma_rd_data_last,
+
+  // ---- DMA writer command ----
+  output logic                     dma_wr_cmd_valid,
+  input  logic                     dma_wr_cmd_ready,
+  output logic [31:0]              dma_wr_cmd_addr,
+  output logic [15:0]              dma_wr_cmd_len,
+
+  // ---- DMA writer data ----
+  output logic                     dma_wr_data_valid,
+  input  logic                     dma_wr_data_ready,
+  output logic [BUS_W-1:0]         dma_wr_data,
+  output logic                     dma_wr_data_last,
+
+  // ---- Performance hooks ----
+  output logic                     o_perf_ms_load_q,
+  output logic                     o_perf_ms_init_context,
+  output logic                     o_perf_ms_load_k,
+  output logic                     o_perf_ms_load_v,
+  output logic                     o_perf_ms_compute,
+  output logic                     o_perf_ms_normalize,
+  output logic                     o_perf_ms_write_o,
+  output logic                     o_perf_ms_next_q,
+  output logic                     o_perf_cs_dp_run,
+  output logic                     o_perf_cs_score_done,
+  output logic                     o_perf_cs_softmax_prep,
+  output logic                     o_perf_comp_launch,
+  output logic [1:0]               o_perf_active_rows,
+  output logic                     o_perf_norm_recip_req,
+  output logic                     o_perf_norm_recip_rsp
+);
+
+  // ---- Parameters ----
+  localparam int NUM_Q_TILES = SEQ_LEN / TQ;  // 8
+  localparam int NUM_K_TILES = SEQ_LEN / TK;  // 4
+  localparam int ELEMS_PER_BEAT = BUS_W / 16; // 8
+  localparam int BEATS_PER_ROW  = D / ELEMS_PER_BEAT; // 8
+  localparam int BEATS_PER_TILE_KV = TK * BEATS_PER_ROW; // 512
+  localparam int BEATS_PER_TILE_Q  = TQ * BEATS_PER_ROW; // 256
+  localparam int DP_LANES = (D < 32) ? D : 32;
+  localparam int DP_CHUNKS = D / DP_LANES;
+  localparam int ROW_PAR = 2;
+  localparam int NORM_LANES = 8;
+  localparam int RECIP_LAT = 10;
+
+  // ---- Master state machine ----
+  typedef enum logic [3:0] {
+    S_IDLE,
+    S_LOAD_Q,         // DMA fetch Q tile
+    S_INIT_CONTEXT,   // Init row context for new Q tile
+    S_LOAD_K,         // DMA fetch K tile
+    S_LOAD_V,         // DMA fetch V tile
+    S_COMPUTE,        // Tile compute (QK^T + online softmax + PV)
+    S_NORMALIZE,      // Final row normalization (acc/l)
+    S_WRITE_O,        // DMA write O tile
+    S_NEXT_Q,         // Advance Q tile index
+    S_DONE
+  } master_state_t;
+  master_state_t ms;
+
+  logic [$clog2(NUM_Q_TILES):0] q_tile_idx;
+  logic [$clog2(NUM_K_TILES):0] k_tile_idx;
+  logic [31:0] cycle_counter;
+
+  // ---- Q local buffer ----
+  logic signed [15:0] q_buf [TQ][D];
+  logic [$clog2(TQ*D/ELEMS_PER_BEAT):0] q_fill_cnt;
+
+  // ---- K/V local buffers (ping-pong) ----
+  logic signed [15:0] k_buf0 [TK][D];
+  logic signed [15:0] k_buf1 [TK][D];
+  logic signed [15:0] v_buf0 [TK][D];
+  logic signed [15:0] v_buf1 [TK][D];
+  logic [$clog2(TK*D/ELEMS_PER_BEAT):0] kv_fill_cnt;
+  logic active_bank;
+  logic pref_target_bank;
+
+  typedef enum logic [2:0] {
+    PF_IDLE,
+    PF_CMD_K,
+    PF_DATA_K,
+    PF_CMD_V,
+    PF_DATA_V,
+    PF_DONE
+  } prefetch_state_t;
+  prefetch_state_t pf_state;
+  logic [$clog2(TK*D/ELEMS_PER_BEAT):0] pf_fill_cnt;
+
+  // ---- Row context (m, l, acc) ----
+  logic signed [15:0] row_m   [TQ];
+  logic [31:0]        row_l   [TQ];
+  logic signed [63:0] row_acc [TQ][D];
+
+  // ---- Compute engine state ----
+  logic [$clog2(TQ)-1:0] comp_qpair;
+  logic [$clog2(TK)-1:0] comp_kj;
+  logic [$clog2(D)-1:0]  comp_d;
+  logic signed [39:0]    dp_acc0;
+  logic signed [39:0]    dp_acc1;
+  logic signed [15:0]    score_q8_8_0;
+  logic signed [15:0]    score_q8_8_1;
+
+  // ---- Normalization / write-out state ----
+  logic [$clog2(TQ)-1:0] norm_qi;
+  logic [$clog2(D)-1:0]  norm_d;
+  logic [$clog2(TQ*D/ELEMS_PER_BEAT):0] o_write_cnt;
+  logic                  norm_recip_in_valid;
+  logic                  norm_recip_out_valid;
+  logic [31:0]           norm_recip_out_q16_16;
+  logic                  norm_recip_pending;
+  logic                  norm_row_ready;
+  logic                  norm_row_den_zero;
+  logic [31:0]           norm_row_recip;
+
+  // ---- O output buffer ----
+  logic signed [15:0] o_buf [TQ][D];
+
+  logic [15:0] exp_old_out0, exp_new_out0;
+  logic [15:0] exp_old_out1, exp_new_out1;
+
+  // Inner compute FSM
+  typedef enum logic [3:0] {
+    C_IDLE,
+    C_DP_RUN,
+    C_SCORE_DONE,
+    C_SOFTMAX_PREP,
+    C_DONE
+  } comp_state_t;
+  comp_state_t cs;
+
+  logic comp_start, comp_done;
+  logic signed [15:0] m_old0, m_new0;
+  logic signed [15:0] m_old1, m_new1;
+  logic [31:0] l_scaled0, l_term0, l_new_val0;
+  logic [31:0] l_scaled1, l_term1, l_new_val1;
+  logic [31:0] l_new_safe0, l_new_safe1;
+  logic [63:0] l_scaled_wide0;
+  logic [63:0] l_scaled_wide1;
+  logic signed [39:0] dp_partial_sum0;
+  logic signed [39:0] dp_partial_sum1;
+  logic                     comp_row1_valid;
+  logic signed [15:0]       dp_q_row0 [D];
+  logic signed [15:0]       dp_q_row1 [D];
+  logic signed [15:0]       dp_k_row  [D];
+  logic signed [63:0]       sm_acc_old0 [D];
+  logic signed [63:0]       sm_acc_old1 [D];
+  logic signed [15:0]       sm_v_row    [D];
+  logic signed [63:0]       sm_acc_new0 [D];
+  logic signed [63:0]       sm_acc_new1 [D];
+  logic signed [63:0]       norm_acc_chunk [NORM_LANES];
+  logic signed [15:0]       norm_o_chunk   [NORM_LANES];
+
+  always_comb begin
+    m_old0 = row_m[comp_qpair];
+    m_old1 = (comp_qpair + 1 < TQ) ? row_m[comp_qpair + 1] : i_neg_large_q8_8;
+    comp_row1_valid = (comp_qpair + 1 < TQ);
+    for (int k = 0; k < D; k++) begin
+      dp_q_row0[k] = q_buf[comp_qpair][k];
+      dp_q_row1[k] = comp_row1_valid ? q_buf[comp_qpair + 1][k] : 16'sd0;
+      dp_k_row[k] = active_bank ? k_buf1[comp_kj][k] : k_buf0[comp_kj][k];
+      sm_acc_old0[k] = row_acc[comp_qpair][k];
+      sm_acc_old1[k] = comp_row1_valid ? row_acc[comp_qpair + 1][k] : 64'sd0;
+      sm_v_row[k] = active_bank ? v_buf1[comp_kj][k] : v_buf0[comp_kj][k];
+    end
+    for (int lane = 0; lane < NORM_LANES; lane++) begin
+      if ((norm_d + lane) < D)
+        norm_acc_chunk[lane] = row_acc[norm_qi][norm_d + lane];
+      else
+        norm_acc_chunk[lane] = 64'sd0;
+    end
+  end
+
+  fa_qk_dotprod_slice #(
+    .D(D),
+    .DP_LANES(DP_LANES)
+  ) u_qk_dotprod_slice (
+    .i_q_row0(dp_q_row0),
+    .i_q_row1(dp_q_row1),
+    .i_row1_valid(comp_row1_valid),
+    .i_k_row(dp_k_row),
+    .i_chunk_idx(comp_d),
+    .o_partial_sum0(dp_partial_sum0),
+    .o_partial_sum1(dp_partial_sum1)
+  );
+
+  // Scale mul: dp_acc -> score
+  // Extract Q8.8 from 40-bit accumulator (which is in Q16.16 after multiply)
+  // dp_acc is sum of (Q8.8 * Q8.8) = Q16.16, so shift >>8 gives Q8.8
+  logic signed [15:0] dp_to_q8_8_0;
+  logic signed [15:0] dp_to_q8_8_1;
+  logic signed [31:0] dp_shifted0;
+  logic signed [31:0] dp_shifted1;
+  always_comb begin
+    dp_shifted0 = dp_acc0[39:8]; // Q8.8 portion (with extra precision)
+    dp_shifted1 = dp_acc1[39:8]; // Q8.8 portion (with extra precision)
+  end
+  fa_mul_sat_q8_8 u_score_scale0 (
+    .i_a_q8_8(dp_shifted0[15:0]),
+    .i_b_q8_8(i_scale_q8_8),
+    .o_y_q8_8(dp_to_q8_8_0)
+  );
+  fa_mul_sat_q8_8 u_score_scale1 (
+    .i_a_q8_8(dp_shifted1[15:0]),
+    .i_b_q8_8(i_scale_q8_8),
+    .o_y_q8_8(dp_to_q8_8_1)
+  );
+
+  fa_online_softmax_pair #(
+    .D(D)
+  ) u_online_softmax_pair (
+    .i_row1_valid(comp_row1_valid),
+    .i_neg_large_q8_8(i_neg_large_q8_8),
+    .i_score0(score_q8_8_0),
+    .i_score1(score_q8_8_1),
+    .i_m_old0(m_old0),
+    .i_m_old1(m_old1),
+    .i_l_old0(row_l[comp_qpair]),
+    .i_l_old1(comp_row1_valid ? row_l[comp_qpair + 1] : 32'd0),
+    .i_acc_old0(sm_acc_old0),
+    .i_acc_old1(sm_acc_old1),
+    .i_v_row(sm_v_row),
+    .o_m_new0(m_new0),
+    .o_m_new1(m_new1),
+    .o_l_new0(l_new_safe0),
+    .o_l_new1(l_new_safe1),
+    .o_exp_old0(exp_old_out0),
+    .o_exp_new0(exp_new_out0),
+    .o_exp_old1(exp_old_out1),
+    .o_exp_new1(exp_new_out1),
+    .o_acc_new0(sm_acc_new0),
+    .o_acc_new1(sm_acc_new1)
+  );
+
+  fa_recip_nr_q16_16 u_norm_recip (
+    .clk(clk),
+    .rst_n(rst_n),
+    .i_valid(norm_recip_in_valid),
+    .i_x_q16_16(row_l[norm_qi]),
+    .o_valid(norm_recip_out_valid),
+    .o_recip_q16_16(norm_recip_out_q16_16)
+  );
+
+  fa_o_normalize_block #(
+    .NORM_LANES(NORM_LANES)
+  ) u_o_normalize_block (
+    .i_den_zero(norm_row_den_zero),
+    .i_recip_q16_16(norm_row_recip),
+    .i_acc(norm_acc_chunk),
+    .o_data(norm_o_chunk)
+  );
+
+  // ---- Inner compute FSM ----
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      cs        <= C_IDLE;
+      comp_qpair <= '0;
+      comp_kj   <= '0;
+      comp_d    <= '0;
+      dp_acc0   <= '0;
+      dp_acc1   <= '0;
+      comp_done <= 1'b0;
+      score_q8_8_0 <= '0;
+      score_q8_8_1 <= '0;
+    end else begin
+      comp_done <= 1'b0;
+
+      case (cs)
+        C_IDLE: begin
+          if (comp_start) begin
+            comp_qpair <= '0;
+            comp_kj <= '0;
+            dp_acc0 <= '0;
+            dp_acc1 <= '0;
+            comp_d <= '0;
+            cs      <= C_DP_RUN;
+          end
+        end
+
+        C_DP_RUN: begin
+          dp_acc0 <= dp_acc0 + dp_partial_sum0;
+          dp_acc1 <= dp_acc1 + dp_partial_sum1;
+          if (comp_d == DP_CHUNKS - 1)
+            cs <= C_SCORE_DONE;
+          else
+            comp_d <= comp_d + 1'b1;
+        end
+
+        C_SCORE_DONE: begin
+          // Apply scale
+          score_q8_8_0 <= dp_to_q8_8_0;
+          score_q8_8_1 <= dp_to_q8_8_1;
+          // Apply causal mask
+          if (i_causal_en) begin
+            if ((q_tile_idx * TQ + comp_qpair) < (k_tile_idx * TK + comp_kj))
+              score_q8_8_0 <= i_neg_large_q8_8;
+            else
+              score_q8_8_0 <= dp_to_q8_8_0;
+
+            if ((comp_qpair + 1 < TQ) && ((q_tile_idx * TQ + comp_qpair + 1) < (k_tile_idx * TK + comp_kj)))
+              score_q8_8_1 <= i_neg_large_q8_8;
+            else
+              score_q8_8_1 <= dp_to_q8_8_1;
+          end
+          cs <= C_SOFTMAX_PREP;
+        end
+
+        C_SOFTMAX_PREP: begin
+          // Update row context: m, l
+          row_m[comp_qpair] <= m_new0;
+          row_l[comp_qpair] <= l_new_safe0;
+          if (comp_qpair + 1 < TQ) begin
+            row_m[comp_qpair + 1] <= m_new1;
+            row_l[comp_qpair + 1] <= l_new_safe1;
+          end
+
+          for (int k = 0; k < D; k++) begin
+            row_acc[comp_qpair][k] <= sm_acc_new0[k];
+            if (comp_qpair + 1 < TQ)
+              row_acc[comp_qpair + 1][k] <= sm_acc_new1[k];
+          end
+
+          if (comp_kj == TK - 1) begin
+            if (comp_qpair >= TQ - ROW_PAR) begin
+              cs <= C_DONE;
+            end else begin
+              comp_qpair <= comp_qpair + ROW_PAR;
+              comp_kj <= '0;
+              dp_acc0 <= '0;
+              dp_acc1 <= '0;
+              comp_d <= '0;
+              cs      <= C_DP_RUN;
+            end
+          end else begin
+            comp_kj <= comp_kj + 1'b1;
+            dp_acc0 <= '0;
+            dp_acc1 <= '0;
+            comp_d <= '0;
+            cs      <= C_DP_RUN;
+          end
+        end
+
+        C_DONE: begin
+          comp_done <= 1'b1;
+          cs        <= C_IDLE;
+        end
+
+        default: cs <= C_IDLE;
+      endcase
+    end
+  end
+
+  // ---- Master FSM ----
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      ms            <= S_IDLE;
+      q_tile_idx    <= '0;
+      k_tile_idx    <= '0;
+      cycle_counter <= '0;
+      q_fill_cnt    <= '0;
+      kv_fill_cnt   <= '0;
+      active_bank   <= 1'b0;
+      pref_target_bank <= 1'b1;
+      pf_state      <= PF_IDLE;
+      pf_fill_cnt   <= '0;
+      norm_qi       <= '0;
+      norm_d        <= '0;
+      norm_recip_in_valid <= 1'b0;
+      norm_recip_pending  <= 1'b0;
+      norm_row_ready      <= 1'b0;
+      norm_row_den_zero   <= 1'b0;
+      norm_row_recip      <= 32'd0;
+      o_write_cnt   <= '0;
+      o_busy        <= 1'b0;
+      o_done        <= 1'b0;
+      o_error       <= 1'b0;
+      comp_start    <= 1'b0;
+      dma_rd_cmd_valid <= 1'b0;
+      dma_wr_cmd_valid <= 1'b0;
+    end else begin
+      o_done     <= 1'b0;
+      comp_start <= 1'b0;
+      dma_rd_cmd_valid <= 1'b0;
+      dma_wr_cmd_valid <= 1'b0;
+      norm_recip_in_valid <= 1'b0;
+
+      if (i_soft_reset) begin
+        ms         <= S_IDLE;
+        o_busy     <= 1'b0;
+        o_error    <= 1'b0;
+        norm_recip_pending <= 1'b0;
+        norm_row_ready     <= 1'b0;
+        norm_row_den_zero  <= 1'b0;
+        norm_row_recip     <= 32'd0;
+      end else begin
+
+      case (ms)
+        S_IDLE: begin
+          if (i_start && !o_busy) begin
+            o_busy        <= 1'b1;
+            cycle_counter <= '0;
+            q_tile_idx    <= '0;
+            k_tile_idx    <= '0;
+            active_bank   <= 1'b0;
+            pref_target_bank <= 1'b1;
+            pf_state      <= PF_IDLE;
+            pf_fill_cnt   <= '0;
+            ms            <= S_LOAD_Q;
+            q_fill_cnt    <= '0;
+          end
+        end
+
+        // -- Load Q tile via DMA --
+        S_LOAD_Q: begin
+          cycle_counter <= cycle_counter + 1'b1;
+          if (q_fill_cnt == 0) begin
+            // Issue DMA command for Q tile
+            dma_rd_cmd_valid <= 1'b1;
+            dma_rd_cmd_addr  <= i_q_base[31:0] + q_tile_idx * TQ * i_stride_bytes;
+            dma_rd_cmd_len   <= BEATS_PER_TILE_Q - 1;
+            if (dma_rd_cmd_ready) begin
+              q_fill_cnt <= q_fill_cnt + 1'b1;
+            end
+          end else if (q_fill_cnt <= BEATS_PER_TILE_Q) begin
+            // Receive Q data
+            if (dma_rd_data_valid) begin
+              for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
+                int flat;
+                flat = (q_fill_cnt - 1) * ELEMS_PER_BEAT + i;
+                q_buf[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+              end
+              q_fill_cnt <= q_fill_cnt + 1'b1;
+              if (dma_rd_data_last || q_fill_cnt == BEATS_PER_TILE_Q)
+                ms <= S_INIT_CONTEXT;
+            end
+          end
+        end
+
+        S_INIT_CONTEXT: begin
+          cycle_counter <= cycle_counter + 1'b1;
+          for (int r = 0; r < TQ; r++) begin
+            row_m[r]   <= i_neg_large_q8_8;
+            row_l[r]   <= 32'd0;
+            for (int k = 0; k < D; k++)
+              row_acc[r][k] <= 64'sd0;
+          end
+          k_tile_idx <= '0;
+          active_bank <= 1'b0;
+          pref_target_bank <= 1'b1;
+          pf_state <= PF_IDLE;
+          pf_fill_cnt <= '0;
+          ms         <= S_LOAD_K;
+          kv_fill_cnt <= '0;
+        end
+
+        // -- Load K tile --
+        S_LOAD_K: begin
+          cycle_counter <= cycle_counter + 1'b1;
+          if (kv_fill_cnt == 0) begin
+            dma_rd_cmd_valid <= 1'b1;
+            dma_rd_cmd_addr  <= i_k_base[31:0] + k_tile_idx * TK * i_stride_bytes;
+            dma_rd_cmd_len   <= BEATS_PER_TILE_KV - 1;
+            if (dma_rd_cmd_ready)
+              kv_fill_cnt <= kv_fill_cnt + 1'b1;
+          end else if (kv_fill_cnt <= BEATS_PER_TILE_KV) begin
+            if (dma_rd_data_valid) begin
+              for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
+                int flat;
+                flat = (kv_fill_cnt - 1) * ELEMS_PER_BEAT + i;
+                if (active_bank)
+                  k_buf1[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                else
+                  k_buf0[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+              end
+              kv_fill_cnt <= kv_fill_cnt + 1'b1;
+              if (dma_rd_data_last || kv_fill_cnt == BEATS_PER_TILE_KV) begin
+                kv_fill_cnt <= '0;
+                ms          <= S_LOAD_V;
+              end
+            end
+          end
+        end
+
+        // -- Load V tile --
+        S_LOAD_V: begin
+          cycle_counter <= cycle_counter + 1'b1;
+          if (kv_fill_cnt == 0) begin
+            dma_rd_cmd_valid <= 1'b1;
+            dma_rd_cmd_addr  <= i_v_base[31:0] + k_tile_idx * TK * i_stride_bytes;
+            dma_rd_cmd_len   <= BEATS_PER_TILE_KV - 1;
+            if (dma_rd_cmd_ready)
+              kv_fill_cnt <= kv_fill_cnt + 1'b1;
+          end else if (kv_fill_cnt <= BEATS_PER_TILE_KV) begin
+            if (dma_rd_data_valid) begin
+              for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
+                int flat;
+                flat = (kv_fill_cnt - 1) * ELEMS_PER_BEAT + i;
+                if (active_bank)
+                  v_buf1[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                else
+                  v_buf0[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+              end
+              kv_fill_cnt <= kv_fill_cnt + 1'b1;
+              if (dma_rd_data_last || kv_fill_cnt == BEATS_PER_TILE_KV) begin
+                ms <= S_COMPUTE;
+              end
+            end
+          end
+        end
+
+        // -- Tile compute --
+        S_COMPUTE: begin
+          cycle_counter <= cycle_counter + 1'b1;
+
+          // Prefetch next K/V tile into the opposite bank while current tile computes.
+          case (pf_state)
+            PF_IDLE: begin
+              if (k_tile_idx < NUM_K_TILES - 1) begin
+                pref_target_bank <= ~active_bank;
+                pf_fill_cnt <= '0;
+                pf_state <= PF_CMD_K;
+              end
+            end
+
+            PF_CMD_K: begin
+              dma_rd_cmd_valid <= 1'b1;
+              dma_rd_cmd_addr  <= i_k_base[31:0] + (k_tile_idx + 1) * TK * i_stride_bytes;
+              dma_rd_cmd_len   <= BEATS_PER_TILE_KV - 1;
+              if (dma_rd_cmd_ready) begin
+                pf_fill_cnt <= 1;
+                pf_state <= PF_DATA_K;
+              end
+            end
+
+            PF_DATA_K: begin
+              if (dma_rd_data_valid) begin
+                for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
+                  int flat;
+                  flat = (pf_fill_cnt - 1) * ELEMS_PER_BEAT + i;
+                  if (pref_target_bank)
+                    k_buf1[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                  else
+                    k_buf0[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                end
+                pf_fill_cnt <= pf_fill_cnt + 1'b1;
+                if (dma_rd_data_last || pf_fill_cnt == BEATS_PER_TILE_KV) begin
+                  pf_fill_cnt <= '0;
+                  pf_state <= PF_CMD_V;
+                end
+              end
+            end
+
+            PF_CMD_V: begin
+              dma_rd_cmd_valid <= 1'b1;
+              dma_rd_cmd_addr  <= i_v_base[31:0] + (k_tile_idx + 1) * TK * i_stride_bytes;
+              dma_rd_cmd_len   <= BEATS_PER_TILE_KV - 1;
+              if (dma_rd_cmd_ready) begin
+                pf_fill_cnt <= 1;
+                pf_state <= PF_DATA_V;
+              end
+            end
+
+            PF_DATA_V: begin
+              if (dma_rd_data_valid) begin
+                for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
+                  int flat;
+                  flat = (pf_fill_cnt - 1) * ELEMS_PER_BEAT + i;
+                  if (pref_target_bank)
+                    v_buf1[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                  else
+                    v_buf0[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
+                end
+                pf_fill_cnt <= pf_fill_cnt + 1'b1;
+                if (dma_rd_data_last || pf_fill_cnt == BEATS_PER_TILE_KV) begin
+                  pf_state <= PF_DONE;
+                end
+              end
+            end
+
+            PF_DONE: begin
+            end
+
+            default: pf_state <= PF_IDLE;
+          endcase
+
+          if (!comp_done && cs == C_IDLE) begin
+            comp_start <= 1'b1;
+          end
+          if (comp_done) begin
+            if (k_tile_idx == NUM_K_TILES - 1) begin
+              pf_state <= PF_IDLE;
+              pf_fill_cnt <= '0;
+              ms                <= S_NORMALIZE;
+              norm_qi           <= '0;
+              norm_d            <= '0;
+              norm_recip_pending <= 1'b0;
+              norm_row_ready     <= 1'b0;
+              norm_row_den_zero  <= 1'b0;
+              norm_row_recip     <= 32'd0;
+            end else if (pf_state == PF_DONE) begin
+              k_tile_idx  <= k_tile_idx + 1'b1;
+              active_bank <= pref_target_bank;
+              if ((k_tile_idx + 1) == (NUM_K_TILES - 1)) begin
+                pf_state <= PF_IDLE;
+                pf_fill_cnt <= '0;
+              end else begin
+                pref_target_bank <= ~pref_target_bank;
+                pf_fill_cnt <= '0;
+                pf_state <= PF_CMD_K;
+              end
+            end
+          end
+        end
+
+        // -- Final normalization: O[i][k] = acc[i][k] / l[i] --
+        S_NORMALIZE: begin
+          cycle_counter <= cycle_counter + 1'b1;
+          if (!norm_row_ready) begin
+            if (!norm_recip_pending) begin
+              if (row_l[norm_qi] == 32'd0) begin
+                norm_row_den_zero <= 1'b1;
+                norm_row_ready    <= 1'b1;
+                norm_row_recip    <= 32'd0;
+              end else begin
+                norm_recip_in_valid <= 1'b1;
+                norm_recip_pending  <= 1'b1;
+                norm_row_den_zero   <= 1'b0;
+              end
+            end else if (norm_recip_out_valid) begin
+              norm_recip_pending <= 1'b0;
+              norm_row_ready     <= 1'b1;
+              norm_row_recip     <= norm_recip_out_q16_16;
+            end
+          end else begin
+            for (int lane = 0; lane < NORM_LANES; lane++) begin
+              int d_idx;
+              d_idx = norm_d + lane;
+              if (d_idx < D)
+                o_buf[norm_qi][d_idx] <= norm_o_chunk[lane];
+            end
+
+            if ((norm_d + NORM_LANES) >= D) begin
+              norm_d            <= '0;
+              norm_row_ready    <= 1'b0;
+              norm_row_den_zero <= 1'b0;
+              norm_row_recip    <= 32'd0;
+              if (norm_qi == TQ - 1) begin
+                ms          <= S_WRITE_O;
+                o_write_cnt <= '0;
+              end else begin
+                norm_qi <= norm_qi + 1'b1;
+              end
+            end else begin
+              norm_d <= norm_d + NORM_LANES;
+            end
+          end
+        end
+
+        // -- Write O tile --
+        S_WRITE_O: begin
+          cycle_counter <= cycle_counter + 1'b1;
+          if (o_write_cnt == 0) begin
+            dma_wr_cmd_valid <= 1'b1;
+            dma_wr_cmd_addr  <= i_o_base[31:0] + q_tile_idx * TQ * i_stride_bytes;
+            dma_wr_cmd_len   <= BEATS_PER_TILE_Q - 1;
+            if (dma_wr_cmd_ready)
+              o_write_cnt <= o_write_cnt + 1'b1;
+          end else if (o_write_cnt <= BEATS_PER_TILE_Q) begin
+            if (dma_wr_data_valid && dma_wr_data_ready) begin
+              o_write_cnt <= o_write_cnt + 1'b1;
+              if (o_write_cnt == BEATS_PER_TILE_Q)
+                ms <= S_NEXT_Q;
+            end
+          end
+        end
+
+        S_NEXT_Q: begin
+          cycle_counter <= cycle_counter + 1'b1;
+          if (q_tile_idx == NUM_Q_TILES - 1) begin
+            ms <= S_DONE;
+          end else begin
+            q_tile_idx  <= q_tile_idx + 1'b1;
+            q_fill_cnt  <= '0;
+            ms          <= S_LOAD_Q;
+          end
+        end
+
+        S_DONE: begin
+          o_busy <= 1'b0;
+          o_done <= 1'b1;
+          ms     <= S_IDLE;
+        end
+
+        default: ms <= S_IDLE;
+      endcase
+      end // !soft_reset
+    end
+  end
+
+  always_comb begin
+    dma_wr_data_valid = 1'b0;
+    dma_wr_data_last  = 1'b0;
+    dma_wr_data       = '0;
+    if ((ms == S_WRITE_O) && (o_write_cnt != 0) && (o_write_cnt <= BEATS_PER_TILE_Q)) begin
+      dma_wr_data_valid = 1'b1;
+      dma_wr_data_last  = (o_write_cnt == BEATS_PER_TILE_Q);
+      for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
+        dma_wr_data[i*16 +: 16] = o_buf[((o_write_cnt - 1) * ELEMS_PER_BEAT + i) / D][((o_write_cnt - 1) * ELEMS_PER_BEAT + i) % D];
+      end
+    end
+  end
+
+  assign o_cycles = cycle_counter;
+
+  assign o_perf_ms_load_q        = (ms == S_LOAD_Q);
+  assign o_perf_ms_init_context  = (ms == S_INIT_CONTEXT);
+  assign o_perf_ms_load_k        = (ms == S_LOAD_K);
+  assign o_perf_ms_load_v        = (ms == S_LOAD_V);
+  assign o_perf_ms_compute       = (ms == S_COMPUTE);
+  assign o_perf_ms_normalize     = (ms == S_NORMALIZE);
+  assign o_perf_ms_write_o       = (ms == S_WRITE_O);
+  assign o_perf_ms_next_q        = (ms == S_NEXT_Q);
+
+  assign o_perf_cs_dp_run        = (cs == C_DP_RUN);
+  assign o_perf_cs_score_done    = (cs == C_SCORE_DONE);
+  assign o_perf_cs_softmax_prep  = (cs == C_SOFTMAX_PREP);
+  assign o_perf_comp_launch      = comp_start;
+  assign o_perf_norm_recip_req   = norm_recip_in_valid;
+  assign o_perf_norm_recip_rsp   = norm_recip_out_valid;
+
+  always_comb begin
+    if (ms == S_COMPUTE) begin
+      if ((comp_qpair + 1) < TQ)
+        o_perf_active_rows = 2'd2;
+      else
+        o_perf_active_rows = 2'd1;
+    end else begin
+      o_perf_active_rows = 2'd0;
+    end
+  end
+
+  // dma_rd_data_ready: accept data whenever we're in a load state
+  assign dma_rd_data_ready = (ms == S_LOAD_Q || ms == S_LOAD_K || ms == S_LOAD_V ||
+                              (ms == S_COMPUTE && (pf_state == PF_DATA_K || pf_state == PF_DATA_V)));
+endmodule
+module fa_online_softmax_pair #(
+  parameter int D = 64
+) (
+  input  logic                     i_row1_valid,
+  input  logic signed [15:0]       i_neg_large_q8_8,
+  input  logic signed [15:0]       i_score0,
+  input  logic signed [15:0]       i_score1,
+  input  logic signed [15:0]       i_m_old0,
+  input  logic signed [15:0]       i_m_old1,
+  input  logic [31:0]              i_l_old0,
+  input  logic [31:0]              i_l_old1,
+  input  logic signed [63:0]       i_acc_old0 [D],
+  input  logic signed [63:0]       i_acc_old1 [D],
+  input  logic signed [15:0]       i_v_row [D],
+  output logic signed [15:0]       o_m_new0,
+  output logic signed [15:0]       o_m_new1,
+  output logic [31:0]              o_l_new0,
+  output logic [31:0]              o_l_new1,
+  output logic [15:0]              o_exp_old0,
+  output logic [15:0]              o_exp_new0,
+  output logic [15:0]              o_exp_old1,
+  output logic [15:0]              o_exp_new1,
+  output logic signed [63:0]       o_acc_new0 [D],
+  output logic signed [63:0]       o_acc_new1 [D]
+);
+
+  logic signed [15:0] exp_diff_old_in0, exp_diff_new_in0;
+  logic signed [15:0] exp_diff_old_in1, exp_diff_new_in1;
+  logic [63:0]        l_scaled_wide0;
+  logic [63:0]        l_scaled_wide1;
+  logic [31:0]        l_scaled0;
+  logic [31:0]        l_scaled1;
+  logic [31:0]        l_term0;
+  logic [31:0]        l_term1;
+  logic [31:0]        l_new_val0;
+  logic [31:0]        l_new_val1;
+
+  fa_exp_pwl_8seg_q1_15 u_exp_old0 (.i_x_q8_8(exp_diff_old_in0), .o_exp_q1_15(o_exp_old0));
+  fa_exp_pwl_8seg_q1_15 u_exp_new0 (.i_x_q8_8(exp_diff_new_in0), .o_exp_q1_15(o_exp_new0));
+  fa_exp_pwl_8seg_q1_15 u_exp_old1 (.i_x_q8_8(exp_diff_old_in1), .o_exp_q1_15(o_exp_old1));
+  fa_exp_pwl_8seg_q1_15 u_exp_new1 (.i_x_q8_8(exp_diff_new_in1), .o_exp_q1_15(o_exp_new1));
+
+  always_comb begin
+    if (i_score0 > i_m_old0)
+      o_m_new0 = i_score0;
+    else
+      o_m_new0 = i_m_old0;
+
+    exp_diff_old_in0 = i_m_old0 - o_m_new0;
+    exp_diff_new_in0 = i_score0 - o_m_new0;
+    l_scaled_wide0 = i_l_old0 * o_exp_old0;
+    l_scaled0 = l_scaled_wide0[46:15];
+    l_term0 = {15'd0, o_exp_new0, 1'b0};
+    l_new_val0 = l_scaled0 + l_term0;
+    o_l_new0 = (l_new_val0 == 32'd0) ? 32'd1 : l_new_val0;
+
+    if (i_row1_valid) begin
+      if (i_score1 > i_m_old1)
+        o_m_new1 = i_score1;
+      else
+        o_m_new1 = i_m_old1;
+
+      exp_diff_old_in1 = i_m_old1 - o_m_new1;
+      exp_diff_new_in1 = i_score1 - o_m_new1;
+      l_scaled_wide1 = i_l_old1 * o_exp_old1;
+      l_scaled1 = l_scaled_wide1[46:15];
+      l_term1 = {15'd0, o_exp_new1, 1'b0};
+      l_new_val1 = l_scaled1 + l_term1;
+      o_l_new1 = (l_new_val1 == 32'd0) ? 32'd1 : l_new_val1;
+    end else begin
+      o_m_new1 = i_neg_large_q8_8;
+      exp_diff_old_in1 = 16'sd0;
+      exp_diff_new_in1 = 16'sd0;
+      l_scaled_wide1 = 64'd0;
+      l_scaled1 = 32'd0;
+      l_term1 = 32'd0;
+      l_new_val1 = 32'd0;
+      o_l_new1 = 32'd1;
+    end
+
+    for (int k = 0; k < D; k++) begin
+      logic signed [95:0] acc_sc;
+      logic signed [63:0] acc_old_sc;
+      logic signed [33:0] pv_mul;
+      logic signed [63:0] pv_term;
+
+      acc_sc = i_acc_old0[k] * $signed({1'b0, o_exp_old0});
+      acc_old_sc = acc_sc[78:15];
+      pv_mul = $signed({1'b0, o_exp_new0}) * i_v_row[k];
+      pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
+      o_acc_new0[k] = acc_old_sc + pv_term;
+
+      if (i_row1_valid) begin
+        acc_sc = i_acc_old1[k] * $signed({1'b0, o_exp_old1});
+        acc_old_sc = acc_sc[78:15];
+        pv_mul = $signed({1'b0, o_exp_new1}) * i_v_row[k];
+        pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
+        o_acc_new1[k] = acc_old_sc + pv_term;
+      end else begin
+        o_acc_new1[k] = i_acc_old1[k];
+      end
+    end
+  end
+endmodule// ============================================================================
+// fa_dma_reader.sv
+// AXI4 Master read-only DMA: issues burst reads to fetch Q/K/V tiles.
+// Produces a simple valid/data stream to downstream tile buffer.
+// ============================================================================
+module fa_dma_reader #(
+  parameter int AXI_ADDR_W  = 32,
+  parameter int AXI_DATA_W  = 128,  // 128-bit bus = 8 Q8.8 elements per beat
+  parameter int AXI_ID_W    = 4,
+  parameter int AXI_LEN_W   = 8,
+  parameter int CMD_LEN_W   = 16
+) (
+  input  logic                      clk,
+  input  logic                      rst_n,
+
+  // ---- Command interface (from scheduler) ----
+  input  logic                      cmd_valid,
+  output logic                      cmd_ready,
+  input  logic [AXI_ADDR_W-1:0]    cmd_addr,
+  input  logic [CMD_LEN_W-1:0]     cmd_len,       // logical length = total beats-1
+
+  // ---- AXI4 Master AR channel ----
+  output logic [AXI_ID_W-1:0]      m_axi_arid,
+  output logic [AXI_ADDR_W-1:0]    m_axi_araddr,
+  output logic [AXI_LEN_W-1:0]     m_axi_arlen,
+  output logic [2:0]               m_axi_arsize,
+  output logic [1:0]               m_axi_arburst,
+  output logic                     m_axi_arvalid,
+  input  logic                     m_axi_arready,
+
+  // ---- AXI4 Master R channel ----
+  input  logic [AXI_ID_W-1:0]      m_axi_rid,
+  input  logic [AXI_DATA_W-1:0]    m_axi_rdata,
+  input  logic [1:0]               m_axi_rresp,
+  input  logic                     m_axi_rlast,
+  input  logic                     m_axi_rvalid,
+  output logic                     m_axi_rready,
+
+  // ---- Data output stream (to tile buffer) ----
+  output logic                     out_valid,
+  output logic [AXI_DATA_W-1:0]   out_data,
+  output logic                     out_last,      // last beat of this burst
+  input  logic                     out_ready,
+
+  // ---- Status ----
+  output logic                     error,         // any RRESP error
+  output logic [31:0]              rd_bytes       // total bytes read
+);
+
+  // AR channel state machine
+  typedef enum logic [1:0] {
+    AR_IDLE, AR_SEND, AR_STREAM
+  } ar_state_t;
+  ar_state_t ar_state;
+
+  logic [AXI_ADDR_W-1:0] ar_addr_r;
+  logic [AXI_LEN_W-1:0]  ar_len_r;
+  logic [CMD_LEN_W-1:0]  total_beats_left_r;
+  logic [CMD_LEN_W-1:0]  burst_beats_r;
+
+  localparam int BYTES_PER_BEAT = AXI_DATA_W / 8;
+  localparam int MAX_BURST_BEATS = (1 << AXI_LEN_W);
+
+  function automatic [CMD_LEN_W-1:0] clip_burst_beats(input logic [CMD_LEN_W-1:0] beats_left);
+    if (beats_left > MAX_BURST_BEATS)
+      clip_burst_beats = CMD_LEN_W'(MAX_BURST_BEATS);
+    else
+      clip_burst_beats = beats_left;
+  endfunction
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      ar_state            <= AR_IDLE;
+      ar_addr_r           <= '0;
+      ar_len_r            <= '0;
+      total_beats_left_r  <= '0;
+      burst_beats_r       <= '0;
+    end else begin
+      case (ar_state)
+        AR_IDLE: begin
+          if (cmd_valid && cmd_ready) begin
+            ar_addr_r          <= cmd_addr;
+            total_beats_left_r <= cmd_len + CMD_LEN_W'(1);
+            burst_beats_r      <= clip_burst_beats(cmd_len + CMD_LEN_W'(1));
+            ar_len_r           <= clip_burst_beats(cmd_len + CMD_LEN_W'(1)) - CMD_LEN_W'(1);
+            ar_state           <= AR_SEND;
+          end
+        end
+        AR_SEND: begin
+          if (m_axi_arvalid && m_axi_arready) begin
+            ar_state <= AR_STREAM;
+          end
+        end
+        AR_STREAM: begin
+          if (m_axi_rvalid && m_axi_rready) begin
+            total_beats_left_r <= total_beats_left_r - CMD_LEN_W'(1);
+            if (total_beats_left_r == CMD_LEN_W'(1)) begin
+              burst_beats_r <= '0;
+              ar_state <= AR_IDLE;
+            end else if (burst_beats_r == CMD_LEN_W'(1)) begin
+              ar_addr_r      <= ar_addr_r + (AXI_ADDR_W'(ar_len_r) + AXI_ADDR_W'(1)) * AXI_ADDR_W'(BYTES_PER_BEAT);
+              burst_beats_r  <= clip_burst_beats(total_beats_left_r - CMD_LEN_W'(1));
+              ar_len_r       <= clip_burst_beats(total_beats_left_r - CMD_LEN_W'(1)) - CMD_LEN_W'(1);
+              ar_state       <= AR_SEND;
+            end else begin
+              burst_beats_r <= burst_beats_r - CMD_LEN_W'(1);
+            end
+          end
+        end
+        default: ar_state <= AR_IDLE;
+      endcase
+    end
+  end
+
+  assign cmd_ready      = (ar_state == AR_IDLE);
+  assign m_axi_arid     = '0;
+  assign m_axi_araddr   = ar_addr_r;
+  assign m_axi_arlen    = ar_len_r;
+  assign m_axi_arsize   = 3'($clog2(AXI_DATA_W / 8));
+  assign m_axi_arburst  = 2'b01;  // INCR
+  assign m_axi_arvalid  = (ar_state == AR_SEND);
+
+  // R channel: pass through to output stream
+  assign out_valid     = m_axi_rvalid;
+  assign out_data      = m_axi_rdata;
+  assign out_last      = m_axi_rvalid && (total_beats_left_r == CMD_LEN_W'(1));
+  assign m_axi_rready  = out_ready;
+
+  // Error flag: sticky on any non-OKAY response
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+      error <= 1'b0;
+    else if (m_axi_rvalid && m_axi_rready && (m_axi_rresp != 2'b00))
+      error <= 1'b1;
+  end
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+      rd_bytes <= 32'd0;
+    else if (m_axi_rvalid && m_axi_rready)
+      rd_bytes <= rd_bytes + BYTES_PER_BEAT;
+  end
+
+  // Unused
+  logic unused;
+  assign unused = ^m_axi_rid;
+endmodule
+// ============================================================================
+// fa_dma_writer.sv
+// AXI4 Master write-only DMA: writes O tiles back to memory.
+// Accepts a simple valid/data/last stream from compute engine.
+// ============================================================================
+module fa_dma_writer #(
+  parameter int AXI_ADDR_W  = 32,
+  parameter int AXI_DATA_W  = 128,
+  parameter int AXI_ID_W    = 4,
+  parameter int AXI_LEN_W   = 8
+) (
+  input  logic                      clk,
+  input  logic                      rst_n,
+
+  // ---- Command interface (from scheduler) ----
+  input  logic                      cmd_valid,
+  output logic                      cmd_ready,
+  input  logic [AXI_ADDR_W-1:0]    cmd_addr,
+  input  logic [AXI_LEN_W-1:0]     cmd_len,
+
+  // ---- Data input stream ----
+  input  logic                      in_valid,
+  output logic                      in_ready,
+  input  logic [AXI_DATA_W-1:0]    in_data,
+  input  logic                      in_last,
+
+  // ---- AXI4 Master AW channel ----
+  output logic [AXI_ID_W-1:0]      m_axi_awid,
+  output logic [AXI_ADDR_W-1:0]    m_axi_awaddr,
+  output logic [AXI_LEN_W-1:0]     m_axi_awlen,
+  output logic [2:0]               m_axi_awsize,
+  output logic [1:0]               m_axi_awburst,
+  output logic                     m_axi_awvalid,
+  input  logic                     m_axi_awready,
+
+  // ---- AXI4 Master W channel ----
+  output logic [AXI_DATA_W-1:0]    m_axi_wdata,
+  output logic [AXI_DATA_W/8-1:0]  m_axi_wstrb,
+  output logic                     m_axi_wlast,
+  output logic                     m_axi_wvalid,
+  input  logic                     m_axi_wready,
+
+  // ---- AXI4 Master B channel ----
+  input  logic [AXI_ID_W-1:0]      m_axi_bid,
+  input  logic [1:0]               m_axi_bresp,
+  input  logic                     m_axi_bvalid,
+  output logic                     m_axi_bready,
+
+  // ---- Status ----
+  output logic                     error,
+  output logic [31:0]              wr_bytes
+);
+
+  typedef enum logic [2:0] {
+    W_IDLE, W_ADDR, W_DATA, W_RESP
+  } w_state_t;
+  w_state_t w_state;
+
+  logic [AXI_ADDR_W-1:0] aw_addr_r;
+  logic [AXI_LEN_W-1:0]  aw_len_r;
+  logic [AXI_LEN_W-1:0]  beat_cnt;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      w_state   <= W_IDLE;
+      aw_addr_r <= '0;
+      aw_len_r  <= '0;
+      beat_cnt  <= '0;
+    end else begin
+      case (w_state)
+        W_IDLE: begin
+          if (cmd_valid && cmd_ready) begin
+            aw_addr_r <= cmd_addr;
+            aw_len_r  <= cmd_len;
+            beat_cnt  <= '0;
+            w_state   <= W_ADDR;
+          end
+        end
+        W_ADDR: begin
+          if (m_axi_awvalid && m_axi_awready) begin
+            w_state <= W_DATA;
+          end
+        end
+        W_DATA: begin
+          if (m_axi_wvalid && m_axi_wready) begin
+            beat_cnt <= beat_cnt + 1'b1;
+            if (m_axi_wlast)
+              w_state <= W_RESP;
+          end
+        end
+        W_RESP: begin
+          if (m_axi_bvalid && m_axi_bready)
+            w_state <= W_IDLE;
+        end
+        default: w_state <= W_IDLE;
+      endcase
+    end
+  end
+
+  assign cmd_ready = (w_state == W_IDLE);
+
+  // AW
+  assign m_axi_awid    = '0;
+  assign m_axi_awaddr  = aw_addr_r;
+  assign m_axi_awlen   = aw_len_r;
+  assign m_axi_awsize  = 3'($clog2(AXI_DATA_W / 8));
+  assign m_axi_awburst = 2'b01;  // INCR
+  assign m_axi_awvalid = (w_state == W_ADDR);
+
+  // W
+  assign m_axi_wdata  = in_data;
+  assign m_axi_wstrb  = {(AXI_DATA_W/8){1'b1}};
+  assign m_axi_wlast  = (beat_cnt == aw_len_r);
+  assign m_axi_wvalid = (w_state == W_DATA) && in_valid;
+  assign in_ready     = (w_state == W_DATA) && m_axi_wready;
+
+  // B
+  assign m_axi_bready = (w_state == W_RESP);
+
+  // Error
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+      error <= 1'b0;
+    else if (m_axi_bvalid && m_axi_bready && (m_axi_bresp != 2'b00))
+      error <= 1'b1;
+  end
+
+  // Byte counter
+  localparam int BYTES_PER_BEAT = AXI_DATA_W / 8;
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+      wr_bytes <= 32'd0;
+    else if (m_axi_wvalid && m_axi_wready)
+      wr_bytes <= wr_bytes + BYTES_PER_BEAT;
+  end
+
+  logic unused;
+  assign unused = ^m_axi_bid;
+endmodule
+module fa_axi_lite_regs #(
+  parameter int ADDR_W = 32,
+  parameter int DATA_W = 32
+) (
+  input  logic                 clk,
+  input  logic                 rst_n,
+
+  input  logic [ADDR_W-1:0]    s_axil_awaddr,
+  input  logic                 s_axil_awvalid,
+  output logic                 s_axil_awready,
+  input  logic [DATA_W-1:0]    s_axil_wdata,
+  input  logic [DATA_W/8-1:0]  s_axil_wstrb,
+  input  logic                 s_axil_wvalid,
+  output logic                 s_axil_wready,
+  output logic [1:0]           s_axil_bresp,
+  output logic                 s_axil_bvalid,
+  input  logic                 s_axil_bready,
+
+  input  logic [ADDR_W-1:0]    s_axil_araddr,
+  input  logic                 s_axil_arvalid,
+  output logic                 s_axil_arready,
+  output logic [DATA_W-1:0]    s_axil_rdata,
+  output logic [1:0]           s_axil_rresp,
+  output logic                 s_axil_rvalid,
+  input  logic                 s_axil_rready,
+
+  input  logic                 i_busy,
+  input  logic                 i_done,
+  input  logic                 i_error,
+  input  logic [31:0]          i_cycles,
+  input  logic [31:0]          i_perf_run_count,
+  input  logic [31:0]          i_perf_busy_cycles,
+  input  logic [31:0]          i_perf_dma_rd_cmd_count,
+  input  logic [31:0]          i_perf_dma_rd_beat_count,
+  input  logic [31:0]          i_perf_dma_wr_cmd_count,
+  input  logic [31:0]          i_perf_dma_wr_beat_count,
+  input  logic [31:0]          i_perf_comp_launch_count,
+  input  logic [31:0]          i_perf_exp_eval_count,
+  input  logic [31:0]          i_perf_mul_eval_count,
+  input  logic [31:0]          i_perf_recip_req_count,
+  input  logic [31:0]          i_perf_recip_rsp_count,
+  input  logic [31:0]          i_perf_ms_load_q_cycles,
+  input  logic [31:0]          i_perf_ms_init_context_cycles,
+  input  logic [31:0]          i_perf_ms_load_k_cycles,
+  input  logic [31:0]          i_perf_ms_load_v_cycles,
+  input  logic [31:0]          i_perf_ms_compute_cycles,
+  input  logic [31:0]          i_perf_ms_normalize_cycles,
+  input  logic [31:0]          i_perf_ms_write_o_cycles,
+  input  logic [31:0]          i_perf_ms_next_q_cycles,
+  input  logic [31:0]          i_perf_cs_dp_run_cycles,
+  input  logic [31:0]          i_perf_cs_score_done_cycles,
+  input  logic [31:0]          i_perf_cs_softmax_prep_cycles,
+
+  output logic                 o_start_pulse,
+  output logic                 o_soft_reset,
+  output logic                 o_irq_en,
+  output logic                 o_causal_en,
+  output logic [63:0]          o_q_base,
+  output logic [63:0]          o_k_base,
+  output logic [63:0]          o_v_base,
+  output logic [63:0]          o_o_base,
+  output logic [31:0]          o_stride_bytes,
+  output logic [15:0]          o_neg_large_q8_8,
+  output logic [15:0]          o_scale_q8_8
+);
+  localparam logic [7:0] REG_CTRL         = 8'h00;
+  localparam logic [7:0] REG_STATUS       = 8'h04;
+  localparam logic [7:0] REG_CFG          = 8'h08;
+  localparam logic [7:0] REG_Q_BASE_L     = 8'h14;
+  localparam logic [7:0] REG_Q_BASE_H     = 8'h18;
+  localparam logic [7:0] REG_K_BASE_L     = 8'h1C;
+  localparam logic [7:0] REG_K_BASE_H     = 8'h20;
+  localparam logic [7:0] REG_V_BASE_L     = 8'h24;
+  localparam logic [7:0] REG_V_BASE_H     = 8'h28;
+  localparam logic [7:0] REG_O_BASE_L     = 8'h2C;
+  localparam logic [7:0] REG_O_BASE_H     = 8'h30;
+  localparam logic [7:0] REG_STRIDE_BYTES = 8'h34;
+  localparam logic [7:0] REG_NEG_LARGE    = 8'h38;
+  localparam logic [7:0] REG_SCALE        = 8'h3C;
+  localparam logic [7:0] REG_CYCLES       = 8'h40;
+  localparam logic [7:0] REG_PERF_RUN_COUNT            = 8'h80;
+  localparam logic [7:0] REG_PERF_BUSY_CYCLES          = 8'h84;
+  localparam logic [7:0] REG_PERF_DMA_RD_CMD_COUNT     = 8'h88;
+  localparam logic [7:0] REG_PERF_DMA_RD_BEAT_COUNT    = 8'h8C;
+  localparam logic [7:0] REG_PERF_DMA_WR_CMD_COUNT     = 8'h90;
+  localparam logic [7:0] REG_PERF_DMA_WR_BEAT_COUNT    = 8'h94;
+  localparam logic [7:0] REG_PERF_COMP_LAUNCH_COUNT    = 8'h98;
+  localparam logic [7:0] REG_PERF_EXP_EVAL_COUNT       = 8'h9C;
+  localparam logic [7:0] REG_PERF_MUL_EVAL_COUNT       = 8'hA0;
+  localparam logic [7:0] REG_PERF_RECIP_REQ_COUNT      = 8'hA4;
+  localparam logic [7:0] REG_PERF_RECIP_RSP_COUNT      = 8'hA8;
+  localparam logic [7:0] REG_PERF_MS_LOAD_Q_CYCLES     = 8'hAC;
+  localparam logic [7:0] REG_PERF_MS_INIT_CTX_CYCLES   = 8'hB0;
+  localparam logic [7:0] REG_PERF_MS_LOAD_K_CYCLES     = 8'hB4;
+  localparam logic [7:0] REG_PERF_MS_LOAD_V_CYCLES     = 8'hB8;
+  localparam logic [7:0] REG_PERF_MS_COMPUTE_CYCLES    = 8'hBC;
+  localparam logic [7:0] REG_PERF_MS_NORMALIZE_CYCLES  = 8'hC0;
+  localparam logic [7:0] REG_PERF_MS_WRITE_O_CYCLES    = 8'hC4;
+  localparam logic [7:0] REG_PERF_MS_NEXT_Q_CYCLES     = 8'hC8;
+  localparam logic [7:0] REG_PERF_CS_DP_RUN_CYCLES     = 8'hCC;
+  localparam logic [7:0] REG_PERF_CS_SCORE_DONE_CYCLES = 8'hD0;
+  localparam logic [7:0] REG_PERF_CS_SOFTMAX_PREP_CYCLES = 8'hD4;
+
+  logic [31:0] reg_ctrl;
+  logic [31:0] reg_cfg;
+  logic [31:0] reg_q_base_l;
+  logic [31:0] reg_q_base_h;
+  logic [31:0] reg_k_base_l;
+  logic [31:0] reg_k_base_h;
+  logic [31:0] reg_v_base_l;
+  logic [31:0] reg_v_base_h;
+  logic [31:0] reg_o_base_l;
+  logic [31:0] reg_o_base_h;
+  logic [31:0] reg_stride_bytes;
+  logic [31:0] reg_neg_large;
+  logic [31:0] reg_scale;
+
+  logic done_sticky;
+
+  logic [ADDR_W-1:0] awaddr_latched;
+  logic [DATA_W-1:0] wdata_latched;
+  logic aw_seen;
+  logic w_seen;
+  logic write_fire;
+
+  logic [7:0] wr_addr;
+  logic [7:0] rd_addr;
+
+  always_comb begin
+    wr_addr = awaddr_latched[7:0];
+    rd_addr = s_axil_araddr[7:0];
+
+    s_axil_awready = !aw_seen;
+    s_axil_wready  = !w_seen;
+    s_axil_bresp   = 2'b00;
+
+    s_axil_arready = !s_axil_rvalid;
+    s_axil_rresp   = 2'b00;
+
+    s_axil_rdata = 32'd0;
+    unique case (rd_addr)
+      REG_CTRL:         s_axil_rdata = reg_ctrl;
+      REG_STATUS:       s_axil_rdata = {29'd0, i_error, done_sticky, i_busy};
+      REG_CFG:          s_axil_rdata = reg_cfg;
+      REG_Q_BASE_L:     s_axil_rdata = reg_q_base_l;
+      REG_Q_BASE_H:     s_axil_rdata = reg_q_base_h;
+      REG_K_BASE_L:     s_axil_rdata = reg_k_base_l;
+      REG_K_BASE_H:     s_axil_rdata = reg_k_base_h;
+      REG_V_BASE_L:     s_axil_rdata = reg_v_base_l;
+      REG_V_BASE_H:     s_axil_rdata = reg_v_base_h;
+      REG_O_BASE_L:     s_axil_rdata = reg_o_base_l;
+      REG_O_BASE_H:     s_axil_rdata = reg_o_base_h;
+      REG_STRIDE_BYTES: s_axil_rdata = reg_stride_bytes;
+      REG_NEG_LARGE:    s_axil_rdata = reg_neg_large;
+      REG_SCALE:        s_axil_rdata = reg_scale;
+      REG_CYCLES:       s_axil_rdata = i_cycles;
+      REG_PERF_RUN_COUNT:              s_axil_rdata = i_perf_run_count;
+      REG_PERF_BUSY_CYCLES:            s_axil_rdata = i_perf_busy_cycles;
+      REG_PERF_DMA_RD_CMD_COUNT:       s_axil_rdata = i_perf_dma_rd_cmd_count;
+      REG_PERF_DMA_RD_BEAT_COUNT:      s_axil_rdata = i_perf_dma_rd_beat_count;
+      REG_PERF_DMA_WR_CMD_COUNT:       s_axil_rdata = i_perf_dma_wr_cmd_count;
+      REG_PERF_DMA_WR_BEAT_COUNT:      s_axil_rdata = i_perf_dma_wr_beat_count;
+      REG_PERF_COMP_LAUNCH_COUNT:      s_axil_rdata = i_perf_comp_launch_count;
+      REG_PERF_EXP_EVAL_COUNT:         s_axil_rdata = i_perf_exp_eval_count;
+      REG_PERF_MUL_EVAL_COUNT:         s_axil_rdata = i_perf_mul_eval_count;
+      REG_PERF_RECIP_REQ_COUNT:        s_axil_rdata = i_perf_recip_req_count;
+      REG_PERF_RECIP_RSP_COUNT:        s_axil_rdata = i_perf_recip_rsp_count;
+      REG_PERF_MS_LOAD_Q_CYCLES:       s_axil_rdata = i_perf_ms_load_q_cycles;
+      REG_PERF_MS_INIT_CTX_CYCLES:     s_axil_rdata = i_perf_ms_init_context_cycles;
+      REG_PERF_MS_LOAD_K_CYCLES:       s_axil_rdata = i_perf_ms_load_k_cycles;
+      REG_PERF_MS_LOAD_V_CYCLES:       s_axil_rdata = i_perf_ms_load_v_cycles;
+      REG_PERF_MS_COMPUTE_CYCLES:      s_axil_rdata = i_perf_ms_compute_cycles;
+      REG_PERF_MS_NORMALIZE_CYCLES:    s_axil_rdata = i_perf_ms_normalize_cycles;
+      REG_PERF_MS_WRITE_O_CYCLES:      s_axil_rdata = i_perf_ms_write_o_cycles;
+      REG_PERF_MS_NEXT_Q_CYCLES:       s_axil_rdata = i_perf_ms_next_q_cycles;
+      REG_PERF_CS_DP_RUN_CYCLES:       s_axil_rdata = i_perf_cs_dp_run_cycles;
+      REG_PERF_CS_SCORE_DONE_CYCLES:   s_axil_rdata = i_perf_cs_score_done_cycles;
+      REG_PERF_CS_SOFTMAX_PREP_CYCLES: s_axil_rdata = i_perf_cs_softmax_prep_cycles;
+      default:          s_axil_rdata = 32'd0;
+    endcase
+  end
+
+  assign write_fire = aw_seen && w_seen && !s_axil_bvalid;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      aw_seen <= 1'b0;
+      w_seen <= 1'b0;
+      awaddr_latched <= '0;
+      wdata_latched <= '0;
+      s_axil_bvalid <= 1'b0;
+      s_axil_rvalid <= 1'b0;
+
+      reg_ctrl <= 32'd0;
+      reg_cfg <= 32'd0;
+      reg_q_base_l <= 32'd0;
+      reg_q_base_h <= 32'd0;
+      reg_k_base_l <= 32'd0;
+      reg_k_base_h <= 32'd0;
+      reg_v_base_l <= 32'd0;
+      reg_v_base_h <= 32'd0;
+      reg_o_base_l <= 32'd0;
+      reg_o_base_h <= 32'd0;
+      reg_stride_bytes <= 32'd128;
+      reg_neg_large <= 32'hFFFF_8000;
+      reg_scale <= 32'd32;
+      done_sticky <= 1'b0;
+      o_start_pulse <= 1'b0;
+    end else begin
+      o_start_pulse <= 1'b0;
+
+      if (s_axil_awvalid && s_axil_awready) begin
+        aw_seen <= 1'b1;
+        awaddr_latched <= s_axil_awaddr;
+      end
+      if (s_axil_wvalid && s_axil_wready) begin
+        w_seen <= 1'b1;
+        wdata_latched <= s_axil_wdata;
+      end
+
+      if (write_fire) begin
+        s_axil_bvalid <= 1'b1;
+        aw_seen <= 1'b0;
+        w_seen <= 1'b0;
+
+        unique case (wr_addr)
+          REG_CTRL: begin
+            reg_ctrl[2:1] <= wdata_latched[2:1];
+            if (wdata_latched[0]) begin
+              o_start_pulse <= 1'b1;
+              done_sticky <= 1'b0;
+            end
+          end
+          REG_STATUS: begin
+            if (wdata_latched[1]) begin
+              done_sticky <= 1'b0;
+            end
+          end
+          REG_CFG:          reg_cfg <= wdata_latched;
+          REG_Q_BASE_L:     reg_q_base_l <= wdata_latched;
+          REG_Q_BASE_H:     reg_q_base_h <= wdata_latched;
+          REG_K_BASE_L:     reg_k_base_l <= wdata_latched;
+          REG_K_BASE_H:     reg_k_base_h <= wdata_latched;
+          REG_V_BASE_L:     reg_v_base_l <= wdata_latched;
+          REG_V_BASE_H:     reg_v_base_h <= wdata_latched;
+          REG_O_BASE_L:     reg_o_base_l <= wdata_latched;
+          REG_O_BASE_H:     reg_o_base_h <= wdata_latched;
+          REG_STRIDE_BYTES: reg_stride_bytes <= wdata_latched;
+          REG_NEG_LARGE:    reg_neg_large <= wdata_latched;
+          REG_SCALE:        reg_scale <= wdata_latched;
+          default: begin end
+        endcase
+      end
+
+      if (s_axil_bvalid && s_axil_bready) begin
+        s_axil_bvalid <= 1'b0;
+      end
+
+      if (s_axil_arvalid && s_axil_arready) begin
+        s_axil_rvalid <= 1'b1;
+      end else if (s_axil_rvalid && s_axil_rready) begin
+        s_axil_rvalid <= 1'b0;
+      end
+
+      if (i_done) begin
+        done_sticky <= 1'b1;
+      end
+    end
+  end
+
+  assign o_soft_reset = reg_ctrl[1];
+  assign o_irq_en = reg_ctrl[2];
+  assign o_causal_en = reg_cfg[0];
+
+  assign o_q_base = {reg_q_base_h, reg_q_base_l};
+  assign o_k_base = {reg_k_base_h, reg_k_base_l};
+  assign o_v_base = {reg_v_base_h, reg_v_base_l};
+  assign o_o_base = {reg_o_base_h, reg_o_base_l};
+  assign o_stride_bytes = reg_stride_bytes;
+  assign o_neg_large_q8_8 = reg_neg_large[15:0];
+  assign o_scale_q8_8 = reg_scale[15:0];
+endmodule
+package fa_fixed_point_pkg;
+  function automatic logic signed [15:0] sat16_signed(input logic signed [31:0] x);
+    if (x > 32'sd32767) begin
+      return 16'sd32767;
+    end
+    if (x < -32'sd32768) begin
+      return -16'sd32768;
+    end
+    return x[15:0];
+  endfunction
+
+  function automatic logic [31:0] sat32_unsigned(input logic [63:0] x);
+    if (x > 64'hFFFF_FFFF) begin
+      return 32'hFFFF_FFFF;
+    end
+    return x[31:0];
+  endfunction
+endpackage
+module fa_mul_sat_q8_8 (
+  input  logic signed [15:0] i_a_q8_8,
+  input  logic signed [15:0] i_b_q8_8,
+  output logic signed [15:0] o_y_q8_8
+);
+  logic signed [31:0] prod_q16_16;
+  logic signed [31:0] rounded_q16_16;
+  logic signed [31:0] shifted_q8_8;
+
+  always_comb begin
+    prod_q16_16 = i_a_q8_8 * i_b_q8_8;
+    if (prod_q16_16 >= 0) begin
+      rounded_q16_16 = prod_q16_16 + 32'sd128;
+    end else begin
+      rounded_q16_16 = prod_q16_16 - 32'sd128;
+    end
+    shifted_q8_8 = rounded_q16_16 >>> 8;
+
+    if (shifted_q8_8 > 32'sd32767) begin
+      o_y_q8_8 = 16'sd32767;
+    end else if (shifted_q8_8 < -32'sd32768) begin
+      o_y_q8_8 = -16'sd32768;
+    end else begin
+      o_y_q8_8 = shifted_q8_8[15:0];
+    end
+  end
+endmodule
+module fa_exp_pwl_8seg_q1_15 (
+  input  logic signed [15:0] i_x_q8_8,
+  output logic        [15:0] o_exp_q1_15
+);
+  logic signed [15:0] x_clamped;
+  logic [15:0] u_q8_8;
+  logic [2:0] seg_idx;
+  logic sat_zero;
+  logic [7:0] frac;
+  logic [15:0] y0;
+  logic [15:0] y1;
+  logic [16:0] delta;
+  logic [15:0] interp_q1_15;
+  logic [8:0] delta_hi;
+  logic [7:0] delta_lo;
+  logic [15:0] interp_hi;
+  logic [15:0] interp_lo;
+
+  always_comb begin
+    if (i_x_q8_8 > 16'sd0) begin
+      x_clamped = 16'sd0;
+    end else if (i_x_q8_8 < -16'sd4096) begin
+      x_clamped = -16'sd4096;
+    end else begin
+      x_clamped = i_x_q8_8;
+    end
+
+    u_q8_8 = $unsigned(-x_clamped);
+    if (u_q8_8[15:8] >= 8) begin
+      seg_idx = 3'd0;
+      frac = 8'h00;
+      sat_zero = 1'b1;
+    end else begin
+      seg_idx = u_q8_8[10:8];
+      frac = u_q8_8[7:0];
+      sat_zero = 1'b0;
+    end
+
+    if (sat_zero) begin
+      y0 = 16'd0;
+      y1 = 16'd0;
+    end else begin
+      unique case (seg_idx)
+        3'd0: begin y0 = 16'd32767; y1 = 16'd12055; end
+        3'd1: begin y0 = 16'd12055; y1 = 16'd4431;  end
+        3'd2: begin y0 = 16'd4431;  y1 = 16'd1631;  end
+        3'd3: begin y0 = 16'd1631;  y1 = 16'd600;   end
+        3'd4: begin y0 = 16'd600;   y1 = 16'd221;   end
+        3'd5: begin y0 = 16'd221;   y1 = 16'd81;    end
+        3'd6: begin y0 = 16'd81;    y1 = 16'd30;    end
+        default: begin y0 = 16'd30; y1 = 16'd11;    end
+      endcase
+    end
+
+    delta = y0 - y1;
+    delta_hi = delta[16:8];
+    delta_lo = delta[7:0];
+    interp_hi = delta_hi * frac;
+    interp_lo = (delta_lo * frac) >> 8;
+    interp_q1_15 = interp_hi + interp_lo;
+    if (y0 > interp_q1_15) begin
+      o_exp_q1_15 = y0 - interp_q1_15;
+    end else begin
+      o_exp_q1_15 = 16'd0;
+    end
+  end
+endmodule
+module fa_recip_nr_q16_16 (
+  input  logic        clk,
+  input  logic        rst_n,
+  input  logic        i_valid,
+  input  logic [31:0] i_x_q16_16,
+  output logic        o_valid,
+  output logic [31:0] o_recip_q16_16
+);
+  // Newton-Raphson reciprocal: 10-stage pipeline with pipelined 32×32 multiply.
+  // Internal latency is hidden behind i_valid/o_valid handshaking.
+
+  function automatic [5:0] clz32(input [31:0] val);
+    reg [5:0] n;
+    reg [31:0] x;
+    begin
+      if (val == 32'd0) begin
+        clz32 = 6'd32;
+      end else begin
+        n = 6'd0;
+        x = val;
+        if (x[31:16] == 16'd0) begin n = n + 6'd16; x = x << 16; end
+        if (x[31:24] == 8'd0)  begin n = n + 6'd8;  x = x << 8;  end
+        if (x[31:28] == 4'd0)  begin n = n + 6'd4;  x = x << 4;  end
+        if (x[31:30] == 2'd0)  begin n = n + 6'd2;  x = x << 2;  end
+        if (x[31]    == 1'b0)  begin n = n + 6'd1;                end
+        clz32 = n;
+      end
+    end
+  endfunction
+
+  logic [5:0]  lz;
+  logic [31:0] d_norm;
+
+  always_comb begin
+    lz     = clz32(i_x_q16_16);
+    d_norm = i_x_q16_16 << lz;
+  end
+
+  logic        s0_valid;
+  logic [31:0] s0_d_norm;
+  logic [5:0]  s0_lz;
+  logic        s0_is_zero;
+  logic        s0_is_one;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      s0_valid <= 1'b0;
+    end else begin
+      s0_valid   <= i_valid;
+      s0_d_norm  <= d_norm;
+      s0_lz      <= lz;
+      s0_is_zero <= (i_x_q16_16 == 32'd0);
+      s0_is_one  <= (i_x_q16_16 == 32'd1);
+    end
+  end
+
+  logic [31:0] r0_lut;
+
+  always_comb begin
+    case (s0_d_norm[30:26])
+      5'd0:  r0_lut = 32'hFC0F_C0FC;
+      5'd1:  r0_lut = 32'hF489_8D60;
+      5'd2:  r0_lut = 32'hED73_03B6;
+      5'd3:  r0_lut = 32'hE6C2_B448;
+      5'd4:  r0_lut = 32'hE070_381C;
+      5'd5:  r0_lut = 32'hDA74_0DA7;
+      5'd6:  r0_lut = 32'hD4C7_7B03;
+      5'd7:  r0_lut = 32'hCF64_74A9;
+      5'd8:  r0_lut = 32'hCA45_87E7;
+      5'd9:  r0_lut = 32'hC565_C87B;
+      5'd10: r0_lut = 32'hC0C0_C0C1;
+      5'd11: r0_lut = 32'hBC52_640C;
+      5'd12: r0_lut = 32'hB817_02E0;
+      5'd13: r0_lut = 32'hB40B_40B4;
+      5'd14: r0_lut = 32'hB02C_0B03;
+      5'd15: r0_lut = 32'hAC76_9184;
+      5'd16: r0_lut = 32'hA8E8_3F57;
+      5'd17: r0_lut = 32'hA57E_B503;
+      5'd18: r0_lut = 32'hA237_C32B;
+      5'd19: r0_lut = 32'h9F11_65E7;
+      5'd20: r0_lut = 32'h9C09_C09C;
+      5'd21: r0_lut = 32'h991F_1A51;
+      5'd22: r0_lut = 32'h964F_DA6C;
+      5'd23: r0_lut = 32'h939A_85C4;
+      5'd24: r0_lut = 32'h90FD_BC09;
+      5'd25: r0_lut = 32'h8E78_356D;
+      5'd26: r0_lut = 32'h8C08_C08C;
+      5'd27: r0_lut = 32'h89AE_408A;
+      5'd28: r0_lut = 32'h8767_AB5F;
+      5'd29: r0_lut = 32'h8534_0853;
+      5'd30: r0_lut = 32'h8312_6E98;
+      default: r0_lut = 32'h8102_0408;
+    endcase
+  end
+
+  logic        s1_valid;
+  logic [31:0] s1_d_norm;
+  logic [31:0] s1_r0;
+  logic [5:0]  s1_lz;
+  logic        s1_is_zero;
+  logic        s1_is_one;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      s1_valid <= 1'b0;
+    end else begin
+      s1_valid   <= s0_valid;
+      s1_d_norm  <= s0_d_norm;
+      s1_r0      <= r0_lut;
+      s1_lz      <= s0_lz;
+      s1_is_zero <= s0_is_zero;
+      s1_is_one  <= s0_is_one;
+    end
+  end
+
+  logic [31:0] pp2_hh, pp2_hl, pp2_lh, pp2_ll;
+
+  always_comb begin
+    pp2_hh = s1_d_norm[31:16] * s1_r0[31:16];
+    pp2_hl = s1_d_norm[31:16] * s1_r0[15:0];
+    pp2_lh = s1_d_norm[15:0]  * s1_r0[31:16];
+    pp2_ll = s1_d_norm[15:0]  * s1_r0[15:0];
+  end
+
+  logic        s2_valid;
+  logic [31:0] s2_pp_hh, s2_pp_hl, s2_pp_lh, s2_pp_ll;
+  logic [31:0] s2_d_norm, s2_r0;
+  logic [5:0]  s2_lz;
+  logic        s2_is_zero, s2_is_one;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      s2_valid <= 1'b0;
+    end else begin
+      s2_valid   <= s1_valid;
+      s2_pp_hh   <= pp2_hh;
+      s2_pp_hl   <= pp2_hl;
+      s2_pp_lh   <= pp2_lh;
+      s2_pp_ll   <= pp2_ll;
+      s2_d_norm  <= s1_d_norm;
+      s2_r0      <= s1_r0;
+      s2_lz      <= s1_lz;
+      s2_is_zero <= s1_is_zero;
+      s2_is_one  <= s1_is_one;
+    end
+  end
+
+  logic [63:0] dr0_acc;
+  logic [31:0] dr0_q1_31;
+  logic [32:0] corr1;
+
+  always_comb begin
+    dr0_acc   = {s2_pp_hh, 32'b0} + {16'b0, s2_pp_hl, 16'b0}
+              + {16'b0, s2_pp_lh, 16'b0} + {32'b0, s2_pp_ll};
+    dr0_q1_31 = dr0_acc[63:32];
+    corr1     = {1'b1, 32'h0000_0000} - {1'b0, dr0_q1_31};
+  end
+
+  logic        s3_valid;
+  logic [31:0] s3_corr1;
+  logic        s3_corr1_ov;
+  logic [31:0] s3_d_norm, s3_r0;
+  logic [5:0]  s3_lz;
+  logic        s3_is_zero, s3_is_one;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      s3_valid <= 1'b0;
+    end else begin
+      s3_valid    <= s2_valid;
+      s3_corr1    <= corr1[31:0];
+      s3_corr1_ov <= corr1[32];
+      s3_d_norm   <= s2_d_norm;
+      s3_r0       <= s2_r0;
+      s3_lz       <= s2_lz;
+      s3_is_zero  <= s2_is_zero;
+      s3_is_one   <= s2_is_one;
+    end
+  end
+
+  logic [31:0] mul4_a, mul4_b;
+  logic [31:0] pp4_hh, pp4_hl, pp4_lh, pp4_ll;
+
+  always_comb begin
+    mul4_a = s3_r0;
+    mul4_b = s3_corr1;
+    pp4_hh = mul4_a[31:16] * mul4_b[31:16];
+    pp4_hl = mul4_a[31:16] * mul4_b[15:0];
+    pp4_lh = mul4_a[15:0]  * mul4_b[31:16];
+    pp4_ll = mul4_a[15:0]  * mul4_b[15:0];
+  end
+
+  logic        s4_valid;
+  logic [31:0] s4_pp_hh, s4_pp_hl, s4_pp_lh, s4_pp_ll;
+  logic        s4_corr1_ov;
+  logic [31:0] s4_r0;
+  logic [31:0] s4_d_norm;
+  logic [5:0]  s4_lz;
+  logic        s4_is_zero, s4_is_one;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      s4_valid <= 1'b0;
+    end else begin
+      s4_valid    <= s3_valid;
+      s4_pp_hh    <= pp4_hh;
+      s4_pp_hl    <= pp4_hl;
+      s4_pp_lh    <= pp4_lh;
+      s4_pp_ll    <= pp4_ll;
+      s4_corr1_ov <= s3_corr1_ov;
+      s4_r0       <= s3_r0;
+      s4_d_norm   <= s3_d_norm;
+      s4_lz       <= s3_lz;
+      s4_is_zero  <= s3_is_zero;
+      s4_is_one   <= s3_is_one;
+    end
+  end
+
+  logic [63:0] r1_full_acc;
+  logic [31:0] r1_extracted;
+
+  always_comb begin
+    r1_full_acc = {s4_pp_hh, 32'b0} + {16'b0, s4_pp_hl, 16'b0}
+                + {16'b0, s4_pp_lh, 16'b0} + {32'b0, s4_pp_ll};
+    r1_extracted = s4_corr1_ov ? s4_r0 : r1_full_acc[62:31];
+  end
+
+  logic        s5_valid;
+  logic [31:0] s5_r1;
+  logic [31:0] s5_d_norm;
+  logic [5:0]  s5_lz;
+  logic        s5_is_zero, s5_is_one;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      s5_valid <= 1'b0;
+    end else begin
+      s5_valid   <= s4_valid;
+      s5_r1      <= r1_extracted;
+      s5_d_norm  <= s4_d_norm;
+      s5_lz      <= s4_lz;
+      s5_is_zero <= s4_is_zero;
+      s5_is_one  <= s4_is_one;
+    end
+  end
+
+  logic [31:0] pp6_hh, pp6_hl, pp6_lh, pp6_ll;
+
+  always_comb begin
+    pp6_hh = s5_d_norm[31:16] * s5_r1[31:16];
+    pp6_hl = s5_d_norm[31:16] * s5_r1[15:0];
+    pp6_lh = s5_d_norm[15:0]  * s5_r1[31:16];
+    pp6_ll = s5_d_norm[15:0]  * s5_r1[15:0];
+  end
+
+  logic        s6_valid;
+  logic [31:0] s6_pp_hh, s6_pp_hl, s6_pp_lh, s6_pp_ll;
+  logic [31:0] s6_r1;
+  logic [5:0]  s6_lz;
+  logic        s6_is_zero, s6_is_one;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      s6_valid <= 1'b0;
+    end else begin
+      s6_valid   <= s5_valid;
+      s6_pp_hh   <= pp6_hh;
+      s6_pp_hl   <= pp6_hl;
+      s6_pp_lh   <= pp6_lh;
+      s6_pp_ll   <= pp6_ll;
+      s6_r1      <= s5_r1;
+      s6_lz      <= s5_lz;
+      s6_is_zero <= s5_is_zero;
+      s6_is_one  <= s5_is_one;
+    end
+  end
+
+  logic [63:0] dr1_acc;
+  logic [31:0] dr1_q1_31;
+  logic [32:0] corr2;
+
+  always_comb begin
+    dr1_acc   = {s6_pp_hh, 32'b0} + {16'b0, s6_pp_hl, 16'b0}
+              + {16'b0, s6_pp_lh, 16'b0} + {32'b0, s6_pp_ll};
+    dr1_q1_31 = dr1_acc[63:32];
+    corr2     = {1'b1, 32'h0000_0000} - {1'b0, dr1_q1_31};
+  end
+
+  logic        s7_valid;
+  logic [31:0] s7_corr2;
+  logic        s7_corr2_ov;
+  logic [31:0] s7_r1;
+  logic [5:0]  s7_lz;
+  logic        s7_is_zero, s7_is_one;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      s7_valid <= 1'b0;
+    end else begin
+      s7_valid    <= s6_valid;
+      s7_corr2    <= corr2[31:0];
+      s7_corr2_ov <= corr2[32];
+      s7_r1       <= s6_r1;
+      s7_lz       <= s6_lz;
+      s7_is_zero  <= s6_is_zero;
+      s7_is_one   <= s6_is_one;
+    end
+  end
+
+  logic [31:0] mul8_a, mul8_b;
+  logic [31:0] pp8_hh, pp8_hl, pp8_lh, pp8_ll;
+
+  always_comb begin
+    mul8_a = s7_r1;
+    mul8_b = s7_corr2;
+    pp8_hh = mul8_a[31:16] * mul8_b[31:16];
+    pp8_hl = mul8_a[31:16] * mul8_b[15:0];
+    pp8_lh = mul8_a[15:0]  * mul8_b[31:16];
+    pp8_ll = mul8_a[15:0]  * mul8_b[15:0];
+  end
+
+  logic        s8_valid;
+  logic [31:0] s8_pp_hh, s8_pp_hl, s8_pp_lh, s8_pp_ll;
+  logic        s8_corr2_ov;
+  logic [31:0] s8_r1;
+  logic [5:0]  s8_lz;
+  logic        s8_is_zero, s8_is_one;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      s8_valid <= 1'b0;
+    end else begin
+      s8_valid    <= s7_valid;
+      s8_pp_hh    <= pp8_hh;
+      s8_pp_hl    <= pp8_hl;
+      s8_pp_lh    <= pp8_lh;
+      s8_pp_ll    <= pp8_ll;
+      s8_corr2_ov <= s7_corr2_ov;
+      s8_r1       <= s7_r1;
+      s8_lz       <= s7_lz;
+      s8_is_zero  <= s7_is_zero;
+      s8_is_one   <= s7_is_one;
+    end
+  end
+
+  logic [63:0] r2_full_acc;
+  logic [31:0] r2;
+  logic [63:0] result_wide;
+  logic [31:0] result_final;
+
+  always_comb begin
+    r2_full_acc = {s8_pp_hh, 32'b0} + {16'b0, s8_pp_hl, 16'b0}
+                + {16'b0, s8_pp_lh, 16'b0} + {32'b0, s8_pp_ll};
+    r2 = s8_corr2_ov ? s8_r1 : r2_full_acc[62:31];
+
+    result_wide = 64'd0;
+    if (s8_is_zero) begin
+      result_final = 32'hFFFF_FFFF;
+    end else if (s8_is_one) begin
+      result_final = 32'hFFFF_FFFF;
+    end else if (s8_lz >= 6'd31) begin
+      result_wide = {32'd0, r2} << (s8_lz - 6'd31);
+      if (result_wide[63:32] != 32'd0)
+        result_final = 32'hFFFF_FFFF;
+      else
+        result_final = result_wide[31:0];
+    end else begin
+      result_final = r2 >> (6'd31 - s8_lz);
+    end
+  end
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      o_valid        <= 1'b0;
+      o_recip_q16_16 <= 32'd0;
+    end else begin
+      o_valid        <= s8_valid;
+      o_recip_q16_16 <= result_final;
+    end
+  end
+endmodule
