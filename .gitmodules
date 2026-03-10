@@ -1,3 +1,6 @@
 [submodule "dv/uvm/lib/uvm-1.2"]
 	path = dv/uvm/lib/uvm-1.2
 	url = https://github.com/accellera/uvm.git
+[submodule "dv/uvm/lib/uvm-verilator"]
+	path = dv/uvm/lib/uvm-verilator
+	url = https://github.com/chipsalliance/uvm-verilator.git
