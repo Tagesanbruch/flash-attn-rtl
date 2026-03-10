@@ -700,12 +700,16 @@ async def test_perf_counters_full_run(dut):
     q_beats_per_tile = TQ * D // ELEMS_PER_BEAT
     kv_beats_per_tile = TK * D // ELEMS_PER_BEAT
     qpair_per_compute = TQ // ROW_PAR
+    qpair_batch = 4
+    qpair_batches_per_compute = qpair_per_compute // qpair_batch
+    qk_pipe_latency = 8
+    qk_batch_cycles = qpair_batch * TK * DP_CHUNKS + qk_pipe_latency
 
     expected_comp_launch_count = num_q_tiles * num_k_tiles * 2
     expected_recip_count = S
     expected_cs_score_done = num_q_tiles * num_k_tiles * qpair_per_compute * TK
     expected_cs_softmax_prep = expected_cs_score_done
-    expected_cs_dp_run = expected_cs_score_done * DP_CHUNKS
+    expected_cs_dp_run = num_q_tiles * num_k_tiles * qpair_batches_per_compute * qk_batch_cycles
     expected_exp_eval = expected_cs_softmax_prep * 4
     expected_mul_eval = expected_cs_score_done * 2
 

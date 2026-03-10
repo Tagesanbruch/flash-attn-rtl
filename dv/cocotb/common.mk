@@ -33,6 +33,12 @@ MODULE_PY := test_fa_recip_nr_q16_16
 VERILOG_SOURCES := $(RTL_SOFTMAX_DIR)/fa_recip_nr_q16_16.sv
 endif
 
+ifeq ($(SELECTED_MODULE),fa_online_softmax_ctx)
+TOPLEVEL := fa_online_softmax_ctx
+MODULE_PY := test_fa_online_softmax_ctx
+VERILOG_SOURCES := $(RTL_CORE_DIR)/fa_online_softmax_ctx.sv
+endif
+
 ifeq ($(SELECTED_MODULE),fa_attention_ip_top)
 TOPLEVEL := fa_attention_ip_top
 MODULE_PY := test_fa_attention_ip_top_regs
@@ -42,7 +48,7 @@ VERILOG_SOURCES := \
 	$(RTL_SOFTMAX_DIR)/fa_exp_pwl_8seg_q1_15.sv \
 	$(RTL_SOFTMAX_DIR)/fa_recip_nr_q16_16.sv \
 	$(RTL_CORE_DIR)/fa_qk_dotprod_slice.sv \
-	$(RTL_CORE_DIR)/fa_online_softmax_pair.sv \
+	$(RTL_CORE_DIR)/fa_online_softmax_ctx.sv \
 	$(RTL_CORE_DIR)/fa_o_normalize_block.sv \
 	$(RTL_BUS_DIR)/fa_axi_lite_regs.sv \
 	$(RTL_BUS_DIR)/fa_dma_reader.sv \
@@ -72,7 +78,7 @@ VERILOG_SOURCES := \
 	$(RTL_SOFTMAX_DIR)/fa_exp_pwl_8seg_q1_15.sv \
 	$(RTL_SOFTMAX_DIR)/fa_recip_nr_q16_16.sv \
 	$(RTL_CORE_DIR)/fa_qk_dotprod_slice.sv \
-	$(RTL_CORE_DIR)/fa_online_softmax_pair.sv \
+	$(RTL_CORE_DIR)/fa_online_softmax_ctx.sv \
 	$(RTL_CORE_DIR)/fa_o_normalize_block.sv \
 	$(RTL_CORE_DIR)/fa_attention_core.sv
 # Small parameters for fast testing: S=32, D=8, TQ=8, TK=8
@@ -92,7 +98,7 @@ VERILOG_SOURCES := \
 	$(RTL_SOFTMAX_DIR)/fa_exp_pwl_8seg_q1_15.sv \
 	$(RTL_SOFTMAX_DIR)/fa_recip_nr_q16_16.sv \
 	$(RTL_CORE_DIR)/fa_qk_dotprod_slice.sv \
-	$(RTL_CORE_DIR)/fa_online_softmax_pair.sv \
+	$(RTL_CORE_DIR)/fa_online_softmax_ctx.sv \
 	$(RTL_CORE_DIR)/fa_o_normalize_block.sv \
 	$(RTL_CORE_DIR)/fa_attention_core.sv
 # No -G overrides: uses RTL defaults SEQ_LEN=256, D=64, TQ=32, TK=64

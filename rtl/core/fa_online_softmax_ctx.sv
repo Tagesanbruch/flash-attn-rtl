@@ -5,6 +5,9 @@ module fa_online_softmax_ctx (
   input  logic                i_row_start,
   input  logic                i_row_end,
   input  logic [1:0]          i_ctx_id,
+  input  logic signed [15:0]  i_init_m_q8_8,
+  input  logic        [31:0]  i_init_l_q16_16,
+  input  logic signed [31:0]  i_init_acc_q16_16,
   input  logic signed [15:0]  i_score_q8_8,
   input  logic signed [15:0]  i_value_q8_8,
   output logic                o_valid,
@@ -161,9 +164,9 @@ module fa_online_softmax_ctx (
         s0_ctx_id <= i_ctx_id;
         s0_score <= i_score_q8_8;
         s0_value <= i_value_q8_8;
-        s0_m_prev <= i_row_start ? -16'sd32768 : fwd_m_prev;
-        s0_l_prev <= i_row_start ? 32'd0 : fwd_l_prev;
-        s0_acc_prev <= i_row_start ? 32'sd0 : fwd_acc_prev;
+        s0_m_prev <= i_row_start ? i_init_m_q8_8 : fwd_m_prev;
+        s0_l_prev <= i_row_start ? i_init_l_q16_16 : fwd_l_prev;
+        s0_acc_prev <= i_row_start ? i_init_acc_q16_16 : fwd_acc_prev;
       end else begin
         s0_valid <= 1'b0;
       end
