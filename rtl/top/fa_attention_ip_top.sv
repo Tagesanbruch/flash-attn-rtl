@@ -65,6 +65,11 @@ module fa_attention_ip_top #(
   output logic                        m_axi_bready
 );
 
+`ifdef FA_UVM_DISABLE_REGS_PERF
+`define FA_UVM_DISABLE_REGS
+`define FA_UVM_DISABLE_PERF
+`endif
+
   // ---- Internal wires ----
   logic        start_pulse;
   logic        soft_reset;
@@ -137,6 +142,7 @@ module fa_attention_ip_top #(
   logic [31:0] wr_bytes;
 
   // ==== Register file ====
+`ifndef FA_UVM_DISABLE_REGS
   fa_axi_lite_regs u_regs (
     .clk(clk), .rst_n(rst_n),
     .s_axil_awaddr(s_axil_awaddr), .s_axil_awvalid(s_axil_awvalid), .s_axil_awready(s_axil_awready),
@@ -160,7 +166,29 @@ module fa_attention_ip_top #(
     .o_q_base(q_base), .o_k_base(k_base), .o_v_base(v_base), .o_o_base(o_base),
     .o_stride_bytes(stride_bytes), .o_neg_large_q8_8(neg_large_q8_8), .o_scale_q8_8(scale_q8_8)
   );
+`else
+  assign s_axil_awready = 1'b0;
+  assign s_axil_wready = 1'b0;
+  assign s_axil_bresp = 2'b00;
+  assign s_axil_bvalid = 1'b0;
+  assign s_axil_arready = 1'b0;
+  assign s_axil_rdata = '0;
+  assign s_axil_rresp = 2'b00;
+  assign s_axil_rvalid = 1'b0;
+  assign start_pulse = 1'b0;
+  assign soft_reset = 1'b0;
+  assign irq_en = 1'b0;
+  assign causal_en = 1'b0;
+  assign q_base = 64'd0;
+  assign k_base = 64'd0;
+  assign v_base = 64'd0;
+  assign o_base = 64'd0;
+  assign stride_bytes = 32'd0;
+  assign neg_large_q8_8 = 16'd0;
+  assign scale_q8_8 = 16'd0;
+`endif
 
+`ifndef FA_UVM_DISABLE_PERF
   fa_perf_counters u_perf (
     .clk(clk),
     .rst_n(rst_n),
@@ -208,8 +236,33 @@ module fa_attention_ip_top #(
     .o_cs_score_done_cycles(perf_cs_score_done_cycles),
     .o_cs_softmax_prep_cycles(perf_cs_softmax_prep_cycles)
   );
+`else
+  assign perf_run_count = 32'd0;
+  assign perf_busy_cycles = 32'd0;
+  assign perf_dma_rd_cmd_count = 32'd0;
+  assign perf_dma_rd_beat_count = 32'd0;
+  assign perf_dma_wr_cmd_count = 32'd0;
+  assign perf_dma_wr_beat_count = 32'd0;
+  assign perf_comp_launch_count = 32'd0;
+  assign perf_exp_eval_count = 32'd0;
+  assign perf_mul_eval_count = 32'd0;
+  assign perf_recip_req_count = 32'd0;
+  assign perf_recip_rsp_count = 32'd0;
+  assign perf_ms_load_q_cycles = 32'd0;
+  assign perf_ms_init_context_cycles = 32'd0;
+  assign perf_ms_load_k_cycles = 32'd0;
+  assign perf_ms_load_v_cycles = 32'd0;
+  assign perf_ms_compute_cycles = 32'd0;
+  assign perf_ms_normalize_cycles = 32'd0;
+  assign perf_ms_write_o_cycles = 32'd0;
+  assign perf_ms_next_q_cycles = 32'd0;
+  assign perf_cs_dp_run_cycles = 32'd0;
+  assign perf_cs_score_done_cycles = 32'd0;
+  assign perf_cs_softmax_prep_cycles = 32'd0;
+`endif
 
   // ==== DMA Reader ====
+`ifndef FA_UVM_DISABLE_DMA
   fa_dma_reader #(
     .AXI_ADDR_W(AXI_ADDR_W), .AXI_DATA_W(AXI_DATA_W), .AXI_ID_W(AXI_ID_W)
   ) u_dma_rd (
@@ -244,8 +297,39 @@ module fa_attention_ip_top #(
     .m_axi_bvalid(m_axi_bvalid), .m_axi_bready(m_axi_bready),
     .error(dma_wr_error), .wr_bytes(wr_bytes)
   );
+`else
+  assign m_axi_arid = '0;
+  assign m_axi_araddr = '0;
+  assign m_axi_arlen = '0;
+  assign m_axi_arsize = '0;
+  assign m_axi_arburst = '0;
+  assign m_axi_arvalid = 1'b0;
+  assign m_axi_rready = 1'b0;
+  assign m_axi_awid = '0;
+  assign m_axi_awaddr = '0;
+  assign m_axi_awlen = '0;
+  assign m_axi_awsize = '0;
+  assign m_axi_awburst = '0;
+  assign m_axi_awvalid = 1'b0;
+  assign m_axi_wdata = '0;
+  assign m_axi_wstrb = '0;
+  assign m_axi_wlast = 1'b0;
+  assign m_axi_wvalid = 1'b0;
+  assign m_axi_bready = 1'b0;
+  assign dma_rd_cmd_ready = 1'b0;
+  assign dma_rd_out_valid = 1'b0;
+  assign dma_rd_out_data = '0;
+  assign dma_rd_out_last = 1'b0;
+  assign dma_rd_error = 1'b0;
+  assign rd_bytes = 32'd0;
+  assign dma_wr_cmd_ready = 1'b0;
+  assign dma_wr_in_ready = 1'b0;
+  assign dma_wr_error = 1'b0;
+  assign wr_bytes = 32'd0;
+`endif
 
   // ==== Attention Core ====
+`ifndef FA_UVM_DISABLE_CORE
   fa_attention_core u_core (
     .clk(clk), .rst_n(rst_n),
     .i_start(start_pulse), .i_soft_reset(soft_reset),
@@ -278,6 +362,37 @@ module fa_attention_ip_top #(
     .o_perf_norm_recip_req(perf_norm_recip_req),
     .o_perf_norm_recip_rsp(perf_norm_recip_rsp)
   );
+`else
+  assign core_busy = 1'b0;
+  assign core_done = 1'b0;
+  assign core_error = 1'b0;
+  assign core_cycles = 32'd0;
+  assign dma_rd_cmd_valid = 1'b0;
+  assign dma_rd_cmd_addr = 32'd0;
+  assign dma_rd_cmd_len = 16'd0;
+  assign dma_rd_out_ready = 1'b0;
+  assign dma_wr_cmd_valid = 1'b0;
+  assign dma_wr_cmd_addr = 32'd0;
+  assign dma_wr_cmd_len = 16'd0;
+  assign dma_wr_in_valid = 1'b0;
+  assign dma_wr_in_data = '0;
+  assign dma_wr_in_last = 1'b0;
+  assign perf_ms_load_q = 1'b0;
+  assign perf_ms_init_context = 1'b0;
+  assign perf_ms_load_k = 1'b0;
+  assign perf_ms_load_v = 1'b0;
+  assign perf_ms_compute = 1'b0;
+  assign perf_ms_normalize = 1'b0;
+  assign perf_ms_write_o = 1'b0;
+  assign perf_ms_next_q = 1'b0;
+  assign perf_cs_dp_run = 1'b0;
+  assign perf_cs_score_done = 1'b0;
+  assign perf_cs_softmax_prep = 1'b0;
+  assign perf_comp_launch = 1'b0;
+  assign perf_active_rows = 2'b00;
+  assign perf_norm_recip_req = 1'b0;
+  assign perf_norm_recip_rsp = 1'b0;
+`endif
 
   // Error aggregation
   logic unused_irq;
