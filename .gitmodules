@@ -1,0 +1,3 @@
+[submodule "dv/uvm/lib/uvm-1.2"]
+	path = dv/uvm/lib/uvm-1.2
+	url = https://github.com/accellera/uvm.git
