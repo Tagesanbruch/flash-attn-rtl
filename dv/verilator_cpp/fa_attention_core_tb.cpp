@@ -343,33 +343,6 @@ struct ProfileEvent {
     uint32_t beats;
 };
 
-enum MasterState : uint8_t {
-    S_IDLE = 0,
-    S_LOAD_Q = 1,
-    S_INIT_CONTEXT = 2,
-    S_LOAD_K = 3,
-    S_LOAD_V = 4,
-    S_COMPUTE = 5,
-    S_NEXT_K = 6,
-    S_NORMALIZE = 7,
-    S_WRITE_O = 8,
-    S_NEXT_Q = 9,
-    S_DONE = 10,
-};
-
-enum ComputeState : uint8_t {
-    C_IDLE = 0,
-    C_DP_INIT = 1,
-    C_DP_RUN = 2,
-    C_SCORE_DONE = 3,
-    C_SOFTMAX_PREP = 4,
-    C_PV_ACC = 5,
-    C_PV_DONE = 6,
-    C_NEXT_KJ = 7,
-    C_NEXT_QI = 8,
-    C_DONE = 9,
-};
-
 static TbConfig parse_args(int argc, char** argv) {
     TbConfig cfg;
     for (int i = 1; i < argc; ++i) {
@@ -459,13 +432,21 @@ int run_sim(const TbConfig& cfg) {
     uint64_t rd_k_cycles = 0;
     uint64_t rd_v_cycles = 0;
     uint64_t wr_o_cycles = 0;
-    uint64_t ms_compute_cycles = 0;
-    uint64_t ms_normalize_cycles = 0;
-    uint64_t ms_other_cycles = 0;
-    uint64_t cs_dp_cycles = 0;
-    uint64_t cs_score_cycles = 0;
-    uint64_t cs_softmax_pv_cycles = 0;
-    uint64_t cs_ctrl_cycles = 0;
+    uint64_t busy_cycles = 0;
+    uint64_t perf_ms_load_q_cycles = 0;
+    uint64_t perf_ms_init_context_cycles = 0;
+    uint64_t perf_ms_load_k_cycles = 0;
+    uint64_t perf_ms_load_v_cycles = 0;
+    uint64_t perf_ms_compute_cycles = 0;
+    uint64_t perf_ms_normalize_cycles = 0;
+    uint64_t perf_ms_write_o_cycles = 0;
+    uint64_t perf_ms_next_q_cycles = 0;
+    uint64_t perf_cs_dp_cycles = 0;
+    uint64_t perf_cs_score_cycles = 0;
+    uint64_t perf_cs_softmax_cycles = 0;
+    uint64_t perf_comp_launch_count = 0;
+    uint64_t perf_norm_recip_req_count = 0;
+    uint64_t perf_norm_recip_rsp_count = 0;
 
     bool profile_active = false;
 
@@ -552,25 +533,21 @@ int run_sim(const TbConfig& cfg) {
 
         if (dut->o_busy) profile_active = true;
         if (profile_active && in_main_loop) {
-            uint8_t ms = dut->rootp->fa_attention_core__DOT__ms;
-            uint8_t cs = dut->rootp->fa_attention_core__DOT__cs;
-
-            if (ms == S_COMPUTE) {
-                ms_compute_cycles++;
-                if (cs == C_DP_INIT || cs == C_DP_RUN) {
-                    cs_dp_cycles++;
-                } else if (cs == C_SCORE_DONE) {
-                    cs_score_cycles++;
-                } else if (cs == C_SOFTMAX_PREP || cs == C_PV_ACC || cs == C_PV_DONE) {
-                    cs_softmax_pv_cycles++;
-                } else {
-                    cs_ctrl_cycles++;
-                }
-            } else if (ms == S_NORMALIZE) {
-                ms_normalize_cycles++;
-            } else {
-                ms_other_cycles++;
-            }
+            if (dut->o_busy) busy_cycles++;
+            if (dut->o_perf_ms_load_q) perf_ms_load_q_cycles++;
+            if (dut->o_perf_ms_init_context) perf_ms_init_context_cycles++;
+            if (dut->o_perf_ms_load_k) perf_ms_load_k_cycles++;
+            if (dut->o_perf_ms_load_v) perf_ms_load_v_cycles++;
+            if (dut->o_perf_ms_compute) perf_ms_compute_cycles++;
+            if (dut->o_perf_ms_normalize) perf_ms_normalize_cycles++;
+            if (dut->o_perf_ms_write_o) perf_ms_write_o_cycles++;
+            if (dut->o_perf_ms_next_q) perf_ms_next_q_cycles++;
+            if (dut->o_perf_cs_dp_run) perf_cs_dp_cycles++;
+            if (dut->o_perf_cs_score_done) perf_cs_score_cycles++;
+            if (dut->o_perf_cs_softmax_prep) perf_cs_softmax_cycles++;
+            if (dut->o_perf_comp_launch) perf_comp_launch_count++;
+            if (dut->o_perf_norm_recip_req) perf_norm_recip_req_count++;
+            if (dut->o_perf_norm_recip_rsp) perf_norm_recip_rsp_count++;
         }
     };
 
@@ -635,6 +612,21 @@ int run_sim(const TbConfig& cfg) {
 
     std::cout << std::fixed << std::setprecision(6);
     std::cout << "[Verilator C++ TB] DONE cycles=" << cycles << " o_cycles=" << dut->o_cycles << "\n";
+    std::cout << "[Verilator C++ TB] PERF summary: busy=" << busy_cycles
+              << " load_q=" << perf_ms_load_q_cycles
+              << " init=" << perf_ms_init_context_cycles
+              << " load_k=" << perf_ms_load_k_cycles
+              << " load_v=" << perf_ms_load_v_cycles
+              << " compute=" << perf_ms_compute_cycles
+              << " norm=" << perf_ms_normalize_cycles
+              << " write_o=" << perf_ms_write_o_cycles
+              << " next_q=" << perf_ms_next_q_cycles << "\n";
+    std::cout << "[Verilator C++ TB] PERF compute split: dp=" << perf_cs_dp_cycles
+              << " score=" << perf_cs_score_cycles
+              << " softmax=" << perf_cs_softmax_cycles
+              << " comp_launch=" << perf_comp_launch_count
+              << " recip_req=" << perf_norm_recip_req_count
+              << " recip_rsp=" << perf_norm_recip_rsp_count << "\n";
     std::cout << "[Verilator C++ TB] RTL vs FixedLike: MAE=" << m_rtl_fixed.mae
               << " MAX_AE=" << m_rtl_fixed.max_ae
               << " @(" << m_rtl_fixed.max_i << "," << m_rtl_fixed.max_d << ")\n";
@@ -667,24 +659,35 @@ int run_sim(const TbConfig& cfg) {
     if (!cfg.summary_csv.empty()) {
         uint64_t dma_cycles = rd_q_cycles + rd_k_cycles + rd_v_cycles + wr_o_cycles;
         uint64_t non_dma_cycles = (cycles > dma_cycles) ? (cycles - dma_cycles) : 0;
-        uint64_t prof_total = ms_compute_cycles + ms_normalize_cycles + ms_other_cycles;
+        uint64_t prof_total = perf_ms_load_q_cycles + perf_ms_init_context_cycles
+                            + perf_ms_load_k_cycles + perf_ms_load_v_cycles
+                            + perf_ms_compute_cycles + perf_ms_normalize_cycles
+                            + perf_ms_write_o_cycles + perf_ms_next_q_cycles;
         uint64_t prof_unaccounted = (cycles > prof_total) ? (cycles - prof_total) : 0;
         std::ofstream sf(cfg.summary_csv);
         sf << "metric,value\n";
         sf << "total_cycles," << cycles << "\n";
         sf << "o_cycles," << static_cast<uint64_t>(dut->o_cycles) << "\n";
+        sf << "busy_cycles," << busy_cycles << "\n";
         sf << "rd_q_cycles," << rd_q_cycles << "\n";
         sf << "rd_k_cycles," << rd_k_cycles << "\n";
         sf << "rd_v_cycles," << rd_v_cycles << "\n";
         sf << "wr_o_cycles," << wr_o_cycles << "\n";
         sf << "non_dma_cycles," << non_dma_cycles << "\n";
-        sf << "ms_compute_cycles," << ms_compute_cycles << "\n";
-        sf << "ms_normalize_cycles," << ms_normalize_cycles << "\n";
-        sf << "ms_other_cycles," << ms_other_cycles << "\n";
-        sf << "cs_dp_cycles," << cs_dp_cycles << "\n";
-        sf << "cs_score_cycles," << cs_score_cycles << "\n";
-        sf << "cs_softmax_pv_cycles," << cs_softmax_pv_cycles << "\n";
-        sf << "cs_ctrl_cycles," << cs_ctrl_cycles << "\n";
+        sf << "perf_ms_load_q_cycles," << perf_ms_load_q_cycles << "\n";
+        sf << "perf_ms_init_context_cycles," << perf_ms_init_context_cycles << "\n";
+        sf << "perf_ms_load_k_cycles," << perf_ms_load_k_cycles << "\n";
+        sf << "perf_ms_load_v_cycles," << perf_ms_load_v_cycles << "\n";
+        sf << "perf_ms_compute_cycles," << perf_ms_compute_cycles << "\n";
+        sf << "perf_ms_normalize_cycles," << perf_ms_normalize_cycles << "\n";
+        sf << "perf_ms_write_o_cycles," << perf_ms_write_o_cycles << "\n";
+        sf << "perf_ms_next_q_cycles," << perf_ms_next_q_cycles << "\n";
+        sf << "perf_cs_dp_cycles," << perf_cs_dp_cycles << "\n";
+        sf << "perf_cs_score_cycles," << perf_cs_score_cycles << "\n";
+        sf << "perf_cs_softmax_cycles," << perf_cs_softmax_cycles << "\n";
+        sf << "perf_comp_launch_count," << perf_comp_launch_count << "\n";
+        sf << "perf_norm_recip_req_count," << perf_norm_recip_req_count << "\n";
+        sf << "perf_norm_recip_rsp_count," << perf_norm_recip_rsp_count << "\n";
         sf << "profiled_total_cycles," << prof_total << "\n";
         sf << "profile_unaccounted_cycles," << prof_unaccounted << "\n";
         sf << "rtl_fp32_mae," << m_rtl_fp32.mae << "\n";
