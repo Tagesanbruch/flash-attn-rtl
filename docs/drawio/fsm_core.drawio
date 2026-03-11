@@ -1,0 +1,167 @@
+<mxfile host="65bd71144e">
+    <diagram id="fsm_core" name="Core State Machine">
+        <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="850" math="0" shadow="0">
+            <root>
+                <mxCell id="0" />
+                <mxCell id="1" parent="0" />
+                
+                <mxCell id="title" value="fa_attention_core 主状态机 (ms) 与 子状态机 (cs) 调度流程" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=16;" vertex="1" parent="1">
+                    <mxGeometry x="350" y="40" width="400" height="30" as="geometry" />
+                </mxCell>
+
+                <!-- Main State Machine (ms) -->
+                <mxCell id="m_idle" value="S_IDLE&#10;(等待 i_start)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+                    <mxGeometry x="150" y="100" width="120" height="60" as="geometry" />
+                </mxCell>
+
+                <mxCell id="m_load_q" value="S_LOAD_Q&#10;(读 Q Tile)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+                    <mxGeometry x="150" y="200" width="120" height="60" as="geometry" />
+                </mxCell>
+
+                <mxCell id="m_init" value="S_INIT_CONTEXT&#10;(初始化 m, l, acc)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+                    <mxGeometry x="150" y="300" width="130" height="60" as="geometry" />
+                </mxCell>
+
+                <mxCell id="m_load_k" value="S_LOAD_K&#10;(读 K Tile)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+                    <mxGeometry x="150" y="400" width="120" height="60" as="geometry" />
+                </mxCell>
+
+                <mxCell id="m_load_v" value="S_LOAD_V&#10;(读 V Tile)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+                    <mxGeometry x="150" y="500" width="120" height="60" as="geometry" />
+                </mxCell>
+
+                <mxCell id="m_compute" value="S_COMPUTE&#10;(进入子状态机计算)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+                    <mxGeometry x="140" y="600" width="140" height="60" as="geometry" />
+                </mxCell>
+
+                <mxCell id="m_norm" value="S_NORMALIZE&#10;(倒数与归一化)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+                    <mxGeometry x="150" y="700" width="120" height="60" as="geometry" />
+                </mxCell>
+
+                <mxCell id="m_write_o" value="S_WRITE_O&#10;(写回 O Tile)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+                    <mxGeometry x="150" y="800" width="120" height="60" as="geometry" />
+                </mxCell>
+
+                <mxCell id="m_next_q" value="S_NEXT_Q&#10;(是否所有Q完成?)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+                    <mxGeometry x="135" y="900" width="150" height="80" as="geometry" />
+                </mxCell>
+
+                <mxCell id="m_done" value="S_DONE&#10;(输出完毕标识)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+                    <mxGeometry x="360" y="910" width="120" height="60" as="geometry" />
+                </mxCell>
+
+                <!-- Sub State Mache (cs) box -->
+                <mxCell id="cs_box" value="Sub State Machine (cs) - Executed during S_COMPUTE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;dashed=1;fontSize=14;" vertex="1" parent="1">
+                    <mxGeometry x="400" y="480" width="460" height="300" as="geometry" />
+                </mxCell>
+
+                <mxCell id="c_dp_run" value="C_DP_RUN&#10;(执行 QK 前向计算)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="cs_box">
+                    <mxGeometry x="160" y="50" width="140" height="60" as="geometry" />
+                </mxCell>
+
+                <mxCell id="c_score_done" value="C_SCORE_DONE&#10;(局部和等待与归并)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="cs_box">
+                    <mxGeometry x="160" y="140" width="140" height="60" as="geometry" />
+                </mxCell>
+
+                <mxCell id="c_softmax" value="C_SOFTMAX_PREP&#10;(Online Softmax 流水推进)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="cs_box">
+                    <mxGeometry x="150" y="220" width="160" height="60" as="geometry" />
+                </mxCell>
+
+                <!-- Edges for MS -->
+                <mxCell id="e_m1" edge="1" parent="1" source="m_idle" target="m_load_q">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e_m2" edge="1" parent="1" source="m_load_q" target="m_init">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e_m3" edge="1" parent="1" source="m_init" target="m_load_k">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e_m4" edge="1" parent="1" source="m_load_k" target="m_load_v">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e_m5" edge="1" parent="1" source="m_load_v" target="m_compute">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                
+                <mxCell id="e_kv_loop" edge="1" parent="1" source="m_compute" target="m_load_k">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="80" y="630" />
+                            <mxPoint x="80" y="430" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="lbl_kv_loop" value="K/V Tile Unfinished" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="e_kv_loop">
+                    <mxGeometry x="0.1" y="2" relative="1" as="geometry">
+                        <mxPoint as="offset" />
+                    </mxGeometry>
+                </mxCell>
+
+                <mxCell id="e_m6" edge="1" parent="1" source="m_compute" target="m_norm">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="lbl_kv_done" value="K/V Tiles Done" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="e_m6">
+                    <mxGeometry x="-0.2" relative="1" as="geometry">
+                        <mxPoint as="offset" />
+                    </mxGeometry>
+                </mxCell>
+
+                <mxCell id="e_m7" edge="1" parent="1" source="m_norm" target="m_write_o">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e_m8" edge="1" parent="1" source="m_write_o" target="m_next_q">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e_m9" edge="1" parent="1" source="m_next_q" target="m_done">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="lbl_q_done" value="Yes" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="e_m9">
+                    <mxGeometry x="-0.2" relative="1" as="geometry">
+                        <mxPoint as="offset" />
+                    </mxGeometry>
+                </mxCell>
+
+                <mxCell id="e_q_loop" edge="1" parent="1" source="m_next_q" target="m_load_q">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="40" y="940" />
+                            <mxPoint x="40" y="230" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="lbl_q_loop" value="No" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="e_q_loop">
+                    <mxGeometry x="0.1" y="-2" relative="1" as="geometry">
+                        <mxPoint as="offset" />
+                    </mxGeometry>
+                </mxCell>
+
+                <!-- Edges for CS -->
+                <mxCell id="e_c1" edge="1" parent="cs_box" source="c_dp_run" target="c_score_done">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e_c2" edge="1" parent="cs_box" source="c_score_done" target="c_softmax">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e_c3" edge="1" parent="cs_box" source="c_softmax" target="c_dp_run">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="90" y="250" />
+                            <mxPoint x="90" y="80" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+
+                <mxCell id="e_ms_cs" edge="1" parent="1" source="m_compute" target="c_dp_run">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="400" y="630" />
+                            <mxPoint x="400" y="560" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

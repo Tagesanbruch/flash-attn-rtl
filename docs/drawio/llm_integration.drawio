@@ -1,0 +1,88 @@
+<mxfile host="65bd71144e">
+    <diagram id="llm_int" name="Software Hardware Integration">
+        <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="850" math="0" shadow="0">
+            <root>
+                <mxCell id="0" />
+                <mxCell id="1" parent="0" />
+                
+                <mxCell id="title" value="LLM 软硬协同推理架构 (Software-Hardware Integration)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=18;" vertex="1" parent="1">
+                    <mxGeometry x="250" y="40" width="600" height="30" as="geometry" />
+                </mxCell>
+
+                <!-- Software Stack -->
+                <mxCell id="sw_stack" value="CPU Software Inference Framework (e.g., Llama.cpp / Custom C Engine)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+                    <mxGeometry x="120" y="120" width="860" height="240" as="geometry" />
+                </mxCell>
+
+                <mxCell id="sw_proj" value="Linear Layers&#10;(Q/K/V Proj, FFN)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;" vertex="1" parent="sw_stack">
+                    <mxGeometry x="60" y="60" width="160" height="60" as="geometry" />
+                </mxCell>
+
+                <mxCell id="sw_quant" value="Quantize FP32 -&amp;gt; Q8.8&#10;(Data Prep)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="sw_stack">
+                    <mxGeometry x="280" y="60" width="140" height="60" as="geometry" />
+                </mxCell>
+
+                <mxCell id="sw_driver" value="IP Driver / DPI-C Interface&#10;1. Configure Base Addr&#10;2. Set CTRL Start&#10;3. Poll STATUS Done" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="sw_stack">
+                    <mxGeometry x="460" y="60" width="180" height="150" as="geometry" />
+                </mxCell>
+
+                <mxCell id="sw_dequant" value="Dequantize Q8.8-&amp;gt;FP32&#10;+ Add to Residual" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="sw_stack">
+                    <mxGeometry x="680" y="60" width="140" height="60" as="geometry" />
+                </mxCell>
+
+                <!-- Memory Hierarchy -->
+                <mxCell id="mem_bus" value="Shared System Memory (DDR / HBM)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#eeeeee;strokeColor=#36393d;fontStyle=1;" vertex="1" parent="1">
+                    <mxGeometry x="270" y="420" width="560" height="80" as="geometry" />
+                </mxCell>
+
+                <!-- Hardware Component -->
+                <mxCell id="hw_ip" value="FlashAttention Accelerator IP (RTL)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=top;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+                    <mxGeometry x="120" y="560" width="860" height="200" as="geometry" />
+                </mxCell>
+
+                <mxCell id="hw_regs" value="AXI-Lite Cfg State" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;" vertex="1" parent="hw_ip">
+                    <mxGeometry x="60" y="60" width="140" height="60" as="geometry" />
+                </mxCell>
+                
+                <mxCell id="hw_core" value="SDPA Core&#10;(Online Softmax, Tiling)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;" vertex="1" parent="hw_ip">
+                    <mxGeometry x="360" y="60" width="140" height="100" as="geometry" />
+                </mxCell>
+
+                <mxCell id="hw_dma" value="AXI4 DMA Engine" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;" vertex="1" parent="hw_ip">
+                    <mxGeometry x="660" y="60" width="140" height="60" as="geometry" />
+                </mxCell>
+
+                <!-- Arrows Setup -->
+                <mxCell id="e1" edge="1" parent="1" source="sw_proj" target="sw_quant">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e2" edge="1" parent="1" source="sw_quant" target="mem_bus">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e3" edge="1" parent="1" source="sw_driver" target="hw_regs">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e4" edge="1" parent="1" source="mem_bus" target="hw_dma">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e5" edge="1" parent="hw_ip" source="hw_dma" target="hw_core">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e6" edge="1" parent="hw_ip" source="hw_core" target="hw_dma">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="600" y="130" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e7" edge="1" parent="1" source="sw_driver" target="sw_dequant">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="e8" edge="1" parent="1" source="mem_bus" target="sw_dequant">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

@@ -1,0 +1,115 @@
+<mxfile host="65bd71144e">
+    <diagram id="uvm_tb" name="UVM Framework Architecture">
+        <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="850" math="0" shadow="0">
+            <root>
+                <mxCell id="0" />
+                <mxCell id="1" parent="0" />
+                
+                <mxCell id="bg" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;" vertex="1" parent="1">
+                    <mxGeometry x="80" y="80" width="940" height="660" as="geometry" />
+                </mxCell>
+                <mxCell id="bg_label" value="UVM Testbench Architecture (Planned)&#10;fa_attention_ip_top_tb" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=16;" vertex="1" parent="1">
+                    <mxGeometry x="400" y="90" width="300" height="40" as="geometry" />
+                </mxCell>
+
+                <!-- DUT -->
+                <mxCell id="dut" value="DUT: fa_attention_ip_top" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=18;" vertex="1" parent="1">
+                    <mxGeometry x="380" y="580" width="340" height="100" as="geometry" />
+                </mxCell>
+
+                <!-- VSEQ -->
+                <mxCell id="vseq" value="Virtual Sequencer / Sequences" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcccc;strokeColor=#36393d;" vertex="1" parent="1">
+                    <mxGeometry x="450" y="160" width="200" height="60" as="geometry" />
+                </mxCell>
+
+                <!-- Agents -->
+                <mxCell id="axi_lite_agent" value="AXI-Lite Master Agent&#10;(Registers Cfg)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+                    <mxGeometry x="140" y="320" width="200" height="120" as="geometry" />
+                </mxCell>
+
+                <mxCell id="axi_mem_agent" value="AXI4 Memory Slave Agent&#10;(RAM Model)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+                    <mxGeometry x="760" y="320" width="200" height="120" as="geometry" />
+                </mxCell>
+
+                <!-- Reference Model / Scoreboard -->
+                <mxCell id="reg_model" value="UVM Register Model&#10;(RAL)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+                    <mxGeometry x="380" y="320" width="140" height="80" as="geometry" />
+                </mxCell>
+
+                <mxCell id="scoreboard" value="Scoreboard&#10;+ Reference Model (C++)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+                    <mxGeometry x="580" y="320" width="140" height="80" as="geometry" />
+                </mxCell>
+                
+                <mxCell id="cov" value="Coverage Collector" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+                    <mxGeometry x="380" y="440" width="340" height="40" as="geometry" />
+                </mxCell>
+
+                <!-- Lines -->
+                <!-- VSEQ to Agents -->
+                <mxCell id="v_a1" edge="1" parent="1" source="vseq" target="axi_lite_agent">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="240" y="190" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="v_a2" edge="1" parent="1" source="vseq" target="axi_mem_agent">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="860" y="190" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+
+                <!-- VSEQ to RAL -->
+                <mxCell id="v_ral" edge="1" parent="1" source="vseq" target="reg_model">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+
+                <!-- Agents to DUT Interfaces -->
+                <mxCell id="a_dut1" edge="1" parent="1" source="axi_lite_agent" target="dut">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="240" y="630" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="lbl_axi_lite" value="AXI-Lite Intf" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="a_dut1">
+                    <mxGeometry x="0.2" relative="1" as="geometry">
+                        <mxPoint as="offset" />
+                    </mxGeometry>
+                </mxCell>
+
+                <mxCell id="a_dut2" edge="1" parent="1" source="dut" target="axi_mem_agent">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="860" y="630" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="lbl_axi_mem" value="AXI4 Master Intf" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="a_dut2">
+                    <mxGeometry x="-0.2" relative="1" as="geometry">
+                        <mxPoint as="offset" />
+                    </mxGeometry>
+                </mxCell>
+
+                <!-- Connections to Scoreboard -->
+                <mxCell id="a_sb1" edge="1" parent="1" source="axi_lite_agent" target="scoreboard">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="340" y="380" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="a_sb2" edge="1" parent="1" source="axi_mem_agent" target="scoreboard">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="760" y="360" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>
