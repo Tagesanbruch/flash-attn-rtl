@@ -278,7 +278,7 @@ module fa_attention_core #(
     end
     for (int lane = 0; lane < NORM_LANES; lane++) begin
       if ((norm_d + lane) < D)
-        norm_acc_chunk[lane] = row_acc[norm_qi][norm_d + lane];
+        norm_acc_chunk[lane] = row_acc[norm_qi][norm_d + lane] <<< 8;
       else
         norm_acc_chunk[lane] = 64'sd0;
       norm_acc_flat[lane*64 +: 64] = norm_acc_chunk[lane];
