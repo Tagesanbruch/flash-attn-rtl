@@ -1,0 +1,11 @@
+{
+  "config": { "hscale": 1 },
+  "signal": [
+    { "name": "q_tile",  "wave": "=.....=.....=.....", "data": ["Q0", "Q1", "Q2"] },
+    { "name": "kv_idx",  "wave": "=.=.=.=.=.=.=.=.=.", "data": ["KV0", "KV1", "KV2", "KV3", "KV0", "KV1", "KV2", "KV3", "KV0", "KV1"] },
+    { "name": "bank0",   "wave": "=...=...=...=...=.", "data": ["ld0", "pf2", "ld0", "pf2", "ld0"] },
+    { "name": "bank1",   "wave": ".=...=...=...=...=", "data": ["ld1", "pf3", "ld1", "pf3", "ld1"] },
+    { "name": "compute", "wave": "0.1...0.1...0.1...", "data": ["Q×KV", "Q×KV", "Q×KV"] },
+    { "name": "wr_o",    "wave": "0....10....10....1" }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "config": { "hscale": 1 },
+  "signal": [
+    { "name": "s",   "wave": "0.=.....", "data": ["s_j"] },
+    { "name": "v",   "wave": "0.=.....", "data": ["v_j"] },
+    { "name": "m",   "wave": "x=......" },
+    { "name": "m'",  "wave": "x..=....", "data": ["max"] },
+    { "name": "α",   "wave": "x...=...", "data": ["e^(m-m')"] },
+    { "name": "β",   "wave": "x...=...", "data": ["e^(s-m')"] },
+    { "name": "l'",  "wave": "x....=..", "data": ["lα+β"] },
+    { "name": "a'",  "wave": "x.....=.", "data": ["aα+βv"] },
+    { "name": "o",   "wave": "x......=", "data": ["a'/l'"] }
+  ]
+}

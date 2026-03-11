@@ -1,0 +1,13 @@
+{
+  "config": { "hscale": 1 },
+  "signal": [
+    { "name": "q_reg",  "wave": "x=......" },
+    { "name": "k_reg",  "wave": "x=......" },
+    { "name": "mul32",  "wave": "x.=.....", "data": ["32xmul"] },
+    { "name": "add_l1", "wave": "x..=....", "data": ["L1"] },
+    { "name": "add_l2", "wave": "x...=...", "data": ["L2"] },
+    { "name": "add_l3", "wave": "x....=..", "data": ["L3"] },
+    { "name": "sum_r",  "wave": "x.....=.", "data": ["psum"] },
+    { "name": "score",  "wave": "x......=", "data": ["dp32"] }
+  ]
+}

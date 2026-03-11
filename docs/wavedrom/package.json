@@ -1,0 +1,17 @@
+{
+  "name": "wavedrom",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "render": "node render.js",
+    "test": "node render.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Offline WaveDrom assets for report_0310",
+  "dependencies": {
+    "onml": "^2.1.0",
+    "wavedrom": "^3.5.0"
+  }
+}

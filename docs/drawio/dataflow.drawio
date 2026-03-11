@@ -1,0 +1,104 @@
+<mxfile host="65bd71144e">
+    <diagram id="dataflow_diagram" name="Q/K/V/O Data Flow">
+        <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="850" math="0" shadow="0">
+            <root>
+                <mxCell id="0" />
+                <mxCell id="1" parent="0" />
+                
+                <!-- HBM / Main Memory side -->
+                <mxCell id="hbm" value="AXI Memory (HBM / DDR)&#10;Q / K / V / O Tensors" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+                    <mxGeometry x="120" y="40" width="860" height="60" as="geometry" />
+                </mxCell>
+                
+                <!-- DMA Transactions -->
+                <mxCell id="dma_q" value="Fetch Q Tile&#10;(Scatter-Gather)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;" edge="1" parent="1" source="hbm" target="q_tile">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="dma_k" value="Fetch K Tile" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;" edge="1" parent="1" source="hbm" target="k_tile">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="dma_v" value="Fetch V Tile" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;" edge="1" parent="1" source="hbm" target="v_tile">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="dma_o" value="Write O Tile" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;" edge="1" parent="1" source="o_tile" target="hbm">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+
+                <!-- SRAM Tiles -->
+                <mxCell id="sram_box" value="On-Chip Tile Buffers (SRAM)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eeeeee;strokeColor=#36393d;verticalAlign=top;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+                    <mxGeometry x="120" y="180" width="860" height="120" as="geometry" />
+                </mxCell>
+                <mxCell id="q_tile" value="Q Tile&#10;(1×32×64)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+                    <mxGeometry x="160" y="220" width="140" height="60" as="geometry" />
+                </mxCell>
+                <mxCell id="k_tile" value="K Tile&#10;(2×64×64)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+                    <mxGeometry x="360" y="220" width="140" height="60" as="geometry" />
+                </mxCell>
+                <mxCell id="v_tile" value="V Tile&#10;(2×64×64)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+                    <mxGeometry x="580" y="220" width="140" height="60" as="geometry" />
+                </mxCell>
+                <mxCell id="o_tile" value="O Tile&#10;(2×32×64)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+                    <mxGeometry x="800" y="220" width="140" height="60" as="geometry" />
+                </mxCell>
+
+                <!-- Compute Engine Pipeline -->
+                <mxCell id="comp_box" value="FlashAttention Compute Pipeline" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;fontStyle=1;fontSize=14;" vertex="1" parent="1">
+                    <mxGeometry x="120" y="380" width="860" height="280" as="geometry" />
+                </mxCell>
+
+                <!-- Modules -->
+                <mxCell id="qk_dot" value="QK Dot-Product Array&#10;Q * K^T&#10;Outputs: s_ij" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+                    <mxGeometry x="220" y="440" width="180" height="80" as="geometry" />
+                </mxCell>
+                
+                <mxCell id="sm_ctx" value="Online Softmax Context&#10;(exp, sum, scale)&#10;Outputs: p_ij" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+                    <mxGeometry x="460" y="440" width="180" height="80" as="geometry" />
+                </mxCell>
+
+                <mxCell id="pv_dot" value="PV Dot-Product Array&#10;p_ij * V&#10;Outputs: o_i" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+                    <mxGeometry x="700" y="440" width="180" height="80" as="geometry" />
+                </mxCell>
+
+                <!-- Bottom loop scale / feedback -->
+                <mxCell id="acc_loop" value="Accumulator Rescale&#10;(o_i_new = o_i * α + o_ij)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+                    <mxGeometry x="580" y="560" width="300" height="60" as="geometry" />
+                </mxCell>
+
+                <!-- Data Flow Arrows -->
+                <mxCell id="edge_q" edge="1" parent="1" source="q_tile" target="qk_dot">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="edge_k" edge="1" parent="1" source="k_tile" target="qk_dot">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="edge_qk_sm" edge="1" parent="1" source="qk_dot" target="sm_ctx">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="edge_sm_pv" edge="1" parent="1" source="sm_ctx" target="pv_dot">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="edge_v_pv" edge="1" parent="1" source="v_tile" target="pv_dot">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="edge_sm_acc" edge="1" parent="1" source="sm_ctx" target="acc_loop">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="550" y="590" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="edge_pv_acc" edge="1" parent="1" source="pv_dot" target="acc_loop">
+                    <mxGeometry relative="1" as="geometry" />
+                </mxCell>
+                <mxCell id="edge_acc_o" edge="1" parent="1" source="acc_loop" target="o_tile">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="870" y="590" />
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

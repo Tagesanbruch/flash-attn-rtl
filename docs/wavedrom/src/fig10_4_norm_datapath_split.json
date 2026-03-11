@@ -1,0 +1,12 @@
+{
+  "config": { "hscale": 1 },
+  "signal": [
+    { "name": "acc64",   "wave": "x=....." },
+    { "name": "recip",   "wave": "x=....." },
+    { "name": "pp_gen",  "wave": "x.=....", "data": ["pp"] },
+    { "name": "pp_reg",  "wave": "x..=...", "data": ["pp_r"] },
+    { "name": "recomb",  "wave": "x...=..", "data": ["mul_r"] },
+    { "name": "rnd_sat", "wave": "x....=.", "data": ["sat"] },
+    { "name": "o_q8.8",  "wave": "x.....=", "data": ["o"] }
+  ]
+}
