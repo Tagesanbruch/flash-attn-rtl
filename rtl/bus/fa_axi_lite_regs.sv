@@ -60,6 +60,8 @@ module fa_axi_lite_regs #(
   output logic [63:0]          o_v_base,
   output logic [63:0]          o_o_base,
   output logic [31:0]          o_stride_bytes,
+  output logic [31:0]          o_num_heads,
+  output logic [31:0]          o_head_stride_bytes,
   output logic [15:0]          o_neg_large_q8_8,
   output logic [15:0]          o_scale_q8_8
 );
@@ -78,6 +80,8 @@ module fa_axi_lite_regs #(
   localparam logic [7:0] REG_NEG_LARGE    = 8'h38;
   localparam logic [7:0] REG_SCALE        = 8'h3C;
   localparam logic [7:0] REG_CYCLES       = 8'h40;
+  localparam logic [7:0] REG_NUM_HEADS    = 8'h44;
+  localparam logic [7:0] REG_HEAD_STRIDE  = 8'h48;
   localparam logic [7:0] REG_PERF_RUN_COUNT            = 8'h80;
   localparam logic [7:0] REG_PERF_BUSY_CYCLES          = 8'h84;
   localparam logic [7:0] REG_PERF_DMA_RD_CMD_COUNT     = 8'h88;
@@ -112,6 +116,8 @@ module fa_axi_lite_regs #(
   logic [31:0] reg_o_base_l;
   logic [31:0] reg_o_base_h;
   logic [31:0] reg_stride_bytes;
+  logic [31:0] reg_num_heads;
+  logic [31:0] reg_head_stride;
   logic [31:0] reg_neg_large;
   logic [31:0] reg_scale;
 
@@ -151,6 +157,8 @@ module fa_axi_lite_regs #(
       REG_O_BASE_L:     s_axil_rdata = reg_o_base_l;
       REG_O_BASE_H:     s_axil_rdata = reg_o_base_h;
       REG_STRIDE_BYTES: s_axil_rdata = reg_stride_bytes;
+      REG_NUM_HEADS:    s_axil_rdata = reg_num_heads;
+      REG_HEAD_STRIDE:  s_axil_rdata = reg_head_stride;
       REG_NEG_LARGE:    s_axil_rdata = reg_neg_large;
       REG_SCALE:        s_axil_rdata = reg_scale;
       REG_CYCLES:       s_axil_rdata = i_cycles;
@@ -202,6 +210,8 @@ module fa_axi_lite_regs #(
       reg_o_base_l <= 32'd0;
       reg_o_base_h <= 32'd0;
       reg_stride_bytes <= 32'd128;
+      reg_num_heads <= 32'd1;
+      reg_head_stride <= 32'd0;
       reg_neg_large <= 32'hFFFF_8000;
       reg_scale <= 32'd32;
       done_sticky <= 1'b0;
@@ -246,6 +256,8 @@ module fa_axi_lite_regs #(
           REG_O_BASE_L:     reg_o_base_l <= wdata_latched;
           REG_O_BASE_H:     reg_o_base_h <= wdata_latched;
           REG_STRIDE_BYTES: reg_stride_bytes <= wdata_latched;
+          REG_NUM_HEADS:    reg_num_heads <= wdata_latched;
+          REG_HEAD_STRIDE:  reg_head_stride <= wdata_latched;
           REG_NEG_LARGE:    reg_neg_large <= wdata_latched;
           REG_SCALE:        reg_scale <= wdata_latched;
           default: begin end
@@ -277,6 +289,8 @@ module fa_axi_lite_regs #(
   assign o_v_base = {reg_v_base_h, reg_v_base_l};
   assign o_o_base = {reg_o_base_h, reg_o_base_l};
   assign o_stride_bytes = reg_stride_bytes;
+  assign o_num_heads = reg_num_heads;
+  assign o_head_stride_bytes = reg_head_stride;
   assign o_neg_large_q8_8 = reg_neg_large[15:0];
   assign o_scale_q8_8 = reg_scale[15:0];
 endmodule

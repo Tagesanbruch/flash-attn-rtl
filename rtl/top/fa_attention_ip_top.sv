@@ -3,7 +3,8 @@ module fa_attention_ip_top #(
   parameter int AXIL_DATA_W = 32,
   parameter int AXI_DATA_W  = 128,
   parameter int AXI_ADDR_W  = 32,
-  parameter int AXI_ID_W    = 4
+  parameter int AXI_ID_W    = 4,
+  parameter int SEQ_LEN     = 256
 ) (
   input  logic                        clk,
   input  logic                        rst_n,
@@ -77,10 +78,24 @@ module fa_attention_ip_top #(
   logic        causal_en;
   logic [63:0] q_base, k_base, v_base, o_base;
   logic [31:0] stride_bytes;
+  logic [31:0] num_heads;
+  logic [31:0] head_stride_bytes;
   logic [15:0] neg_large_q8_8;
   logic [15:0] scale_q8_8;
   logic        core_busy, core_done, core_error;
   logic [31:0] core_cycles;
+  logic        run_busy, run_done, run_error;
+  logic [31:0] run_cycles;
+  logic        core_start_pulse;
+  logic        launch_pending;
+  logic [31:0] active_head_idx;
+  logic [31:0] completed_head_cycles;
+  logic [31:0] run_cycles_hold;
+  logic        run_error_latched;
+  logic [31:0] effective_num_heads;
+  logic [31:0] effective_head_stride_bytes;
+  logic [63:0] active_head_byte_offset;
+  logic [63:0] core_q_base, core_k_base, core_v_base, core_o_base;
 
   logic        perf_ms_load_q;
   logic        perf_ms_init_context;
@@ -150,7 +165,7 @@ module fa_attention_ip_top #(
     .s_axil_bresp(s_axil_bresp), .s_axil_bvalid(s_axil_bvalid), .s_axil_bready(s_axil_bready),
     .s_axil_araddr(s_axil_araddr), .s_axil_arvalid(s_axil_arvalid), .s_axil_arready(s_axil_arready),
     .s_axil_rdata(s_axil_rdata), .s_axil_rresp(s_axil_rresp), .s_axil_rvalid(s_axil_rvalid), .s_axil_rready(s_axil_rready),
-    .i_busy(core_busy), .i_done(core_done), .i_error(core_error), .i_cycles(core_cycles),
+    .i_busy(run_busy), .i_done(run_done), .i_error(run_error), .i_cycles(run_cycles),
     .i_perf_run_count(perf_run_count), .i_perf_busy_cycles(perf_busy_cycles),
     .i_perf_dma_rd_cmd_count(perf_dma_rd_cmd_count), .i_perf_dma_rd_beat_count(perf_dma_rd_beat_count),
     .i_perf_dma_wr_cmd_count(perf_dma_wr_cmd_count), .i_perf_dma_wr_beat_count(perf_dma_wr_beat_count),
@@ -164,7 +179,8 @@ module fa_attention_ip_top #(
     .i_perf_cs_score_done_cycles(perf_cs_score_done_cycles), .i_perf_cs_softmax_prep_cycles(perf_cs_softmax_prep_cycles),
     .o_start_pulse(start_pulse), .o_soft_reset(soft_reset), .o_irq_en(irq_en), .o_causal_en(causal_en),
     .o_q_base(q_base), .o_k_base(k_base), .o_v_base(v_base), .o_o_base(o_base),
-    .o_stride_bytes(stride_bytes), .o_neg_large_q8_8(neg_large_q8_8), .o_scale_q8_8(scale_q8_8)
+    .o_stride_bytes(stride_bytes), .o_num_heads(num_heads), .o_head_stride_bytes(head_stride_bytes),
+    .o_neg_large_q8_8(neg_large_q8_8), .o_scale_q8_8(scale_q8_8)
   );
 `else
   assign s_axil_awready = 1'b0;
@@ -184,9 +200,69 @@ module fa_attention_ip_top #(
   assign v_base = 64'd0;
   assign o_base = 64'd0;
   assign stride_bytes = 32'd0;
+  assign num_heads = 32'd1;
+  assign head_stride_bytes = 32'd0;
   assign neg_large_q8_8 = 16'd0;
   assign scale_q8_8 = 16'd0;
 `endif
+
+  assign effective_num_heads = (num_heads == 32'd0) ? 32'd1 : num_heads;
+  assign effective_head_stride_bytes = (head_stride_bytes == 32'd0) ? (stride_bytes * SEQ_LEN) : head_stride_bytes;
+  assign active_head_byte_offset = active_head_idx * effective_head_stride_bytes;
+  assign core_q_base = q_base + active_head_byte_offset;
+  assign core_k_base = k_base + active_head_byte_offset;
+  assign core_v_base = v_base + active_head_byte_offset;
+  assign core_o_base = o_base + active_head_byte_offset;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      launch_pending <= 1'b0;
+      active_head_idx <= 32'd0;
+      completed_head_cycles <= 32'd0;
+      run_cycles_hold <= 32'd0;
+      run_done <= 1'b0;
+      run_error_latched <= 1'b0;
+      core_start_pulse <= 1'b0;
+    end else begin
+      run_done <= 1'b0;
+      core_start_pulse <= 1'b0;
+
+      if (soft_reset) begin
+        launch_pending <= 1'b0;
+        active_head_idx <= 32'd0;
+        run_cycles_hold <= completed_head_cycles + core_cycles;
+        run_error_latched <= 1'b0;
+      end else begin
+        if (start_pulse && !run_busy) begin
+          launch_pending <= 1'b1;
+          active_head_idx <= 32'd0;
+          completed_head_cycles <= 32'd0;
+          run_cycles_hold <= 32'd0;
+          run_error_latched <= 1'b0;
+        end else if (core_done) begin
+          completed_head_cycles <= completed_head_cycles + core_cycles;
+          run_cycles_hold <= completed_head_cycles + core_cycles;
+          run_error_latched <= run_error_latched | core_error;
+          if ((active_head_idx + 32'd1) < effective_num_heads) begin
+            active_head_idx <= active_head_idx + 32'd1;
+            launch_pending <= 1'b1;
+          end else begin
+            launch_pending <= 1'b0;
+            run_done <= 1'b1;
+          end
+        end else if (launch_pending && !core_busy && !core_done) begin
+          core_start_pulse <= 1'b1;
+          launch_pending <= 1'b0;
+        end else if (core_busy) begin
+          run_cycles_hold <= completed_head_cycles + core_cycles;
+        end
+      end
+    end
+  end
+
+  assign run_busy = core_busy || launch_pending;
+  assign run_error = run_error_latched | core_error;
+  assign run_cycles = run_cycles_hold;
 
 `ifndef FA_UVM_DISABLE_PERF
   fa_perf_counters u_perf (
@@ -332,11 +408,11 @@ module fa_attention_ip_top #(
 `ifndef FA_UVM_DISABLE_CORE
   fa_attention_core u_core (
     .clk(clk), .rst_n(rst_n),
-    .i_start(start_pulse), .i_soft_reset(soft_reset),
+    .i_start(core_start_pulse), .i_soft_reset(soft_reset),
     .i_causal_en(causal_en), .i_scale_q8_8(scale_q8_8),
     .i_neg_large_q8_8(neg_large_q8_8),
     .o_busy(core_busy), .o_done(core_done), .o_error(core_error), .o_cycles(core_cycles),
-    .i_q_base(q_base), .i_k_base(k_base), .i_v_base(v_base), .i_o_base(o_base),
+    .i_q_base(core_q_base), .i_k_base(core_k_base), .i_v_base(core_v_base), .i_o_base(core_o_base),
     .i_stride_bytes(stride_bytes),
     .dma_rd_cmd_valid(dma_rd_cmd_valid), .dma_rd_cmd_ready(dma_rd_cmd_ready),
     .dma_rd_cmd_addr(dma_rd_cmd_addr), .dma_rd_cmd_len(dma_rd_cmd_len),

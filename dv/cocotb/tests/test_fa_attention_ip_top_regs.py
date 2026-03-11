@@ -24,6 +24,8 @@ REG_SCALE = 0x3C
 REG_Q_BASE_L = 0x14
 REG_Q_BASE_H = 0x18
 REG_CYCLES = 0x40
+REG_NUM_HEADS = 0x44
+REG_HEAD_STRIDE = 0x48
 REG_PERF_RUN_COUNT = 0x80
 REG_PERF_BUSY_CYCLES = 0x84
 REG_PERF_DMA_RD_CMD_COUNT = 0x88
@@ -91,6 +93,10 @@ def _fp32_ref(Q, K, V, causal):
     return out
 
 
+def _fp32_ref_multi(Q_heads, K_heads, V_heads, causal):
+    return [_fp32_ref(Q, K, V, causal) for Q, K, V in zip(Q_heads, K_heads, V_heads)]
+
+
 def _fixed_flash_attention_ref(Q, K, V, scale, neg_large, causal=False):
     out = [[0] * D for _ in range(S)]
     num_q_tiles = S // TQ
@@ -155,6 +161,13 @@ def _fixed_flash_attention_ref(Q, K, V, scale, neg_large, causal=False):
                     out[q_start + qi][d] = norm_result
 
     return out
+
+
+def _fixed_flash_attention_ref_multi(Q_heads, K_heads, V_heads, scale, neg_large, causal=False):
+    return [
+        _fixed_flash_attention_ref(Q, K, V, scale=scale, neg_large=neg_large, causal=causal)
+        for Q, K, V in zip(Q_heads, K_heads, V_heads)
+    ]
 
 
 def _calc_i16_metrics(got, ref):
@@ -436,6 +449,8 @@ async def test_reg_map_defaults_and_permissions(dut):
     assert await master.read(REG_O_BASE_L) == 0x00000000
     assert await master.read(REG_O_BASE_H) == 0x00000000
     assert await master.read(REG_STRIDE_BYTES) == 0x00000080
+    assert await master.read(REG_NUM_HEADS) == 0x00000001
+    assert await master.read(REG_HEAD_STRIDE) == 0x00000000
     assert await master.read(REG_NEG_LARGE) == 0xFFFF8000
     assert await master.read(REG_SCALE) == 0x00000020
     assert await master.read(REG_CYCLES) == 0x00000000
@@ -453,6 +468,8 @@ async def test_reg_map_defaults_and_permissions(dut):
     await master.write(REG_O_BASE_L, 0x77777777)
     await master.write(REG_O_BASE_H, 0x88888888)
     await master.write(REG_STRIDE_BYTES, 0x00000100)
+    await master.write(REG_NUM_HEADS, 0x00000004)
+    await master.write(REG_HEAD_STRIDE, 0x00008000)
     await master.write(REG_NEG_LARGE, 0xFFFF0000)
     await master.write(REG_SCALE, 0x00000040)
 
@@ -465,6 +482,8 @@ async def test_reg_map_defaults_and_permissions(dut):
     assert await master.read(REG_O_BASE_L) == 0x77777777
     assert await master.read(REG_O_BASE_H) == 0x88888888
     assert await master.read(REG_STRIDE_BYTES) == 0x00000100
+    assert await master.read(REG_NUM_HEADS) == 0x00000004
+    assert await master.read(REG_HEAD_STRIDE) == 0x00008000
     assert await master.read(REG_NEG_LARGE) == 0xFFFF0000
     assert await master.read(REG_SCALE) == 0x00000040
 
@@ -563,29 +582,41 @@ async def test_perf_counters_full_run(dut):
     scale_q8_8 = int(os.environ.get("TOP_TEST_SCALE_Q8_8", "32"))
     neg_large_q8_8 = int(os.environ.get("TOP_TEST_NEG_LARGE_Q8_8", str(to_s16(0xE000))))
     causal = int(os.environ.get("TOP_TEST_CAUSAL", "1")) != 0
+    num_heads = int(os.environ.get("TOP_TEST_NUM_HEADS", "1"))
     cocotb.log.info(
-        "top stimulus config: seed=%d range=[%d,%d] causal=%d scale_q8_8=%d neg_large_q8_8=%d",
+        "top stimulus config: seed=%d range=[%d,%d] causal=%d num_heads=%d scale_q8_8=%d neg_large_q8_8=%d",
         seed,
         data_min,
         data_max,
         int(causal),
+        num_heads,
         scale_q8_8,
         neg_large_q8_8,
     )
     random.seed(seed)
     q_base = 0x00000000
-    k_base = 0x00010000
-    v_base = 0x00020000
-    o_base = 0x00030000
+    k_base = 0x01000000
+    v_base = 0x02000000
+    o_base = 0x03000000
     stride_bytes = D * 2
+    head_stride_bytes = S * stride_bytes
 
-    Q = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
-    K = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
-    V = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
+    Q_heads = []
+    K_heads = []
+    V_heads = []
+    for _ in range(num_heads):
+        Q = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
+        K = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
+        V = [[random.randint(data_min, data_max) for _ in range(D)] for _ in range(S)]
+        Q_heads.append(Q)
+        K_heads.append(K)
+        V_heads.append(V)
 
-    mem.store_matrix_q8_8(q_base, Q, stride_bytes)
-    mem.store_matrix_q8_8(k_base, K, stride_bytes)
-    mem.store_matrix_q8_8(v_base, V, stride_bytes)
+    for head_idx in range(num_heads):
+        head_offset = head_idx * head_stride_bytes
+        mem.store_matrix_q8_8(q_base + head_offset, Q_heads[head_idx], stride_bytes)
+        mem.store_matrix_q8_8(k_base + head_offset, K_heads[head_idx], stride_bytes)
+        mem.store_matrix_q8_8(v_base + head_offset, V_heads[head_idx], stride_bytes)
 
     await master.write(REG_Q_BASE_L, q_base)
     await master.write(REG_Q_BASE_H, 0)
@@ -596,6 +627,8 @@ async def test_perf_counters_full_run(dut):
     await master.write(REG_O_BASE_L, o_base)
     await master.write(REG_O_BASE_H, 0)
     await master.write(REG_STRIDE_BYTES, stride_bytes)
+    await master.write(REG_NUM_HEADS, num_heads)
+    await master.write(REG_HEAD_STRIDE, head_stride_bytes)
     await master.write(REG_SCALE, scale_q8_8 & 0xFFFF)
     await master.write(REG_NEG_LARGE, neg_large_q8_8 & 0xFFFFFFFF)
     await master.write(REG_CFG, 0x1 if causal else 0x0)
@@ -705,11 +738,11 @@ async def test_perf_counters_full_run(dut):
     qk_pipe_latency = 8
     qk_batch_cycles = qpair_batch * TK * DP_CHUNKS + qk_pipe_latency
 
-    expected_comp_launch_count = num_q_tiles * num_k_tiles * 2
-    expected_recip_count = S
-    expected_cs_score_done = num_q_tiles * num_k_tiles * qpair_per_compute * TK
+    expected_comp_launch_count = num_heads * num_q_tiles * num_k_tiles * 2
+    expected_recip_count = num_heads * S
+    expected_cs_score_done = num_heads * num_q_tiles * num_k_tiles * qpair_per_compute * TK
     expected_cs_softmax_prep = expected_cs_score_done
-    expected_cs_dp_run = num_q_tiles * num_k_tiles * qpair_batches_per_compute * qk_batch_cycles
+    expected_cs_dp_run = num_heads * num_q_tiles * num_k_tiles * qpair_batches_per_compute * qk_batch_cycles
     expected_exp_eval = expected_cs_softmax_prep * 4
     expected_mul_eval = expected_cs_score_done * 2
 
@@ -753,12 +786,25 @@ async def test_perf_counters_full_run(dut):
     assert ms_compute_cycles > ms_normalize_cycles > 0, "state occupancy ordering unexpected"
     assert ms_load_k_cycles > 0 and ms_load_v_cycles > 0 and ms_write_o_cycles > 0
 
-    out = mem.load_matrix_q8_8(o_base, S, D, stride_bytes)
-    stream_out = _unpack_beats_to_matrix(write_stream_beats, S, D)
-    non_zero_outputs = sum(1 for row in out for v in row if v != 0)
+    out_heads = [
+        mem.load_matrix_q8_8(o_base + head_idx * head_stride_bytes, S, D, stride_bytes)
+        for head_idx in range(num_heads)
+    ]
+    stream_out = _unpack_beats_to_matrix(write_stream_beats, S * num_heads, D)
+    stream_out_heads = [stream_out[head_idx * S:(head_idx + 1) * S] for head_idx in range(num_heads)]
+    non_zero_outputs = sum(1 for head in out_heads for row in head for v in row if v != 0)
     assert non_zero_outputs > 0, "output buffer should contain non-zero results after full run"
 
-    stream_vs_mem_mae_lsb, stream_vs_mem_max_lsb, stream_vs_mem_worst = _calc_i16_metrics(stream_out, out)
+    stream_vs_mem_mae_lsb = 0.0
+    stream_vs_mem_max_lsb = 0
+    stream_vs_mem_worst = None
+    for head_idx in range(num_heads):
+        head_mae_lsb, head_max_lsb, head_worst = _calc_i16_metrics(stream_out_heads[head_idx], out_heads[head_idx])
+        if head_max_lsb > stream_vs_mem_max_lsb:
+            stream_vs_mem_max_lsb = head_max_lsb
+            stream_vs_mem_worst = (head_idx, head_worst)
+        stream_vs_mem_mae_lsb += head_mae_lsb
+    stream_vs_mem_mae_lsb /= num_heads
     cocotb.log.info(
         "top write-path check (stream vs mem): mae_lsb=%.4f max_lsb=%d worst=%s",
         stream_vs_mem_mae_lsb,
@@ -770,24 +816,50 @@ async def test_perf_counters_full_run(dut):
     dump_dir = os.environ.get("TOP_RTL_DUMP_DIR", "").strip()
     if dump_dir:
         os.makedirs(dump_dir, exist_ok=True)
-        _dump_matrix_csv(os.path.join(dump_dir, "Q_q8_8.csv"), Q)
-        _dump_matrix_csv(os.path.join(dump_dir, "K_q8_8.csv"), K)
-        _dump_matrix_csv(os.path.join(dump_dir, "V_q8_8.csv"), V)
-        _dump_matrix_csv(os.path.join(dump_dir, "O_top_q8_8.csv"), out)
+        for head_idx in range(num_heads):
+            _dump_matrix_csv(os.path.join(dump_dir, f"Q_head{head_idx}_q8_8.csv"), Q_heads[head_idx])
+            _dump_matrix_csv(os.path.join(dump_dir, f"K_head{head_idx}_q8_8.csv"), K_heads[head_idx])
+            _dump_matrix_csv(os.path.join(dump_dir, f"V_head{head_idx}_q8_8.csv"), V_heads[head_idx])
+            _dump_matrix_csv(os.path.join(dump_dir, f"O_head{head_idx}_top_q8_8.csv"), out_heads[head_idx])
         with open(os.path.join(dump_dir, "meta.txt"), "w") as f:
             f.write(f"seed={seed}\n")
             f.write(f"data_min={data_min}\n")
             f.write(f"data_max={data_max}\n")
             f.write(f"causal={int(causal)}\n")
+            f.write(f"num_heads={num_heads}\n")
             f.write(f"scale_q8_8={scale_q8_8}\n")
             f.write(f"neg_large_q8_8={neg_large_q8_8}\n")
         cocotb.log.info("top dump written to %s", dump_dir)
 
-    golden_fixed = _fixed_flash_attention_ref(Q, K, V, scale=scale_q8_8, neg_large=to_s16(neg_large_q8_8), causal=causal)
-    golden_fp32 = _fp32_ref(Q, K, V, causal=causal)
+    golden_fixed_heads = _fixed_flash_attention_ref_multi(
+        Q_heads,
+        K_heads,
+        V_heads,
+        scale=scale_q8_8,
+        neg_large=to_s16(neg_large_q8_8),
+        causal=causal,
+    )
+    golden_fp32_heads = _fp32_ref_multi(Q_heads, K_heads, V_heads, causal=causal)
 
-    mae_i16, max_err_i16, worst_i16 = _calc_i16_metrics(out, golden_fixed)
-    mae_fp32, max_err_fp32, worst_fp32 = _calc_fp32_metrics(out, golden_fp32)
+    mae_i16 = 0.0
+    max_err_i16 = 0
+    worst_i16 = None
+    mae_fp32 = 0.0
+    max_err_fp32 = 0.0
+    worst_fp32 = None
+    for head_idx in range(num_heads):
+        head_mae_i16, head_max_err_i16, head_worst_i16 = _calc_i16_metrics(out_heads[head_idx], golden_fixed_heads[head_idx])
+        head_mae_fp32, head_max_err_fp32, head_worst_fp32 = _calc_fp32_metrics(out_heads[head_idx], golden_fp32_heads[head_idx])
+        mae_i16 += head_mae_i16
+        mae_fp32 += head_mae_fp32
+        if head_max_err_i16 > max_err_i16:
+            max_err_i16 = head_max_err_i16
+            worst_i16 = (head_idx, head_worst_i16)
+        if head_max_err_fp32 > max_err_fp32:
+            max_err_fp32 = head_max_err_fp32
+            worst_fp32 = (head_idx, head_worst_fp32)
+    mae_i16 /= num_heads
+    mae_fp32 /= num_heads
 
     cocotb.log.info(
         "top numeric check (rtl vs fixed-q8.8): mae_lsb=%.4f mae=%.6f max_err_lsb=%d max_err=%.6f worst=%s",
@@ -804,3 +876,135 @@ async def test_perf_counters_full_run(dut):
         worst_fp32,
     )
     assert max_err_i16 < 256, f"top output mismatch too large: max_err={max_err_i16}, worst={worst_i16}, mae={mae_i16:.4f}"
+    assert mae_fp32 <= 0.03, f"top fp32 mae exceeds limit: mae={mae_fp32:.6f}, worst={worst_fp32}"
+    assert max_err_fp32 <= 0.10, f"top fp32 max error exceeds limit: max_err={max_err_fp32:.6f}, worst={worst_fp32}"
+
+
+@cocotb.test(timeout_time=900000, timeout_unit="ms")
+async def test_multihead_two_head_full_run(dut):
+    cocotb.start_soon(Clock(dut.clk, 2, units="ns").start())
+
+    dut.rst_n.value = 0
+    _init_dma_inputs(dut)
+    master = AxiLiteMaster(dut)
+    mem = AxiMemoryModel(dut)
+    cocotb.start_soon(mem.run())
+    await master.reset_master()
+    for _ in range(5):
+        await RisingEdge(dut.clk)
+    dut.rst_n.value = 1
+    await RisingEdge(dut.clk)
+
+    num_heads = 2
+    stride_bytes = D * 2
+    head_stride_bytes = S * stride_bytes
+    scale_q8_8 = 32
+    neg_large_q8_8 = to_s16(0xE000)
+    causal = True
+
+    q_base = 0x00000000
+    k_base = 0x00020000
+    v_base = 0x00040000
+    o_base = 0x00060000
+
+    random.seed(20260312)
+    Q_heads = []
+    K_heads = []
+    V_heads = []
+    for _ in range(num_heads):
+        Q = [[random.randint(-64, 64) for _ in range(D)] for _ in range(S)]
+        K = [[random.randint(-64, 64) for _ in range(D)] for _ in range(S)]
+        V = [[random.randint(-64, 64) for _ in range(D)] for _ in range(S)]
+        Q_heads.append(Q)
+        K_heads.append(K)
+        V_heads.append(V)
+
+    for head_idx in range(num_heads):
+        head_off = head_idx * head_stride_bytes
+        mem.store_matrix_q8_8(q_base + head_off, Q_heads[head_idx], stride_bytes)
+        mem.store_matrix_q8_8(k_base + head_off, K_heads[head_idx], stride_bytes)
+        mem.store_matrix_q8_8(v_base + head_off, V_heads[head_idx], stride_bytes)
+
+    await master.write(REG_Q_BASE_L, q_base)
+    await master.write(REG_Q_BASE_H, 0)
+    await master.write(REG_K_BASE_L, k_base)
+    await master.write(REG_K_BASE_H, 0)
+    await master.write(REG_V_BASE_L, v_base)
+    await master.write(REG_V_BASE_H, 0)
+    await master.write(REG_O_BASE_L, o_base)
+    await master.write(REG_O_BASE_H, 0)
+    await master.write(REG_STRIDE_BYTES, stride_bytes)
+    await master.write(REG_NUM_HEADS, num_heads)
+    await master.write(REG_HEAD_STRIDE, head_stride_bytes)
+    await master.write(REG_SCALE, scale_q8_8 & 0xFFFF)
+    await master.write(REG_NEG_LARGE, neg_large_q8_8 & 0xFFFFFFFF)
+    await master.write(REG_CFG, 0x1 if causal else 0x0)
+
+    await master.write(REG_CTRL, 0x1)
+
+    done_seen = False
+    for _ in range(30000):
+        for _ in range(64):
+            await RisingEdge(dut.clk)
+        status = await master.read(REG_STATUS)
+        if status & 0x2:
+            done_seen = True
+            break
+
+    assert done_seen, "Timed out waiting for 2-head top run completion"
+
+    out_heads = [
+        mem.load_matrix_q8_8(o_base + head_idx * head_stride_bytes, S, D, stride_bytes)
+        for head_idx in range(num_heads)
+    ]
+    golden_fixed_heads = _fixed_flash_attention_ref_multi(
+        Q_heads,
+        K_heads,
+        V_heads,
+        scale=scale_q8_8,
+        neg_large=neg_large_q8_8,
+        causal=causal,
+    )
+    golden_fp32_heads = _fp32_ref_multi(Q_heads, K_heads, V_heads, causal=causal)
+
+    max_err_i16 = 0
+    worst_i16 = None
+    max_err_fp32 = 0.0
+    worst_fp32 = None
+    for head_idx in range(num_heads):
+        _, head_max_err_i16, head_worst_i16 = _calc_i16_metrics(out_heads[head_idx], golden_fixed_heads[head_idx])
+        _, head_max_err_fp32, head_worst_fp32 = _calc_fp32_metrics(out_heads[head_idx], golden_fp32_heads[head_idx])
+        if head_max_err_i16 > max_err_i16:
+            max_err_i16 = head_max_err_i16
+            worst_i16 = (head_idx, head_worst_i16)
+        if head_max_err_fp32 > max_err_fp32:
+            max_err_fp32 = head_max_err_fp32
+            worst_fp32 = (head_idx, head_worst_fp32)
+
+    total_cycles = await master.read(REG_CYCLES)
+    run_count = await master.read(REG_PERF_RUN_COUNT)
+    comp_launch_count = await master.read(REG_PERF_COMP_LAUNCH_COUNT)
+    recip_req_count = await master.read(REG_PERF_RECIP_REQ_COUNT)
+    dma_wr_cmd_count = await master.read(REG_PERF_DMA_WR_CMD_COUNT)
+
+    num_q_tiles = S // TQ
+    num_k_tiles = S // TK
+    expected_comp_launch_count = num_heads * num_q_tiles * num_k_tiles * 2
+
+    cocotb.log.info(
+        "2-head run summary: cycles=%d comp_launch=%d recip_req=%d wr_cmd=%d max_err_lsb=%d max_err_fp32=%.6f",
+        total_cycles,
+        comp_launch_count,
+        recip_req_count,
+        dma_wr_cmd_count,
+        max_err_i16,
+        max_err_fp32,
+    )
+
+    assert run_count == 1, f"run_count mismatch for 2-head run: {run_count}"
+    assert comp_launch_count == expected_comp_launch_count, \
+        f"2-head comp_launch_count mismatch: got {comp_launch_count}, exp {expected_comp_launch_count}"
+    assert recip_req_count == num_heads * S, f"2-head recip_req_count mismatch: {recip_req_count}"
+    assert dma_wr_cmd_count == num_heads * num_q_tiles, f"2-head wr_cmd mismatch: {dma_wr_cmd_count}"
+    assert max_err_i16 < 256, f"2-head fixed mismatch too large: max_err={max_err_i16}, worst={worst_i16}"
+    assert max_err_fp32 < 0.03, f"2-head fp32 mismatch too large: max_err={max_err_fp32}, worst={worst_fp32}"
