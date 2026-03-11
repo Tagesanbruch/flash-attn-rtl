@@ -3,6 +3,8 @@
 include cfg/sta_modules.mk
 
 MODULE ?= fa_mul_sat_q8_8
+WAVES ?= 0
+WAVE_FMT ?= fst
 LINT_FLAGS := --lint-only -Wall -Wno-UNUSEDSIGNAL -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC
 CPP_SDPA_BIN ?= build/sdpa_compare
 RTL_DUMP_DIR ?= /tmp/fa_rtl_dump
@@ -34,10 +36,10 @@ setup-py:
 	uv pip install --python .venv/bin/python 'cocotb==1.9.2' pytest numpy
 
 test:
-	VIRTUAL_ENV=$(PWD)/.venv PATH=$(PWD)/.venv/bin:$$PATH $(MAKE) -C dv/cocotb MODULE=$(MODULE) test
+	VIRTUAL_ENV=$(PWD)/.venv PATH=$(PWD)/.venv/bin:$$PATH $(MAKE) -C dv/cocotb MODULE=$(MODULE) WAVES=$(WAVES) WAVE_FMT=$(WAVE_FMT) test
 
 regress:
-	VIRTUAL_ENV=$(PWD)/.venv PATH=$(PWD)/.venv/bin:$$PATH $(MAKE) -C dv/cocotb regress
+	VIRTUAL_ENV=$(PWD)/.venv PATH=$(PWD)/.venv/bin:$$PATH $(MAKE) -C dv/cocotb WAVES=$(WAVES) WAVE_FMT=$(WAVE_FMT) regress
 
 list:
 	VIRTUAL_ENV=$(PWD)/.venv PATH=$(PWD)/.venv/bin:$$PATH $(MAKE) -C dv/cocotb list
@@ -124,7 +126,7 @@ sta: sta-run
 sta-module: sta-run
 
 clean:
-	$(MAKE) -C dv/cocotb clean
+	$(MAKE) -C dv/cocotb WAVES=$(WAVES) WAVE_FMT=$(WAVE_FMT) clean
 
 cpp-sdpa-build:
 	@mkdir -p build

@@ -9,8 +9,8 @@ test:
 	$(MAKE) -f $(COCOTB_MAKEFILE) \
 		MODULE=$(MODULE_PY) \
 		TOPLEVEL=$(TOPLEVEL) \
-		SIM_BUILD=sim_build/$(SELECTED_MODULE) \
-		COCOTB_RESULTS_FILE=sim_build/$(SELECTED_MODULE)/results.xml
+		SIM_BUILD=$(SIM_BUILD) \
+		COCOTB_RESULTS_FILE=$(COCOTB_RESULTS_FILE)
 
 regress:
 	@set -e; \

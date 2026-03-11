@@ -109,15 +109,28 @@ ifeq ($(strip $(TOPLEVEL)),)
 $(error Unsupported MODULE=$(SELECTED_MODULE). Run: make -C dv/cocotb list)
 endif
 
-SIM_BUILD ?= sim_build/$(MODULE)
-COCOTB_RESULTS_FILE ?= $(SIM_BUILD)/results.xml
-
-EXTRA_ARGS += -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-UNUSEDSIGNAL
-
 # waveform generation control: set WAVES=1 to enable, and optionally
 # pick format via WAVE_FMT (fst or vcd). default is fst for compact files.
 WAVES ?= 0
 WAVE_FMT ?= fst
+
+ifeq ($(WAVE_FMT),vcd)
+WAVE_EXT := vcd
+else
+WAVE_EXT := fst
+endif
+
+ifeq ($(WAVES),1)
+SIM_BUILD ?= sim_build/$(MODULE)_waves_$(WAVE_EXT)
+TRACE_FILE := $(abspath $(SIM_BUILD))/$(TOPLEVEL).$(WAVE_EXT)
+else
+SIM_BUILD ?= sim_build/$(MODULE)
+TRACE_FILE :=
+endif
+
+COCOTB_RESULTS_FILE ?= $(SIM_BUILD)/results.xml
+
+EXTRA_ARGS += -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-UNUSEDSIGNAL
 
 ifeq ($(WAVES),1)
 ifeq ($(WAVE_FMT),vcd)
@@ -125,6 +138,7 @@ EXTRA_ARGS += --trace
 else
 EXTRA_ARGS += --trace --trace-fst
 endif
+SIM_ARGS += --trace --trace-file $(TRACE_FILE)
 endif
 
 export TOPLEVEL MODULE
@@ -135,6 +149,7 @@ export SIM_BUILD
 export COCOTB_RESULTS_FILE
 export EXTRA_ARGS
 export COMPILE_ARGS
+export SIM_ARGS
 export PYTHON := $(PYTHON_BIN)
 export MODULE := $(MODULE_PY)
 
