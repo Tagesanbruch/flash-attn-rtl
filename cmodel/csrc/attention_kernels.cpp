@@ -60,6 +60,12 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
     MatrixI16 O(S, std::vector<int16_t>(D, 0));
     const int16_t scale_q8_8 = static_cast<int16_t>(std::lround((1.0 / std::sqrt(static_cast<double>(D))) * 256.0));
     const bool strict_rtl_mode = (mode == Mode::RTL_STRICT);
+    const bool ctx_step_mode = (mode == Mode::RTL_CTX_STEP);
+    const bool ctx_step_acc24_mode = (mode == Mode::RTL_CTX_STEP_ACC24);
+    const bool ctx_interp_mode = (mode == Mode::RTL_CTX_INTERP);
+    const bool ctx_pwl_mode = (mode == Mode::RTL_CTX_PWL);
+    const bool ctx_realexp_mode = (mode == Mode::RTL_CTX_REAL_EXP);
+    const bool ctx_like_mode = ctx_step_mode || ctx_step_acc24_mode || ctx_interp_mode || ctx_pwl_mode || ctx_realexp_mode;
     const bool acc_float_mode = (mode == Mode::ACC_FLOAT_QOUT || mode == Mode::ACC_FLOAT_REAL_EXP_QOUT);
     const bool hiacc_fixed_mode = (mode == Mode::FIXED_HIACC_QOUT || mode == Mode::FIXED_HIACC_REAL_EXP_QOUT);
 
@@ -97,9 +103,25 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
                     int16_t diff_old = static_cast<int16_t>(m_old - m_new);
                     int16_t diff_new = static_cast<int16_t>(score - m_new);
 
-                    bool use_pwl_exp = (mode == Mode::RTL_STRICT || mode == Mode::RTL_EXACT || mode == Mode::FLOAT_ONLINE_Q8 || mode == Mode::ACC_FLOAT_QOUT || mode == Mode::FIXED_HIACC_QOUT);
-                    uint16_t exp_old = use_pwl_exp ? exp_pwl_q1_15(diff_old) : exp_real_q1_15(diff_old);
-                    uint16_t exp_new = use_pwl_exp ? exp_pwl_q1_15(diff_new) : exp_real_q1_15(diff_new);
+                    uint16_t exp_old;
+                    uint16_t exp_new;
+                    if (ctx_step_mode || ctx_step_acc24_mode) {
+                        exp_old = exp2_ctx_step_q1_15(diff_old);
+                        exp_new = exp2_ctx_step_q1_15(diff_new);
+                    } else if (ctx_interp_mode) {
+                        exp_old = exp2_ctx_interp_q1_15(diff_old);
+                        exp_new = exp2_ctx_interp_q1_15(diff_new);
+                    } else if (ctx_pwl_mode) {
+                        exp_old = exp_pwl_q1_15(diff_old);
+                        exp_new = exp_pwl_q1_15(diff_new);
+                    } else if (ctx_realexp_mode) {
+                        exp_old = exp_real_q1_15(diff_old);
+                        exp_new = exp_real_q1_15(diff_new);
+                    } else {
+                        bool use_pwl_exp = (mode == Mode::RTL_STRICT || mode == Mode::RTL_EXACT || mode == Mode::FLOAT_ONLINE_Q8 || mode == Mode::ACC_FLOAT_QOUT || mode == Mode::FIXED_HIACC_QOUT);
+                        exp_old = use_pwl_exp ? exp_pwl_q1_15(diff_old) : exp_real_q1_15(diff_old);
+                        exp_new = use_pwl_exp ? exp_pwl_q1_15(diff_new) : exp_real_q1_15(diff_new);
+                    }
 
                     if (strict_rtl_mode) {
                         uint32_t l_scaled = (static_cast<uint64_t>(row_l[qi]) * exp_old) >> 15;
@@ -110,6 +132,16 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
                             int64_t acc_old_sc = (row_acc_rtl[qi][d] * static_cast<int64_t>(exp_old)) >> 15;
                             int64_t pv_term = (static_cast<int64_t>(exp_new) * static_cast<int64_t>(static_cast<int32_t>(V[global_j][d]))) << 1;
                             row_acc_rtl[qi][d] = acc_old_sc + pv_term;
+                        }
+                    } else if (ctx_like_mode) {
+                        uint32_t l_scaled = (static_cast<uint64_t>(row_l[qi]) * exp_old) >> 15;
+                        uint32_t l_term = (static_cast<uint32_t>(exp_new) << 1);
+                        row_l[qi] = to_u32(static_cast<uint64_t>(l_scaled) + l_term);
+
+                        for (int d = 0; d < D; ++d) {
+                            int64_t acc_old_sc = (static_cast<int64_t>(row_acc[qi][d]) * exp_old) >> 15;
+                            int64_t pv_term = (static_cast<int64_t>(exp_new) * static_cast<int64_t>(static_cast<int32_t>(V[global_j][d]))) >> 7;
+                            row_acc[qi][d] = to_s32(acc_old_sc + pv_term);
                         }
                     } else if (acc_float_mode) {
                         float exp_old_f = static_cast<float>(exp_old) / 32768.0f;
@@ -150,6 +182,20 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
                 uint32_t recip = recip_nr_rtl_q16_16(row_l[qi]);
                 for (int d = 0; d < D; ++d) {
                     int64_t num = row_acc_rtl[qi][d];
+                    __int128 norm_mul_q32_32 = static_cast<__int128>(num) * static_cast<int64_t>(static_cast<int32_t>(recip));
+                    __int128 norm_rounded_q32_32 = (norm_mul_q32_32 >= 0)
+                        ? (norm_mul_q32_32 + static_cast<__int128>(2147483648ll))
+                        : (norm_mul_q32_32 - static_cast<__int128>(2147483648ll));
+                    int64_t norm_result = static_cast<int64_t>(norm_rounded_q32_32 >> 32);
+                    if (norm_result > 32767) O[q_start + qi][d] = 32767;
+                    else if (norm_result < -32768) O[q_start + qi][d] = -32768;
+                    else O[q_start + qi][d] = static_cast<int16_t>(norm_result);
+                }
+            } else if (ctx_like_mode) {
+                uint32_t recip = recip_nr_rtl_q16_16(row_l[qi]);
+                for (int d = 0; d < D; ++d) {
+                    int64_t num = static_cast<int64_t>(row_acc[qi][d]);
+                    if (ctx_step_acc24_mode) num <<= 8;
                     __int128 norm_mul_q32_32 = static_cast<__int128>(num) * static_cast<int64_t>(static_cast<int32_t>(recip));
                     __int128 norm_rounded_q32_32 = (norm_mul_q32_32 >= 0)
                         ? (norm_mul_q32_32 + static_cast<__int128>(2147483648ll))

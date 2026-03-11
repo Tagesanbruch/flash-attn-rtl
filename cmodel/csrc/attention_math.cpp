@@ -66,6 +66,53 @@ uint16_t exp_real_q1_15(int16_t x_q8_8) {
     return static_cast<uint16_t>(v);
 }
 
+namespace {
+
+constexpr int kCtxExp2Table[32] = {
+    32768, 32066, 31379, 30706, 30048, 29405, 28774, 28158,
+    27554, 26964, 26386, 25821, 25268, 24726, 24196, 23678,
+    23170, 22674, 22188, 21713, 21247, 20792, 20347, 19911,
+    19484, 19066, 18658, 18258, 17867, 17484, 17109, 16743,
+};
+
+} // namespace
+
+uint16_t exp2_ctx_step_q1_15(int16_t x_q8_8) {
+    int32_t x = x_q8_8;
+    if (x > 0) x = 0;
+    if (x < -4096) x = -4096;
+
+    uint32_t mag_q8_8 = static_cast<uint32_t>(-x);
+    uint32_t z_mul_q16_16 = mag_q8_8 * 369u;
+    uint32_t z_q8_8 = (z_mul_q16_16 + 128u) >> 8;
+    uint32_t int_part = (z_q8_8 >> 8) & 0xFFu;
+    uint32_t frac_part = z_q8_8 & 0xFFu;
+    if (int_part >= 16u) return 0;
+    return static_cast<uint16_t>(kCtxExp2Table[frac_part >> 3] >> int_part);
+}
+
+uint16_t exp2_ctx_interp_q1_15(int16_t x_q8_8) {
+    int32_t x = x_q8_8;
+    if (x > 0) x = 0;
+    if (x < -4096) x = -4096;
+
+    uint32_t mag_q8_8 = static_cast<uint32_t>(-x);
+    uint32_t z_mul_q16_16 = mag_q8_8 * 369u;
+    uint32_t z_q8_8 = (z_mul_q16_16 + 128u) >> 8;
+    uint32_t int_part = (z_q8_8 >> 8) & 0xFFu;
+    uint32_t frac_part = z_q8_8 & 0xFFu;
+    if (int_part >= 16u) return 0;
+
+    uint32_t idx = frac_part >> 3;
+    uint32_t frac_lo = frac_part & 0x7u;
+    int y0 = kCtxExp2Table[idx];
+    int y1 = (idx >= 31u) ? 0 : kCtxExp2Table[idx + 1];
+    int delta = y0 - y1;
+    int interp = y0 - ((delta * static_cast<int>(frac_lo) + 4) >> 3);
+    if (interp < 0) interp = 0;
+    return static_cast<uint16_t>(interp >> int_part);
+}
+
 uint32_t recip_q16_16(uint32_t x_q16_16) {
     if (x_q16_16 == 0) return 0xFFFFFFFFu;
     uint64_t num = (1ull << 32);

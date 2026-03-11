@@ -30,6 +30,11 @@ using MatrixF = std::vector<std::vector<float>>;
 
 enum class Mode {
     RTL_STRICT,
+    RTL_CTX_STEP,
+    RTL_CTX_STEP_ACC24,
+    RTL_CTX_INTERP,
+    RTL_CTX_PWL,
+    RTL_CTX_REAL_EXP,
     RTL_EXACT,
     RTL_REAL_EXP,
     RTL_REAL_EXP_FLOAT_NORM,
@@ -84,6 +89,8 @@ uint32_t to_u32(uint64_t v);
 int16_t q8_8_mul_sat(int16_t a, int16_t b);
 uint16_t exp_pwl_q1_15(int16_t x_q8_8);
 uint16_t exp_real_q1_15(int16_t x_q8_8);
+uint16_t exp2_ctx_step_q1_15(int16_t x_q8_8);
+uint16_t exp2_ctx_interp_q1_15(int16_t x_q8_8);
 uint32_t recip_q16_16(uint32_t x_q16_16);
 uint32_t recip_nr_rtl_q16_16(uint32_t x_q16_16);
 float q8_8_to_float(int16_t x);

@@ -30,6 +30,11 @@ int run_cmodel(int argc, char** argv) {
 
         std::vector<std::string> names = {
             "rtl_strict",
+            "rtl_ctx_step",
+            "rtl_ctx_step_acc24",
+            "rtl_ctx_interp",
+            "rtl_ctx_pwl",
+            "rtl_ctx_real_exp",
             "rtl_exact", "rtl_real_exp", "rtl_real_exp_float_norm", "float_online_q8",
             "acc_float_qout", "acc_float_real_exp_qout",
             "fixed_hiacc_qout", "fixed_hiacc_real_exp_qout",
