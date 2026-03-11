@@ -5,16 +5,42 @@
 - 验证：cocotb + Verilator C++ TB + CModel 对照；
 - 评估：周期/误差/带宽统计 + 模块级 STA。
 
-## 当前状态（2026-03-05）
+## 当前状态（2026-03-11）
 
-基于最新统计文件 `docs/data/20260304_rtl_summary.csv`：
-- `total_cycles = 145,584`（已满足 baseline `<300k`，并较前一版继续下降）
-- `rtl_fp32_mae = 0.000971925`
-- `rtl_fp32_maxae = 0.00203197`
+当前仓库只有一条活动主线 `main`。这条主线已经完成：
 
-主要分解（`docs/data/20260304_rtl_latency_breakdown.csv`）：
-- `Compute+Normalize+Ctrl = 108,721 cycles`（主要瓶颈）
-- DMA 读写约 `36,863 cycles`
+- `QK tag` 化流式回收
+- `4-context` online softmax 调度
+- `acc -> normalize` 尺度对齐修正
+
+基于顶层 full-run cocotb 回归（`make test MODULE=fa_attention_ip_top`），当前主线结果为：
+
+- `total_cycles = 85,928`
+- `rtl_vs_fixed_q8_8_mae_lsb = 0`
+- `rtl_vs_fixed_q8_8_max_err_lsb = 0`
+- `rtl_fp32_mae = 0.002499`
+- `rtl_fp32_maxae = 0.006583`
+
+对应 perf 摘要为：
+
+- `compute = 67,584 cycles`
+- `dp = 66,560`
+- `score = 32,768`
+- `softmax = 32,768`
+- `norm = 5,888`
+- `rd_beat = 34,816`
+- `wr_beat = 2,048`
+
+说明：仓库中出现过的 `145,584 cycles` 与 `608,296 cycles` 仍有历史价值，但都不再代表当前 `main`：
+
+- `145,584`：较早一版稳定 baseline 的历史结果；
+- `608,296`：高频 leaf 接回但 system overlap 尚未打通时的中间恢复态；
+- `85,928`：当前唯一活动主线 `main` 的最新实测结果。
+
+建议配合阅读：
+
+- [docs/20260310_current_cycle_perf_and_accuracy_analysis.md](docs/20260310_current_cycle_perf_and_accuracy_analysis.md)
+- [docs/20260311_mainline_status_and_next_step_strategy.md](docs/20260311_mainline_status_and_next_step_strategy.md)
 
 ## 环境准备
 
@@ -70,13 +96,14 @@ make cmodel-compute-adv
 make rtl-cmodel-compare
 ```
 
-产物：
+产物（含历史与当前阶段）：
 - `docs/data/20260304_rtl_summary.csv`
 - `docs/data/20260304_rtl_timeline.csv`
 - `docs/data/20260304_rtl_latency_breakdown.csv`
 - `docs/data/20260304_rtl_compute_breakdown.csv`
 - `docs/data/20260304_compute_cycle_models_s256d64.csv`
 - `docs/data/20260304_rtl_cmodel_compute_compare.csv`
+- `docs/data/20260311_rtl_summary_ctxstream.csv`
 - 图表：`docs/report/20260304_*.png`
 
 ### 5) STA（模块级）
@@ -149,12 +176,17 @@ docs/
 
 ## 建议开发节奏（后续）
 
-1. 改 RTL 前先保留一个可跑基线：`make rtl-latency-profile`
-2. 每次改动至少跑：
+1. 先冻结当前 `main` 作为可提交 baseline；
+2. 新实验优先单独开分支，不要直接破坏 `85,928 cycles` 主线；
+3. 每次改动至少跑：
    - `make lint`
+  - `make test MODULE=fa_attention_ip_top`
    - `make check-sdpa-verilator-cpp`
    - `make rtl-latency-profile`
-3. 再用 `make rtl-cmodel-compare` 看周期差异来源。
+4. 再用 `make rtl-cmodel-compare` 看周期差异来源。
 
 若目标是 Baseline P0，请优先看：
 - `docs/20260305_architecture_next_steps_from_papers.md`
+
+若目标是下一步分支规划，请优先看：
+- [docs/20260311_mainline_status_and_next_step_strategy.md](docs/20260311_mainline_status_and_next_step_strategy.md)
