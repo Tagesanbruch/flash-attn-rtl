@@ -101,6 +101,24 @@ static uint16_t exp_real_q1_15(int16_t x_q8_8) {
     return static_cast<uint16_t>(v);
 }
 
+static uint16_t exp2_ctx_q1_15(int16_t x_q8_8) {
+    int32_t x = x_q8_8;
+    if (x > 0) x = 0;
+    if (x < -4096) x = -4096;
+
+    uint32_t z_q8_8 = ((static_cast<uint32_t>(-x) * 369u) + 128u) >> 8;
+    uint32_t int_part = (z_q8_8 >> 8) & 0xFFu;
+    uint32_t frac_part = z_q8_8 & 0xFFu;
+    static const int table[32] = {
+        32768, 32066, 31379, 30706, 30048, 29405, 28774, 28158,
+        27554, 26964, 26386, 25821, 25268, 24726, 24196, 23678,
+        23170, 22674, 22188, 21713, 21247, 20792, 20347, 19911,
+        19484, 19066, 18658, 18258, 17867, 17484, 17109, 16743,
+    };
+    if (int_part >= 16u) return 0;
+    return static_cast<uint16_t>(table[frac_part >> 3] >> int_part);
+}
+
 static uint32_t recip_q16_16(uint32_t x_q16_16) {
     if (x_q16_16 == 0) return 0xFFFFFFFFu;
     uint64_t num = (1ull << 32);
@@ -179,7 +197,7 @@ static int16_t div_round_sat_s16(int64_t num, uint32_t den) {
     return sat_s16(static_cast<int32_t>(q));
 }
 
-static MatrixI16 reference_fixed_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI16& V, bool use_pwl_exp, bool causal) {
+static MatrixI16 reference_fixed_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI16& V, bool use_step_exp, bool causal) {
     MatrixI16 O(S, std::vector<int16_t>(D, 0));
     int16_t neg_large = static_cast<int16_t>(-8192); // -32.0 Q8.8
     int16_t scale = static_cast<int16_t>(std::lround((1.0 / std::sqrt(static_cast<double>(D))) * 256.0));
@@ -208,8 +226,8 @@ static MatrixI16 reference_fixed_like(const MatrixI16& Q, const MatrixI16& K, co
                     int16_t m_new = (score > m_old) ? score : m_old;
                     int16_t diff_old = static_cast<int16_t>(m_old - m_new);
                     int16_t diff_new = static_cast<int16_t>(score - m_new);
-                    uint16_t exp_old = use_pwl_exp ? exp_pwl_q1_15(diff_old) : exp_real_q1_15(diff_old);
-                    uint16_t exp_new = use_pwl_exp ? exp_pwl_q1_15(diff_new) : exp_real_q1_15(diff_new);
+                    uint16_t exp_old = use_step_exp ? exp2_ctx_q1_15(diff_old) : exp_real_q1_15(diff_old);
+                    uint16_t exp_new = use_step_exp ? exp2_ctx_q1_15(diff_new) : exp_real_q1_15(diff_new);
 
                     uint32_t l_scaled = (static_cast<uint64_t>(row_l[qi]) * exp_old) >> 15;
                     uint32_t l_term = (static_cast<uint32_t>(exp_new) << 1);
@@ -217,8 +235,8 @@ static MatrixI16 reference_fixed_like(const MatrixI16& Q, const MatrixI16& K, co
 
                     for (int d = 0; d < D; ++d) {
                         int64_t acc_old_sc = (row_acc[qi][d] * static_cast<int64_t>(exp_old)) >> 15;
-                        int64_t pv_term = (static_cast<int64_t>(exp_new) * static_cast<int32_t>(V[k_start + kj][d])) << 1;
-                        row_acc[qi][d] = acc_old_sc + pv_term;
+                        int64_t pv_term = (static_cast<int64_t>(exp_new) * static_cast<int32_t>(V[k_start + kj][d])) >> 7;
+                        row_acc[qi][d] = to_s32(acc_old_sc + pv_term);
                     }
 
                     row_m[qi] = m_new;
@@ -228,7 +246,13 @@ static MatrixI16 reference_fixed_like(const MatrixI16& Q, const MatrixI16& K, co
 
         for (int qi = 0; qi < TQ; ++qi) {
             for (int d = 0; d < D; ++d) {
-                O[q_start + qi][d] = div_round_sat_s16(row_acc[qi][d], row_l[qi]);
+                int64_t num = row_acc[qi][d] << 8;
+                uint32_t recip = recip_q16_16(row_l[qi]);
+                __int128 norm_mul_q32_32 = static_cast<__int128>(num) * static_cast<int64_t>(static_cast<int32_t>(recip));
+                __int128 norm_round_q32_32 = (norm_mul_q32_32 >= 0)
+                    ? (norm_mul_q32_32 + static_cast<__int128>(2147483648ll))
+                    : (norm_mul_q32_32 - static_cast<__int128>(2147483648ll));
+                O[q_start + qi][d] = sat_s16(static_cast<int32_t>(norm_round_q32_32 >> 32));
             }
         }
     }

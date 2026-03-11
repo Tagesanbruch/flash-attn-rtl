@@ -6,7 +6,7 @@ import math
 import os
 
 from axilite_master import AxiLiteMaster
-from fp_ref import to_s16, to_u32, q8_8_mul_sat, exp_pwl_q1_15
+from fp_ref import to_s16, to_s32, to_u32, q8_8_mul_sat, exp2_ctx_q1_15, recip_nr_rtl_q16_16
 
 
 REG_CTRL = 0x00
@@ -120,8 +120,8 @@ def _fixed_flash_attention_ref(Q, K, V, scale, neg_large, causal=False):
                     m_new = score if score > m_old else m_old
                     diff_old = to_s16(m_old - m_new)
                     diff_new = to_s16(score - m_new)
-                    exp_old = exp_pwl_q1_15(diff_old)
-                    exp_new = exp_pwl_q1_15(diff_new)
+                    exp_old = exp2_ctx_q1_15(diff_old)
+                    exp_new = exp2_ctx_q1_15(diff_new)
 
                     l_scaled = (to_u32(row_l[qi]) * exp_old) >> 15
                     l_term = (exp_new << 1) & 0xFFFFFFFF
@@ -131,21 +131,21 @@ def _fixed_flash_attention_ref(Q, K, V, scale, neg_large, causal=False):
                         acc_scaled_wide = row_acc[qi][d] * exp_old
                         acc_old_sc = acc_scaled_wide >> 15
                         pv_mul = exp_new * to_s16(V[k_start + kj][d])
-                        pv_term = pv_mul << 1
-                        row_acc[qi][d] = acc_old_sc + pv_term
+                        pv_term = pv_mul >> 7
+                        row_acc[qi][d] = to_s32(acc_old_sc + pv_term)
 
                     row_m[qi] = to_s16(m_new)
 
         for qi in range(TQ):
             den = to_u32(row_l[qi])
             for d in range(D):
-                num = row_acc[qi][d]
-                if den == 0:
-                    norm_result = 32767 if num >= 0 else -32768
+                num = row_acc[qi][d] << 8
+                recip = recip_nr_rtl_q16_16(den)
+                norm_mul_q32_32 = num * to_s32(recip)
+                if norm_mul_q32_32 >= 0:
+                    norm_result = int((norm_mul_q32_32 + (1 << 31)) >> 32)
                 else:
-                    half = den >> 1
-                    num_adj = num + half if num >= 0 else num - half
-                    norm_result = int(num_adj / den)
+                    norm_result = int((norm_mul_q32_32 - (1 << 31)) >> 32)
 
                 if norm_result > 32767:
                     out[q_start + qi][d] = 32767

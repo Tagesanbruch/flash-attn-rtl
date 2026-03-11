@@ -114,8 +114,17 @@ COCOTB_RESULTS_FILE ?= $(SIM_BUILD)/results.xml
 
 EXTRA_ARGS += -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-UNUSEDSIGNAL
 
+# waveform generation control: set WAVES=1 to enable, and optionally
+# pick format via WAVE_FMT (fst or vcd). default is fst for compact files.
+WAVES ?= 0
+WAVE_FMT ?= fst
+
 ifeq ($(WAVES),1)
+ifeq ($(WAVE_FMT),vcd)
+EXTRA_ARGS += --trace
+else
 EXTRA_ARGS += --trace --trace-fst
+endif
 endif
 
 export TOPLEVEL MODULE
