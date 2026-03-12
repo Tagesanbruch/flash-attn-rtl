@@ -10,6 +10,7 @@ CPP_SDPA_BIN ?= build/sdpa_compare
 RTL_DUMP_DIR ?= /tmp/fa_rtl_dump
 VERILATOR_CPP_DIR ?= build/verilator_cpp
 VERILATOR_CPP_BIN ?= fa_attention_core_tb
+VERILATOR_CPP_ARGS ?=
 
 YOSYS_STA_DIR ?= ../ysyx/yosys-sta
 PDK_SRC_DIR ?= ../ysyx/mac/pdk/icsprout55-pdk
@@ -153,12 +154,15 @@ verilator-cpp-build:
 		rtl/common/fa_mul_sat_q8_8.sv \
 		rtl/softmax/fa_exp_pwl_8seg_q1_15.sv \
 		rtl/softmax/fa_recip_nr_q16_16.sv \
+		rtl/core/fa_qk_dotprod_slice.sv \
+		rtl/core/fa_online_softmax_ctx.sv \
+		rtl/core/fa_o_normalize_block.sv \
 		rtl/core/fa_attention_core.sv \
 		dv/verilator_cpp/fa_attention_core_tb.cpp \
 		-o $(VERILATOR_CPP_BIN)
 
 verilator-cpp-run: verilator-cpp-build
-	$(VERILATOR_CPP_DIR)/$(VERILATOR_CPP_BIN)
+	$(VERILATOR_CPP_DIR)/$(VERILATOR_CPP_BIN) $(VERILATOR_CPP_ARGS)
 
 check-sdpa-verilator-cpp:
 	@echo "[INFO] Using Verilator: $$(verilator --version)"

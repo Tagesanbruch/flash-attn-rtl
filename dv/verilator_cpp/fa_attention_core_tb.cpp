@@ -260,7 +260,7 @@ static MatrixI16 reference_fixed_like(const MatrixI16& Q, const MatrixI16& K, co
     return O;
 }
 
-static std::vector<std::vector<double>> reference_fp32(const MatrixI16& Q, const MatrixI16& K, const MatrixI16& V) {
+static std::vector<std::vector<double>> reference_fp32(const MatrixI16& Q, const MatrixI16& K, const MatrixI16& V, bool causal) {
     std::vector<std::vector<double>> O(S, std::vector<double>(D, 0.0));
     const double scale = 1.0 / std::sqrt(static_cast<double>(D));
 
@@ -273,7 +273,7 @@ static std::vector<std::vector<double>> reference_fp32(const MatrixI16& Q, const
                 dot += q8_8_to_float(Q[i][d]) * q8_8_to_float(K[j][d]);
             }
             scores[j] = dot * scale;
-            if (j > i) scores[j] = -1e9;
+            if (causal && j > i) scores[j] = -1e9;
             if (scores[j] > max_s) max_s = scores[j];
         }
         double denom = 0.0;
@@ -357,6 +357,11 @@ struct WriteTxn {
 struct TbConfig {
     std::string timeline_csv;
     std::string summary_csv;
+    bool causal = true;
+    int neg_large_q8_8 = -8192;
+    int seed = 2025;
+    int data_min = -32;
+    int data_max = 31;
 };
 
 struct ProfileEvent {
@@ -380,6 +385,11 @@ static TbConfig parse_args(int argc, char** argv) {
 
         if (a == "--timeline-csv") cfg.timeline_csv = next(i);
         else if (a == "--summary-csv") cfg.summary_csv = next(i);
+        else if (a == "--causal") cfg.causal = (std::stoi(next(i)) != 0);
+        else if (a == "--neg-large-q8_8") cfg.neg_large_q8_8 = std::stoi(next(i));
+        else if (a == "--seed") cfg.seed = std::stoi(next(i));
+        else if (a == "--data-min") cfg.data_min = std::stoi(next(i));
+        else if (a == "--data-max") cfg.data_max = std::stoi(next(i));
         else throw std::runtime_error("Unknown arg: " + a);
     }
     return cfg;
@@ -397,8 +407,8 @@ int run_sim(const TbConfig& cfg) {
     auto* dut = new Vfa_attention_core();
 
     // Generate deterministic input
-    std::mt19937 rng(2025);
-    std::uniform_int_distribution<int> dist(-32, 31);
+    std::mt19937 rng(cfg.seed);
+    std::uniform_int_distribution<int> dist(cfg.data_min, cfg.data_max);
     MatrixI16 Q(S, std::vector<int16_t>(D));
     MatrixI16 K(S, std::vector<int16_t>(D));
     MatrixI16 V(S, std::vector<int16_t>(D));
@@ -429,9 +439,9 @@ int run_sim(const TbConfig& cfg) {
     dut->rst_n = 0;
     dut->i_start = 0;
     dut->i_soft_reset = 0;
-    dut->i_causal_en = 1;
+    dut->i_causal_en = cfg.causal ? 1 : 0;
     dut->i_scale_q8_8 = static_cast<uint16_t>(std::lround((1.0 / std::sqrt(static_cast<double>(D))) * 256.0));
-    dut->i_neg_large_q8_8 = static_cast<uint16_t>(static_cast<int16_t>(-8192));
+    dut->i_neg_large_q8_8 = static_cast<uint16_t>(static_cast<int16_t>(cfg.neg_large_q8_8));
     dut->i_q_base = Q_BASE;
     dut->i_k_base = K_BASE;
     dut->i_v_base = V_BASE;
@@ -624,9 +634,9 @@ int run_sim(const TbConfig& cfg) {
     MatrixI16 O_rtl = mem.load_matrix_q8_8(static_cast<uint32_t>(O_BASE), S, D, stride_bytes);
 
     // Round-2 diagnostics: fixed-like + FP32 references
-    MatrixI16 O_fixed = reference_fixed_like(Q, K, V, true, true);
-    MatrixI16 O_fixed_realexp = reference_fixed_like(Q, K, V, false, true);
-    auto O_fp32 = reference_fp32(Q, K, V);
+    MatrixI16 O_fixed = reference_fixed_like(Q, K, V, true, cfg.causal);
+    MatrixI16 O_fixed_realexp = reference_fixed_like(Q, K, V, false, cfg.causal);
+    auto O_fp32 = reference_fp32(Q, K, V, cfg.causal);
 
     Metrics m_rtl_fixed = compare_i16_to_i16(O_rtl, O_fixed);
     Metrics m_rtl_fixed_realexp = compare_i16_to_i16(O_rtl, O_fixed_realexp);
@@ -635,6 +645,10 @@ int run_sim(const TbConfig& cfg) {
     Metrics m_rtl_fp32 = compare_i16_to_fp32(O_rtl, O_fp32);
 
     std::cout << std::fixed << std::setprecision(6);
+    std::cout << "[Verilator C++ TB] CONFIG causal=" << (cfg.causal ? 1 : 0)
+              << " neg_large_q8_8=" << cfg.neg_large_q8_8
+              << " seed=" << cfg.seed
+              << " data_range=[" << cfg.data_min << "," << cfg.data_max << "]\n";
     std::cout << "[Verilator C++ TB] DONE cycles=" << cycles << " o_cycles=" << dut->o_cycles << "\n";
     std::cout << "[Verilator C++ TB] PERF summary: busy=" << busy_cycles
               << " load_q=" << perf_ms_load_q_cycles

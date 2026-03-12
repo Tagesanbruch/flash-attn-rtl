@@ -15,6 +15,7 @@ PDK_NAME     ?= icsprout55
 
 EXP_DIR      := $(abspath $(MOD)/$(EXP))
 TB_DIR       := $(abspath $(MOD)/tb)
+EXTRA_SV_LIST_FILE := $(EXP_DIR)/sources.f
 STA_OUT_DIR  := $(ROOT)/syn/exp_$(MOD)_$(EXP)_$(STA_DATE)
 STA_WORK_DIR := $(YOSYS_STA_DIR)/flashattn_exp/$(MOD)_$(EXP)_$(STA_DATE)
 
@@ -32,7 +33,8 @@ TOPLEVEL_LANG ?= verilog
 
 # ─── Per-module configuration ─────────────────────────────────────
 # RTL files: all .sv in the experiment directory
-EXP_SV_FILES := $(wildcard $(EXP_DIR)/*.sv)
+EXTRA_SV_FILES := $(shell test -f "$(EXTRA_SV_LIST_FILE)" && tr '\n' ' ' < "$(EXTRA_SV_LIST_FILE)" || true)
+EXP_SV_FILES := $(wildcard $(EXP_DIR)/*.sv) $(EXTRA_SV_FILES)
 
 # Determine if the module is clocked (has clk port)
 CLOCKED_MODULES := fa_row_reduction_core fa_online_softmax_update fa_recip_nr_q16_16 \
@@ -73,7 +75,11 @@ list:
 	done
 
 # ─── Verification (cocotb + verilator) ───────────────────────────
-VERIF_BUILD  := $(abspath build/verif_$(MOD)_$(EXP))
+COMPILE_TAG  := $(strip $(subst -G,,$(subst =,,$(subst  ,_,$(COMPILE_ARGS)))))
+empty :=
+space := $(empty) $(empty)
+COMPILE_TAG := $(strip $(subst =,,$(subst -G,,$(subst $(space),_,$(COMPILE_ARGS)))))
+VERIF_BUILD  := $(abspath build/verif_$(MOD)_$(EXP)$(if $(COMPILE_TAG),_$(COMPILE_TAG)))
 VERIF_BASENAME := $(notdir $(MOD))
 VERIF_TEST   := $(wildcard $(TB_DIR)/test_$(VERIF_BASENAME).py)
 VERIF_MODULE := test_$(VERIF_BASENAME)
@@ -88,15 +94,18 @@ verif:
 	VERILOG_SOURCES="$(EXP_SV_FILES)" \
 	SIM_BUILD=$(VERIF_BUILD) \
 	COCOTB_RESULTS_FILE=$(VERIF_BUILD)/results.xml \
-	EXTRA_ARGS="-Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-UNUSEDSIGNAL" \
+	EXTRA_ARGS="-Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-UNUSEDSIGNAL $(COMPILE_ARGS)" \
+	SIM_ARGS="$(SIM_ARGS)" \
 	PYTHONPATH=$(TB_DIR):$(ROOT)/experiments:$(ROOT)/dv/cocotb/tests:$(PYTHONPATH) \
 	EXP_NAME=$(EXP) \
+	MAKEOVERRIDES= \
+	MAKEFLAGS= \
 	$(MAKE) -f $$($(COCOTB_CONFIG) --makefiles)/Makefile.sim
 
 # ─── Lint ─────────────────────────────────────────────────────────
 lint:
 	@test -d "$(EXP_DIR)" || (echo "[ERR] Experiment dir not found: $(EXP_DIR)" && exit 1)
-	verilator $(LINT_FLAGS) --top-module $(TOPLEVEL) $(EXP_SV_FILES)
+	verilator $(LINT_FLAGS) $(COMPILE_ARGS) --top-module $(TOPLEVEL) $(EXP_SV_FILES)
 
 # ─── Synthesis (yosys) ────────────────────────────────────────────
 synth:

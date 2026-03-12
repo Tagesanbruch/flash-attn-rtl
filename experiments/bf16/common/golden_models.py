@@ -75,6 +75,78 @@ def bf16_mul_reference(a_bf16: int, b_bf16: int) -> tuple[int, int]:
     return prod_bits, fp32_to_bf16_bits(prod_bits)
 
 
+def _round_shift_right_rne_u32(value: int, shamt: int) -> int:
+    value &= 0xFFFFFFFF
+    if shamt <= 0:
+        return value
+    if shamt >= 32:
+        return 1 if value != 0 else 0
+    base = value >> shamt
+    guard = (value >> (shamt - 1)) & 0x1
+    sticky_mask = (1 << (shamt - 1)) - 1 if shamt > 1 else 0
+    sticky = 1 if (value & sticky_mask) != 0 else 0
+    if guard and (sticky or (base & 0x1)):
+        return (base + 1) & 0xFFFFFFFF
+    return base & 0xFFFFFFFF
+
+
+def _fp32_to_q16_16_signed(bits: int) -> int:
+    sign = (bits >> 31) & 0x1
+    exp = (bits >> 23) & 0xFF
+    frac = bits & 0x7FFFFF
+    if exp == 0 and frac == 0:
+        return 0
+    sig24 = frac if exp == 0 else ((1 << 23) | frac)
+    exp_unbiased = -126 if exp == 0 else exp - 127
+    shift_i = exp_unbiased - 7
+    if shift_i >= 0:
+        mag = sig24 << shift_i
+        mag = min(mag, 0x7FFFFFFF)
+    else:
+        mag = _round_shift_right_rne_u32(sig24, -shift_i)
+    mag = min(mag, 0x7FFFFFFF)
+    return -mag if sign else mag
+
+
+def _q16_16_signed_to_fp32_bits(q_val: int) -> int:
+    sign = 1 if q_val < 0 else 0
+    mag = -q_val if q_val < 0 else q_val
+    mag &= 0xFFFFFFFFFFFFFFFF
+    if mag == 0:
+        return sign << 31
+    msb_idx = mag.bit_length() - 1
+    exp_unbiased = msb_idx - 16
+    shift_i = msb_idx - 23
+    if shift_i > 0:
+        sig24 = _round_shift_right_rne_u32(mag & 0xFFFFFFFF, shift_i)
+    else:
+        sig24 = (mag << (23 - msb_idx)) & 0xFFFFFFFFFFFFFFFF
+    if sig24 & (1 << 24):
+        sig24 >>= 1
+        exp_unbiased += 1
+    if exp_unbiased > 127:
+        return (sign << 31) | 0x7F800000
+    exp = exp_unbiased + 127
+    frac = sig24 & 0x7FFFFF
+    return ((sign << 31) | (exp << 23) | frac) & 0xFFFFFFFF
+
+
+def fp32_mul_q16_bits(a_bits: int, b_bits: int) -> int:
+    a_q = _fp32_to_q16_16_signed(a_bits)
+    b_q = _fp32_to_q16_16_signed(b_bits)
+    prod_q32_32 = a_q * b_q
+    if prod_q32_32 >= 0:
+        prod_round = prod_q32_32 + 32768
+    else:
+        prod_round = prod_q32_32 - 32768
+    prod_q16_16 = prod_round >> 16
+    if prod_q16_16 > 0x7FFFFFFF:
+        prod_q16_16 = 0x7FFFFFFF
+    if prod_q16_16 < -0x80000000:
+        prod_q16_16 = -0x80000000
+    return _q16_16_signed_to_fp32_bits(prod_q16_16)
+
+
 def dotprod_fp32_reference(a_vec_bf16: Iterable[int], b_vec_bf16: Iterable[int]) -> dict[str, list[int]]:
     mul_fp32 = []
     acc_fp32 = []
@@ -179,6 +251,73 @@ def online_softmax_mixed_step(
         "m_stage_fp32": bf16_to_fp32_bits(m_bf16),
         "l_stage_fp32": bf16_to_fp32_bits(l_bf16),
         "acc_stage_fp32": bf16_to_fp32_bits(acc_bf16),
+    }
+
+
+def attention_bf16_fp32_reference(
+    q_mat_bf16: list[list[int]],
+    k_mat_bf16: list[list[int]],
+    v_mat_bf16: list[list[int]],
+    scale_bits: int,
+    neg_large_bits: int,
+    causal: bool = False,
+) -> dict[str, list[list[int]]]:
+    seq_len = len(q_mat_bf16)
+    d = len(q_mat_bf16[0]) if seq_len > 0 else 0
+    out_fp32_bits = [[0 for _ in range(d)] for _ in range(seq_len)]
+    out_bf16 = [[0 for _ in range(d)] for _ in range(seq_len)]
+    cycle_model = 3 * (seq_len * d // 8) + seq_len * (seq_len * (d + 2) + 1 + (d // 8))
+
+    zero_bits = 0
+    zero_bf16 = 0
+    for i in range(seq_len):
+        m_bits = zero_bits
+        l_bits = zero_bits
+        acc_bits = [zero_bits for _ in range(d)]
+        inv_l_bits = zero_bits
+        for j in range(seq_len):
+            score_bits = zero_bits
+            for kk in range(d):
+                prod_bits = fp32_mul_q16_bits(
+                    bf16_to_fp32_bits(q_mat_bf16[i][kk]),
+                    bf16_to_fp32_bits(k_mat_bf16[j][kk]),
+                )
+                score_bits = fp32_add_bits(score_bits, prod_bits)
+            score_bits = fp32_mul_q16_bits(score_bits, scale_bits)
+            if causal and j > i:
+                score_bits = neg_large_bits
+            score_bf16 = fp32_to_bf16_bits(score_bits)
+
+            step_ref = online_softmax_fp32_step(
+                m_old_bits=m_bits,
+                l_old_bits=l_bits,
+                acc_old_bits=zero_bits,
+                score_bf16=score_bf16,
+                value_bf16=zero_bf16,
+                row_start=(j == 0),
+            )
+            m_bits = step_ref["m_new_bits"]
+            l_bits = step_ref["l_new_bits"]
+            exp_old_bits = step_ref["exp_old_bits"]
+            exp_new_bits = step_ref["exp_new_bits"]
+
+            l_val = bits_to_f32(l_bits)
+            inv_l_bits = zero_bits if l_val == 0.0 else f32_to_bits(f32(1.0 / l_val))
+
+            for kk in range(d):
+                acc_scaled = zero_bits if j == 0 else fp32_mul_q16_bits(acc_bits[kk], exp_old_bits)
+                v_term = fp32_mul_q16_bits(bf16_to_fp32_bits(v_mat_bf16[j][kk]), exp_new_bits)
+                acc_bits[kk] = fp32_add_bits(acc_scaled, v_term)
+
+        for kk in range(d):
+            out_bits = fp32_mul_q16_bits(acc_bits[kk], inv_l_bits)
+            out_fp32_bits[i][kk] = out_bits
+            out_bf16[i][kk] = fp32_to_bf16_bits(out_bits)
+
+    return {
+        "o_fp32_bits": out_fp32_bits,
+        "o_bf16": out_bf16,
+        "cycle_model": cycle_model,
     }
 
 

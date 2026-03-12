@@ -3,22 +3,30 @@ CXXFLAGS ?= -O3 -std=c++17 -Wall -Wextra
 
 BUILD_DIR := build
 BIN := $(BUILD_DIR)/attention_cmodel
+LIB := $(BUILD_DIR)/libbf16_cmodel.so
 SRCS := \
 	csrc/attention_cmodel.cpp \
 	csrc/attention_lib.cpp \
 	csrc/attention_math.cpp \
 	csrc/attention_kernels.cpp \
 	csrc/attention_experiment.cpp
+LIB_SRCS := \
+	csrc/attention_math.cpp \
+	csrc/bf16_cmodel_export.cpp
 
 .PHONY: all build run run-noncausal run-gaussian run-gaussian-noncausal sweep run-mask-sweep run-stage-decomp run-compute-cycles run-solution-compare run-solution-compare-tuned clean
 
 all: build
 
-build: $(BIN)
+build: $(BIN) $(LIB)
 
 $(BIN): $(SRCS)
 	@mkdir -p $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) $(SRCS) -o $(BIN)
+
+$(LIB): $(LIB_SRCS)
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) -fPIC -shared $(LIB_SRCS) -o $(LIB)
 
 run: build
 	$(BIN) --s 256 --d 64 --tq 32 --tk 64 --causal --input-mode small-int --seed 20260303 --n-seeds 5 \

@@ -21,6 +21,12 @@
 - `fa_bf16_dotprod_lane`
 - `fa_fp32_softmax_update_scalar`
 - `fa_fp32_softmax_row`
+- `fa_attention_core_bf16fp32`
+
+其中 `fa_attention_core_bf16fp32` 的 RTL 默认参数已对齐赛题基线 `S=256, D=64, TQ=32, TK=64`；
+日常快速回归可通过参数覆盖切换到小尺寸，例如：
+
+- `PARAM_SEQ_LEN=32 PARAM_D=8 PARAM_TQ=8 PARAM_TK=8 make verif MOD=bf16/fa_attention_core_bf16fp32 EXP=base COMPILE_ARGS='-GSEQ_LEN=32 -GD=8 -GTQ=8 -GTK=8'`
 
 运行示例：
 
@@ -31,3 +37,4 @@
 - `make verif MOD=bf16/fa_bf16_dotprod_lane EXP=base`
 - `make verif MOD=bf16/fa_fp32_softmax_update_scalar EXP=base`
 - `make verif MOD=bf16/fa_fp32_softmax_row EXP=base`
+- `make verif MOD=bf16/fa_attention_core_bf16fp32 EXP=base`

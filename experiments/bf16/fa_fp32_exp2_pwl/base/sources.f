@@ -1,0 +1,1 @@
+bf16/fa_fp32_softmax_update_scalar/base/fa_fp32_exp2_pwl.sv

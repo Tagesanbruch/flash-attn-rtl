@@ -15,17 +15,23 @@ struct Config {
     int n_seeds = 5;
     bool causal = true;
     std::string csv_out = "";
-    std::string input_mode = "small-int";
+    std::string input_mode = "bf16";
     int neg_large_q8_8 = -2048;
+    float neg_large_fp32 = -64.0f;
+    float bf16_low = -1.0f;
+    float bf16_high = 1.0f;
     std::string mask_mode = "neg";
     bool run_stage_decomp = false;
     int stage_seed = -1;
     std::string stage_csv_out = "";
     bool run_compute_cycle_model = false;
     std::string cycle_csv_out = "";
+    bool run_module_eval = false;
+    std::string module_csv_out = "";
 };
 
 using MatrixI16 = std::vector<std::vector<int16_t>>;
+using MatrixU16 = std::vector<std::vector<uint16_t>>;
 using MatrixF = std::vector<std::vector<float>>;
 
 enum class Mode {
@@ -73,6 +79,14 @@ struct StageDecompResult {
     StageMetrics norm;
 };
 
+struct ModuleEvalResult {
+    StageMetrics fp32_add;
+    StageMetrics fp32_mul_q16;
+    StageMetrics fp32_exp2_pwl;
+    StageMetrics fp32_recip;
+    StageMetrics fp32_to_bf16;
+};
+
 struct ComputeCycleResult {
     std::string name;
     int64_t pair_total = 0;
@@ -98,6 +112,34 @@ int16_t float_to_q8_8(float x);
 MatrixF dequant_q8_8(const MatrixI16& x);
 MatrixI16 quant_q8_8(const MatrixF& x);
 
+uint32_t f32_to_bits(float v);
+float bits_to_f32(uint32_t bits);
+uint16_t fp32_to_bf16_bits(uint32_t x_bits);
+uint32_t bf16_to_fp32_bits(uint16_t bf16);
+uint32_t fp32_add_ref_bits(uint32_t a_bits, uint32_t b_bits);
+uint32_t fp32_add_rtl_bits(uint32_t a_bits, uint32_t b_bits);
+uint32_t fp32_mul_q16_bits(uint32_t a_bits, uint32_t b_bits);
+uint32_t fp32_exp2_pwl_bits(uint32_t x_bits);
+uint32_t fp32_recip_bits(uint32_t x_bits);
+uint32_t fp32_max_bits(uint32_t a_bits, uint32_t b_bits);
+uint32_t fp32_neg_bits(uint32_t x_bits);
+
+MatrixU16 attention_bf16_fp32_reference(const MatrixU16& q_bf16,
+                                        const MatrixU16& k_bf16,
+                                        const MatrixU16& v_bf16,
+                                        int TQ, int TK,
+                                        bool causal,
+                                        uint32_t scale_bits,
+                                        uint32_t neg_large_bits);
+
+MatrixU16 online_rtl_like_bf16_fp32(const MatrixU16& q_bf16,
+                                    const MatrixU16& k_bf16,
+                                    const MatrixU16& v_bf16,
+                                    int TQ, int TK,
+                                    bool causal,
+                                    uint32_t scale_bits,
+                                    uint32_t neg_large_bits);
+
 MatrixF direct_sdpa_fp32(const MatrixF& q, const MatrixF& k, const MatrixF& v, bool causal);
 MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI16& V,
                           int TQ, int TK, bool causal, Mode mode,
@@ -106,6 +148,7 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
 Metrics calc_metrics(const MatrixF& a, const MatrixF& b);
 std::vector<ModeResult> run_one_seed(const Config& cfg, int seed);
 StageDecompResult run_stage_decomposition(const Config& cfg, int seed);
+ModuleEvalResult run_module_error_eval_bf16(const Config& cfg, int seed);
 std::vector<ComputeCycleResult> run_compute_cycle_models(const Config& cfg);
 Config parse_args(int argc, char** argv);
 

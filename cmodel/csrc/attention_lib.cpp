@@ -25,21 +25,11 @@ int run_cmodel(int argc, char** argv) {
                   << " causal=" << (cfg.causal ? 1 : 0)
                   << " input_mode=" << cfg.input_mode
                   << " neg_large_q8_8=" << cfg.neg_large_q8_8
+                  << " neg_large_fp32=" << cfg.neg_large_fp32
                   << " mask_mode=" << cfg.mask_mode
                   << " seeds=" << cfg.n_seeds << "\n";
 
-        std::vector<std::string> names = {
-            "rtl_strict",
-            "rtl_ctx_step",
-            "rtl_ctx_step_acc24",
-            "rtl_ctx_interp",
-            "rtl_ctx_pwl",
-            "rtl_ctx_real_exp",
-            "rtl_exact", "rtl_real_exp", "rtl_real_exp_float_norm", "float_online_q8",
-            "acc_float_qout", "acc_float_real_exp_qout",
-            "fixed_hiacc_qout", "fixed_hiacc_real_exp_qout",
-            "fp32_then_q8"
-        };
+        std::vector<std::string> names;
 
         struct Agg {
             double mae_sum = 0;
@@ -50,7 +40,7 @@ int run_cmodel(int argc, char** argv) {
             int worst_i = -1;
             int worst_d = -1;
         };
-        std::vector<Agg> aggs(names.size());
+        std::vector<Agg> aggs;
 
         std::ofstream csv;
         if (!cfg.csv_out.empty()) {
@@ -61,6 +51,13 @@ int run_cmodel(int argc, char** argv) {
         for (int k = 0; k < cfg.n_seeds; ++k) {
             int seed = cfg.seed + k;
             auto rs = attn::run_one_seed(cfg, seed);
+            if (names.empty()) {
+                for (const auto& r : rs) names.push_back(r.name);
+                aggs.assign(names.size(), Agg{});
+            }
+            if (rs.size() != names.size()) {
+                throw std::runtime_error("Mode count mismatch across seeds");
+            }
             std::cout << "seed=" << seed << "\n";
             for (size_t i = 0; i < rs.size(); ++i) {
                 const auto& r = rs[i];
@@ -106,10 +103,14 @@ int run_cmodel(int argc, char** argv) {
             std::cout << "[cmodel] csv written: " << cfg.csv_out << "\n";
         }
 
-        std::cout << "[cmodel] threshold check on rtl_strict: "
-                  << "MAE<=0.03=" << ((aggs[0].mae_sum / aggs[0].cnt <= 0.03) ? "PASS" : "FAIL")
-                  << ", MaxAE<=0.10=" << ((aggs[0].maxe_max <= 0.10) ? "PASS" : "FAIL")
-                  << "\n";
+        auto it_rtl = std::find(names.begin(), names.end(), "rtl_strict");
+        if (it_rtl != names.end()) {
+            size_t idx = static_cast<size_t>(std::distance(names.begin(), it_rtl));
+            std::cout << "[cmodel] threshold check on rtl_strict: "
+                      << "MAE<=0.03=" << ((aggs[idx].mae_sum / aggs[idx].cnt <= 0.03) ? "PASS" : "FAIL")
+                      << ", MaxAE<=0.10=" << ((aggs[idx].maxe_max <= 0.10) ? "PASS" : "FAIL")
+                      << "\n";
+        }
 
         auto it_opt = std::find(names.begin(), names.end(), "fixed_hiacc_real_exp_qout");
         if (it_opt != names.end()) {
@@ -148,6 +149,43 @@ int run_cmodel(int argc, char** argv) {
                       << " (MAE=" << stages[best_idx].second.mae << ")\n";
             if (!cfg.stage_csv_out.empty()) {
                 std::cout << "[stage-decomp] csv written: " << cfg.stage_csv_out << "\n";
+            }
+        }
+
+        if (cfg.run_module_eval || !cfg.module_csv_out.empty()) {
+            int module_seed = (cfg.stage_seed >= 0) ? cfg.stage_seed : cfg.seed;
+            auto mod = attn::run_module_error_eval_bf16(cfg, module_seed);
+            std::vector<std::pair<std::string, attn::StageMetrics>> mods = {
+                {"fp32_add", mod.fp32_add},
+                {"fp32_mul_q16", mod.fp32_mul_q16},
+                {"fp32_exp2_pwl", mod.fp32_exp2_pwl},
+                {"fp32_recip", mod.fp32_recip},
+                {"fp32_to_bf16", mod.fp32_to_bf16},
+            };
+
+            std::cout << "[module-eval] seed=" << module_seed << "\n";
+            for (const auto& kv : mods) {
+                std::cout << "  " << kv.first
+                          << " MAE=" << kv.second.mae
+                          << " MaxAE=" << kv.second.maxe
+                          << " RMSE=" << kv.second.rmse << "\n";
+            }
+
+            size_t best_idx = 0;
+            for (size_t i = 1; i < mods.size(); ++i) {
+                if (mods[i].second.mae > mods[best_idx].second.mae) best_idx = i;
+            }
+            std::cout << "[module-eval] dominant module by MAE: " << mods[best_idx].first
+                      << " (MAE=" << mods[best_idx].second.mae << ")\n";
+
+            if (!cfg.module_csv_out.empty()) {
+                std::ofstream csv(cfg.module_csv_out);
+                csv << "seed,module,mae,maxe,rmse\n";
+                for (const auto& kv : mods) {
+                    csv << module_seed << "," << kv.first << ","
+                        << kv.second.mae << "," << kv.second.maxe << "," << kv.second.rmse << "\n";
+                }
+                std::cout << "[module-eval] csv written: " << cfg.module_csv_out << "\n";
             }
         }
 

@@ -34,6 +34,38 @@ struct StageAccum {
     }
 };
 
+MatrixU16 random_bf16_uniform(int S, int D, std::mt19937& rng, float low, float high) {
+    std::uniform_real_distribution<float> ud(low, high);
+    MatrixU16 out(S, std::vector<uint16_t>(D, 0));
+    for (int i = 0; i < S; ++i) {
+        for (int d = 0; d < D; ++d) {
+            uint32_t bits = f32_to_bits(ud(rng));
+            out[i][d] = fp32_to_bf16_bits(bits);
+        }
+    }
+    return out;
+}
+
+MatrixF bf16_to_float_matrix(const MatrixU16& x) {
+    MatrixF out(x.size(), std::vector<float>(x[0].size(), 0.0f));
+    for (size_t i = 0; i < x.size(); ++i) {
+        for (size_t d = 0; d < x[0].size(); ++d) {
+            out[i][d] = bits_to_f32(bf16_to_fp32_bits(x[i][d]));
+        }
+    }
+    return out;
+}
+
+MatrixU16 fp32_to_bf16_matrix(const MatrixF& x) {
+    MatrixU16 out(x.size(), std::vector<uint16_t>(x[0].size(), 0));
+    for (size_t i = 0; i < x.size(); ++i) {
+        for (size_t d = 0; d < x[0].size(); ++d) {
+            out[i][d] = fp32_to_bf16_bits(f32_to_bits(x[i][d]));
+        }
+    }
+    return out;
+}
+
 struct CycleModelCfg {
     std::string name;
     int dot_lanes = 4;
@@ -96,7 +128,42 @@ Metrics calc_metrics(const MatrixF& a, const MatrixF& b) {
     return m;
 }
 
+std::vector<ModeResult> run_one_seed_bf16(const Config& cfg, int seed) {
+    std::mt19937 rng(seed);
+    MatrixU16 q_bf16 = random_bf16_uniform(cfg.S, cfg.D, rng, cfg.bf16_low, cfg.bf16_high);
+    MatrixU16 k_bf16 = random_bf16_uniform(cfg.S, cfg.D, rng, cfg.bf16_low, cfg.bf16_high);
+    MatrixU16 v_bf16 = random_bf16_uniform(cfg.S, cfg.D, rng, cfg.bf16_low, cfg.bf16_high);
+
+    MatrixF qf = bf16_to_float_matrix(q_bf16);
+    MatrixF kf = bf16_to_float_matrix(k_bf16);
+    MatrixF vf = bf16_to_float_matrix(v_bf16);
+
+    MatrixF fp32_ref = direct_sdpa_fp32(qf, kf, vf, cfg.causal);
+    MatrixU16 fp32_ref_bf16 = fp32_to_bf16_matrix(fp32_ref);
+
+    uint32_t scale_bits = f32_to_bits(1.0f / std::sqrt(static_cast<float>(cfg.D)));
+    uint32_t neg_large_bits = f32_to_bits(cfg.neg_large_fp32);
+
+    MatrixU16 rtl_out = online_rtl_like_bf16_fp32(q_bf16, k_bf16, v_bf16, cfg.TQ, cfg.TK,
+                                                 cfg.causal, scale_bits, neg_large_bits);
+    MatrixU16 ref_out = attention_bf16_fp32_reference(q_bf16, k_bf16, v_bf16, cfg.TQ, cfg.TK,
+                                                      cfg.causal, scale_bits, neg_large_bits);
+
+    MatrixF rtl_out_f = bf16_to_float_matrix(rtl_out);
+    MatrixF ref_out_f = bf16_to_float_matrix(ref_out);
+    MatrixF fp32_ref_bf16_f = bf16_to_float_matrix(fp32_ref_bf16);
+
+    std::vector<ModeResult> out;
+    out.push_back({"rtl_bf16_fp32", calc_metrics(rtl_out_f, ref_out_f)});
+    out.push_back({"bf16_ref_vs_fp32", calc_metrics(ref_out_f, fp32_ref)});
+    out.push_back({"fp32_then_bf16", calc_metrics(fp32_ref_bf16_f, fp32_ref)});
+    return out;
+}
+
 std::vector<ModeResult> run_one_seed(const Config& cfg, int seed) {
+    if (cfg.input_mode == "bf16" || cfg.input_mode == "bf16-uniform") {
+        return run_one_seed_bf16(cfg, seed);
+    }
     std::mt19937 rng(seed);
     MatrixI16 q_q(cfg.S, std::vector<int16_t>(cfg.D, 0));
     MatrixI16 k_q(cfg.S, std::vector<int16_t>(cfg.D, 0));
@@ -119,7 +186,7 @@ std::vector<ModeResult> run_one_seed(const Config& cfg, int seed) {
         k_q = quant_q8_8(kf);
         v_q = quant_q8_8(vf);
     } else {
-        throw std::runtime_error("Unknown --input-mode, use small-int|gaussian");
+        throw std::runtime_error("Unknown --input-mode, use small-int|gaussian|bf16");
     }
 
     MatrixF q_qf = dequant_q8_8(q_q);
@@ -166,7 +233,240 @@ std::vector<ModeResult> run_one_seed(const Config& cfg, int seed) {
     return out;
 }
 
+StageDecompResult run_stage_decomposition_bf16(const Config& cfg, int seed) {
+    std::mt19937 rng(seed);
+    MatrixU16 q_bf16 = random_bf16_uniform(cfg.S, cfg.D, rng, cfg.bf16_low, cfg.bf16_high);
+    MatrixU16 k_bf16 = random_bf16_uniform(cfg.S, cfg.D, rng, cfg.bf16_low, cfg.bf16_high);
+    MatrixU16 v_bf16 = random_bf16_uniform(cfg.S, cfg.D, rng, cfg.bf16_low, cfg.bf16_high);
+
+    uint32_t scale_bits = f32_to_bits(1.0f / std::sqrt(static_cast<float>(cfg.D)));
+    uint32_t neg_large_bits = f32_to_bits(cfg.neg_large_fp32);
+
+    StageAccum dot_acc;
+    StageAccum score_acc;
+    StageAccum exp_acc;
+    StageAccum l_acc;
+    StageAccum acc_acc;
+    StageAccum norm_acc;
+
+    for (int qt = 0; qt < cfg.S / cfg.TQ; ++qt) {
+        int q_start = qt * cfg.TQ;
+        std::vector<uint32_t> m_ref(cfg.TQ, 0u);
+        std::vector<uint32_t> l_ref(cfg.TQ, 0u);
+        std::vector<std::vector<uint32_t>> acc_ref(cfg.TQ, std::vector<uint32_t>(cfg.D, 0u));
+
+        std::vector<uint32_t> m_rtl(cfg.TQ, 0u);
+        std::vector<uint32_t> l_rtl(cfg.TQ, 0u);
+        std::vector<std::vector<uint32_t>> acc_rtl(cfg.TQ, std::vector<uint32_t>(cfg.D, 0u));
+
+        for (int kt = 0; kt < cfg.S / cfg.TK; ++kt) {
+            int k_start = kt * cfg.TK;
+            for (int qi = 0; qi < cfg.TQ; ++qi) {
+                for (int kj = 0; kj < cfg.TK; ++kj) {
+                    int gi = q_start + qi;
+                    int gj = k_start + kj;
+                    bool row_start = (kt == 0) && (kj == 0);
+
+                    uint32_t dot_ref = 0u;
+                    uint32_t dot_rtl = 0u;
+                    for (int d = 0; d < cfg.D; ++d) {
+                        uint32_t prod_bits = fp32_mul_q16_bits(bf16_to_fp32_bits(q_bf16[gi][d]),
+                                                               bf16_to_fp32_bits(k_bf16[gj][d]));
+                        dot_ref = fp32_add_ref_bits(dot_ref, prod_bits);
+                        dot_rtl = fp32_add_rtl_bits(dot_rtl, prod_bits);
+                    }
+                    dot_acc.add(static_cast<double>(bits_to_f32(dot_rtl) - bits_to_f32(dot_ref)));
+
+                    uint32_t score_ref = fp32_mul_q16_bits(dot_ref, scale_bits);
+                    uint32_t score_rtl = fp32_mul_q16_bits(dot_rtl, scale_bits);
+                    if (cfg.causal && (gj > gi)) {
+                        score_ref = neg_large_bits;
+                        score_rtl = neg_large_bits;
+                    }
+                    score_acc.add(static_cast<double>(bits_to_f32(score_rtl) - bits_to_f32(score_ref)));
+
+                    uint32_t m_new_ref = row_start
+                        ? score_ref
+                        : ((bits_to_f32(score_ref) > bits_to_f32(m_ref[qi])) ? score_ref : m_ref[qi]);
+                    uint32_t diff_old_ref = fp32_add_ref_bits(m_ref[qi], fp32_neg_bits(m_new_ref));
+                    uint32_t diff_new_ref = fp32_add_ref_bits(score_ref, fp32_neg_bits(m_new_ref));
+                    uint32_t exp_old_ref = row_start ? 0u : f32_to_bits(std::exp2(bits_to_f32(diff_old_ref)));
+                    uint32_t exp_new_ref = row_start ? 0x3F800000u : f32_to_bits(std::exp2(bits_to_f32(diff_new_ref)));
+
+                    uint32_t m_new_rtl = row_start ? score_rtl : fp32_max_bits(score_rtl, m_rtl[qi]);
+                    uint32_t diff_old_rtl = fp32_add_rtl_bits(m_rtl[qi], fp32_neg_bits(m_new_rtl));
+                    uint32_t diff_new_rtl = fp32_add_rtl_bits(score_rtl, fp32_neg_bits(m_new_rtl));
+                    uint32_t exp_old_rtl = row_start ? 0u : fp32_exp2_pwl_bits(diff_old_rtl);
+                    uint32_t exp_new_rtl = row_start ? 0x3F800000u : fp32_exp2_pwl_bits(diff_new_rtl);
+
+                    exp_acc.add(static_cast<double>(bits_to_f32(exp_old_rtl) - bits_to_f32(exp_old_ref)));
+                    exp_acc.add(static_cast<double>(bits_to_f32(exp_new_rtl) - bits_to_f32(exp_new_ref)));
+
+                    uint32_t l_scaled_ref = row_start ? 0u
+                        : f32_to_bits(bits_to_f32(l_ref[qi]) * bits_to_f32(exp_old_ref));
+                    uint32_t l_new_ref = fp32_add_ref_bits(l_scaled_ref, exp_new_ref);
+
+                    uint32_t l_scaled_rtl = fp32_mul_q16_bits(l_rtl[qi], exp_old_rtl);
+                    uint32_t l_new_rtl = fp32_add_rtl_bits(row_start ? 0u : l_scaled_rtl, exp_new_rtl);
+                    l_acc.add(static_cast<double>(bits_to_f32(l_new_rtl) - bits_to_f32(l_new_ref)));
+
+                    for (int d = 0; d < cfg.D; ++d) {
+                        uint32_t acc_scaled_ref = row_start ? 0u : fp32_mul_q16_bits(acc_ref[qi][d], exp_old_ref);
+                        uint32_t v_term_ref = fp32_mul_q16_bits(bf16_to_fp32_bits(v_bf16[gj][d]), exp_new_ref);
+                        uint32_t acc_new_ref = fp32_add_ref_bits(acc_scaled_ref, v_term_ref);
+
+                        uint32_t acc_scaled_rtl = fp32_mul_q16_bits(acc_rtl[qi][d], exp_old_rtl);
+                        uint32_t v_term_rtl = fp32_mul_q16_bits(bf16_to_fp32_bits(v_bf16[gj][d]), exp_new_rtl);
+                        uint32_t acc_new_rtl = fp32_add_rtl_bits(row_start ? 0u : acc_scaled_rtl, v_term_rtl);
+
+                        acc_acc.add(static_cast<double>(bits_to_f32(acc_new_rtl) - bits_to_f32(acc_new_ref)));
+                        acc_ref[qi][d] = acc_new_ref;
+                        acc_rtl[qi][d] = acc_new_rtl;
+                    }
+
+                    m_ref[qi] = m_new_ref;
+                    m_rtl[qi] = m_new_rtl;
+                    l_ref[qi] = l_new_ref;
+                    l_rtl[qi] = l_new_rtl;
+                }
+            }
+        }
+
+        for (int qi = 0; qi < cfg.TQ; ++qi) {
+            float l_ref_f = bits_to_f32(l_ref[qi]);
+            uint32_t inv_l_ref = (l_ref_f == 0.0f) ? 0u : f32_to_bits(1.0f / l_ref_f);
+            uint32_t inv_l_rtl = fp32_recip_bits(l_rtl[qi]);
+            for (int d = 0; d < cfg.D; ++d) {
+                uint32_t out_ref = fp32_mul_q16_bits(acc_ref[qi][d], inv_l_ref);
+                uint32_t out_rtl = fp32_mul_q16_bits(acc_rtl[qi][d], inv_l_rtl);
+                norm_acc.add(static_cast<double>(bits_to_f32(out_rtl) - bits_to_f32(out_ref)));
+            }
+        }
+    }
+
+    StageDecompResult r;
+    r.dot = dot_acc.done();
+    r.score = score_acc.done();
+    r.exp = exp_acc.done();
+    r.l = l_acc.done();
+    r.acc = acc_acc.done();
+    r.norm = norm_acc.done();
+    return r;
+}
+
+ModuleEvalResult run_module_error_eval_bf16(const Config& cfg, int seed) {
+    std::mt19937 rng(seed);
+    MatrixU16 q_bf16 = random_bf16_uniform(cfg.S, cfg.D, rng, cfg.bf16_low, cfg.bf16_high);
+    MatrixU16 k_bf16 = random_bf16_uniform(cfg.S, cfg.D, rng, cfg.bf16_low, cfg.bf16_high);
+    MatrixU16 v_bf16 = random_bf16_uniform(cfg.S, cfg.D, rng, cfg.bf16_low, cfg.bf16_high);
+
+    uint32_t scale_bits = f32_to_bits(1.0f / std::sqrt(static_cast<float>(cfg.D)));
+    uint32_t neg_large_bits = f32_to_bits(cfg.neg_large_fp32);
+
+    StageAccum add_acc;
+    StageAccum mul_acc;
+    StageAccum exp_acc;
+    StageAccum recip_acc;
+    StageAccum bf16_acc;
+
+    for (int qt = 0; qt < cfg.S / cfg.TQ; ++qt) {
+        int q_start = qt * cfg.TQ;
+        std::vector<uint32_t> row_m(cfg.TQ, 0u);
+        std::vector<uint32_t> row_l(cfg.TQ, 0u);
+        std::vector<std::vector<uint32_t>> row_acc(cfg.TQ, std::vector<uint32_t>(cfg.D, 0u));
+
+        for (int kt = 0; kt < cfg.S / cfg.TK; ++kt) {
+            int k_start = kt * cfg.TK;
+            for (int qi = 0; qi < cfg.TQ; ++qi) {
+                for (int kj = 0; kj < cfg.TK; ++kj) {
+                    int gi = q_start + qi;
+                    int gj = k_start + kj;
+                    bool row_start = (kt == 0) && (kj == 0);
+
+                    uint32_t dot = 0u;
+                    for (int d = 0; d < cfg.D; ++d) {
+                        uint32_t a_bits = bf16_to_fp32_bits(q_bf16[gi][d]);
+                        uint32_t b_bits = bf16_to_fp32_bits(k_bf16[gj][d]);
+                        uint32_t mul_rtl = fp32_mul_q16_bits(a_bits, b_bits);
+                        uint32_t mul_ref = f32_to_bits(bits_to_f32(a_bits) * bits_to_f32(b_bits));
+                        mul_acc.add(static_cast<double>(bits_to_f32(mul_rtl) - bits_to_f32(mul_ref)));
+
+                        uint32_t add_rtl = fp32_add_rtl_bits(dot, mul_rtl);
+                        uint32_t add_ref = fp32_add_ref_bits(dot, mul_rtl);
+                        add_acc.add(static_cast<double>(bits_to_f32(add_rtl) - bits_to_f32(add_ref)));
+                        dot = add_rtl;
+                    }
+
+                    uint32_t score = fp32_mul_q16_bits(dot, scale_bits);
+                    uint32_t score_ref = f32_to_bits(bits_to_f32(dot) * bits_to_f32(scale_bits));
+                    mul_acc.add(static_cast<double>(bits_to_f32(score) - bits_to_f32(score_ref)));
+
+                    if (cfg.causal && (gj > gi)) score = neg_large_bits;
+                    uint16_t score_bf16 = fp32_to_bf16_bits(score);
+                    uint16_t score_bf16_ref = fp32_to_bf16_bits(score);
+                    bf16_acc.add(static_cast<double>(static_cast<int32_t>(score_bf16) - static_cast<int32_t>(score_bf16_ref)));
+
+                    uint32_t score_fp32 = bf16_to_fp32_bits(score_bf16);
+                    uint32_t m_new = row_start ? score_fp32 : fp32_max_bits(score_fp32, row_m[qi]);
+                    uint32_t diff_old = fp32_add_rtl_bits(row_m[qi], fp32_neg_bits(m_new));
+                    uint32_t diff_new = fp32_add_rtl_bits(score_fp32, fp32_neg_bits(m_new));
+
+                    uint32_t exp_old = row_start ? 0u : fp32_exp2_pwl_bits(diff_old);
+                    uint32_t exp_new = row_start ? 0x3F800000u : fp32_exp2_pwl_bits(diff_new);
+                    uint32_t exp_old_ref = f32_to_bits(std::exp2(bits_to_f32(diff_old)));
+                    uint32_t exp_new_ref = f32_to_bits(std::exp2(bits_to_f32(diff_new)));
+                    exp_acc.add(static_cast<double>(bits_to_f32(exp_old) - bits_to_f32(exp_old_ref)));
+                    exp_acc.add(static_cast<double>(bits_to_f32(exp_new) - bits_to_f32(exp_new_ref)));
+
+                    uint32_t l_scaled = fp32_mul_q16_bits(row_l[qi], exp_old);
+                    uint32_t l_scaled_ref = f32_to_bits(bits_to_f32(row_l[qi]) * bits_to_f32(exp_old));
+                    mul_acc.add(static_cast<double>(bits_to_f32(l_scaled) - bits_to_f32(l_scaled_ref)));
+
+                    uint32_t l_new = fp32_add_rtl_bits(row_start ? 0u : l_scaled, exp_new);
+                    uint32_t l_new_ref = fp32_add_ref_bits(row_start ? 0u : l_scaled, exp_new);
+                    add_acc.add(static_cast<double>(bits_to_f32(l_new) - bits_to_f32(l_new_ref)));
+                    row_l[qi] = l_new;
+
+                    uint32_t recip = fp32_recip_bits(row_l[qi]);
+                    float l_val = bits_to_f32(row_l[qi]);
+                    uint32_t recip_ref = (l_val == 0.0f) ? 0u : f32_to_bits(1.0f / l_val);
+                    recip_acc.add(static_cast<double>(bits_to_f32(recip) - bits_to_f32(recip_ref)));
+
+                    for (int d = 0; d < cfg.D; ++d) {
+                        uint32_t acc_scaled = fp32_mul_q16_bits(row_acc[qi][d], exp_old);
+                        uint32_t acc_scaled_ref = f32_to_bits(bits_to_f32(row_acc[qi][d]) * bits_to_f32(exp_old));
+                        mul_acc.add(static_cast<double>(bits_to_f32(acc_scaled) - bits_to_f32(acc_scaled_ref)));
+
+                        uint32_t v_bits = bf16_to_fp32_bits(v_bf16[gj][d]);
+                        uint32_t v_term = fp32_mul_q16_bits(v_bits, exp_new);
+                        uint32_t v_term_ref = f32_to_bits(bits_to_f32(v_bits) * bits_to_f32(exp_new));
+                        mul_acc.add(static_cast<double>(bits_to_f32(v_term) - bits_to_f32(v_term_ref)));
+
+                        uint32_t acc_new = fp32_add_rtl_bits(row_start ? 0u : acc_scaled, v_term);
+                        uint32_t acc_new_ref = fp32_add_ref_bits(row_start ? 0u : acc_scaled, v_term);
+                        add_acc.add(static_cast<double>(bits_to_f32(acc_new) - bits_to_f32(acc_new_ref)));
+                        row_acc[qi][d] = acc_new;
+                    }
+
+                    row_m[qi] = m_new;
+                }
+            }
+        }
+    }
+
+    ModuleEvalResult r;
+    r.fp32_add = add_acc.done();
+    r.fp32_mul_q16 = mul_acc.done();
+    r.fp32_exp2_pwl = exp_acc.done();
+    r.fp32_recip = recip_acc.done();
+    r.fp32_to_bf16 = bf16_acc.done();
+    return r;
+}
+
 StageDecompResult run_stage_decomposition(const Config& cfg, int seed) {
+    if (cfg.input_mode == "bf16" || cfg.input_mode == "bf16-uniform") {
+        return run_stage_decomposition_bf16(cfg, seed);
+    }
     std::mt19937 rng(seed);
     MatrixI16 q_q(cfg.S, std::vector<int16_t>(cfg.D, 0));
     MatrixI16 k_q(cfg.S, std::vector<int16_t>(cfg.D, 0));
@@ -189,7 +489,7 @@ StageDecompResult run_stage_decomposition(const Config& cfg, int seed) {
         k_q = quant_q8_8(kf);
         v_q = quant_q8_8(vf);
     } else {
-        throw std::runtime_error("Unknown --input-mode, use small-int|gaussian");
+        throw std::runtime_error("Unknown --input-mode, use small-int|gaussian|bf16");
     }
 
     MatrixF qf = dequant_q8_8(q_q);
@@ -390,12 +690,17 @@ Config parse_args(int argc, char** argv) {
         else if (a == "--csv-out") cfg.csv_out = next(i);
         else if (a == "--input-mode") cfg.input_mode = next(i);
         else if (a == "--neg-large-q8_8") cfg.neg_large_q8_8 = std::stoi(next(i));
+        else if (a == "--neg-large-fp32") cfg.neg_large_fp32 = std::stof(next(i));
+        else if (a == "--bf16-low") cfg.bf16_low = std::stof(next(i));
+        else if (a == "--bf16-high") cfg.bf16_high = std::stof(next(i));
         else if (a == "--mask-mode") cfg.mask_mode = next(i);
         else if (a == "--run-stage-decomp") cfg.run_stage_decomp = true;
         else if (a == "--stage-seed") cfg.stage_seed = std::stoi(next(i));
         else if (a == "--stage-csv-out") cfg.stage_csv_out = next(i);
         else if (a == "--run-compute-cycle-model") cfg.run_compute_cycle_model = true;
         else if (a == "--cycle-csv-out") cfg.cycle_csv_out = next(i);
+        else if (a == "--run-module-eval") cfg.run_module_eval = true;
+        else if (a == "--module-csv-out") cfg.module_csv_out = next(i);
         else throw std::runtime_error("Unknown arg: " + a);
     }
     if (cfg.mask_mode != "neg" && cfg.mask_mode != "hard") {
