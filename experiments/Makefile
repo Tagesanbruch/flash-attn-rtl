@@ -89,7 +89,7 @@ verif:
 	SIM_BUILD=$(VERIF_BUILD) \
 	COCOTB_RESULTS_FILE=$(VERIF_BUILD)/results.xml \
 	EXTRA_ARGS="-Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-UNUSEDSIGNAL" \
-	PYTHONPATH=$(TB_DIR):$(ROOT)/dv/cocotb/tests:$(PYTHONPATH) \
+	PYTHONPATH=$(TB_DIR):$(ROOT)/experiments:$(ROOT)/dv/cocotb/tests:$(PYTHONPATH) \
 	EXP_NAME=$(EXP) \
 	$(MAKE) -f $$($(COCOTB_CONFIG) --makefiles)/Makefile.sim
 
