@@ -3,12 +3,12 @@ module fa_attention_ip_top #(
   parameter int AXIL_DATA_W = 32,
   parameter int AXI_DATA_W  = 128,
   parameter int AXI_ADDR_W  = 32,
-  parameter int AXI_ID_W    = 4
+  parameter int AXI_ID_W    = 4,
+  parameter int FIFO_DEPTH  = 4
 ) (
   input  logic                        clk,
   input  logic                        rst_n,
 
-  // ==== AXI4-Lite slave (control) ====
   input  logic [AXIL_ADDR_W-1:0]      s_axil_awaddr,
   input  logic                        s_axil_awvalid,
   output logic                        s_axil_awready,
@@ -28,38 +28,32 @@ module fa_attention_ip_top #(
   output logic                        s_axil_rvalid,
   input  logic                        s_axil_rready,
 
-  // ==== AXI4 Master (data DMA) ====
-  // -- AR --
-  output logic [AXI_ID_W-1:0]        m_axi_arid,
-  output logic [AXI_ADDR_W-1:0]      m_axi_araddr,
+  output logic [AXI_ID_W-1:0]         m_axi_arid,
+  output logic [AXI_ADDR_W-1:0]       m_axi_araddr,
   output logic [7:0]                  m_axi_arlen,
   output logic [2:0]                  m_axi_arsize,
   output logic [1:0]                  m_axi_arburst,
   output logic                        m_axi_arvalid,
   input  logic                        m_axi_arready,
-  // -- R --
-  input  logic [AXI_ID_W-1:0]        m_axi_rid,
-  input  logic [AXI_DATA_W-1:0]      m_axi_rdata,
+  input  logic [AXI_ID_W-1:0]         m_axi_rid,
+  input  logic [AXI_DATA_W-1:0]       m_axi_rdata,
   input  logic [1:0]                  m_axi_rresp,
   input  logic                        m_axi_rlast,
   input  logic                        m_axi_rvalid,
   output logic                        m_axi_rready,
-  // -- AW --
-  output logic [AXI_ID_W-1:0]        m_axi_awid,
-  output logic [AXI_ADDR_W-1:0]      m_axi_awaddr,
+  output logic [AXI_ID_W-1:0]         m_axi_awid,
+  output logic [AXI_ADDR_W-1:0]       m_axi_awaddr,
   output logic [7:0]                  m_axi_awlen,
   output logic [2:0]                  m_axi_awsize,
   output logic [1:0]                  m_axi_awburst,
   output logic                        m_axi_awvalid,
   input  logic                        m_axi_awready,
-  // -- W --
-  output logic [AXI_DATA_W-1:0]      m_axi_wdata,
-  output logic [AXI_DATA_W/8-1:0]    m_axi_wstrb,
+  output logic [AXI_DATA_W-1:0]       m_axi_wdata,
+  output logic [AXI_DATA_W/8-1:0]     m_axi_wstrb,
   output logic                        m_axi_wlast,
   output logic                        m_axi_wvalid,
   input  logic                        m_axi_wready,
-  // -- B --
-  input  logic [AXI_ID_W-1:0]        m_axi_bid,
+  input  logic [AXI_ID_W-1:0]         m_axi_bid,
   input  logic [1:0]                  m_axi_bresp,
   input  logic                        m_axi_bvalid,
   output logic                        m_axi_bready
@@ -70,17 +64,60 @@ module fa_attention_ip_top #(
 `define FA_UVM_DISABLE_PERF
 `endif
 
-  // ---- Internal wires ----
+  localparam int FIFO_PTR_W   = (FIFO_DEPTH <= 1) ? 1 : $clog2(FIFO_DEPTH);
+  localparam int FIFO_COUNT_W = (FIFO_DEPTH <= 1) ? 1 : $clog2(FIFO_DEPTH + 1);
+
   logic        start_pulse;
   logic        soft_reset;
   logic        irq_en;
-  logic        causal_en;
-  logic [63:0] q_base, k_base, v_base, o_base;
-  logic [31:0] stride_bytes;
-  logic [15:0] neg_large_q8_8;
-  logic [15:0] scale_q8_8;
+  logic        clear_done;
+  logic        clear_queue_overflow;
+  logic        clear_queue_underflow;
+  logic        clear_queue_desc_error;
+  logic        flush_queue;
+  logic        staging_causal_en;
+  logic [63:0] staging_q_base, staging_k_base, staging_v_base, staging_o_base;
+  logic [31:0] staging_stride_bytes;
+  logic [15:0] staging_neg_large_q8_8;
+  logic [15:0] staging_scale_q8_8;
+
+  logic        active_task_valid;
+  logic        active_causal_en;
+  logic [63:0] active_q_base, active_k_base, active_v_base, active_o_base;
+  logic [31:0] active_stride_bytes;
+  logic [15:0] active_neg_large_q8_8;
+  logic [15:0] active_scale_q8_8;
+
+  logic [63:0] fifo_q_base [0:FIFO_DEPTH-1];
+  logic [63:0] fifo_k_base [0:FIFO_DEPTH-1];
+  logic [63:0] fifo_v_base [0:FIFO_DEPTH-1];
+  logic [63:0] fifo_o_base [0:FIFO_DEPTH-1];
+  logic [31:0] fifo_stride_bytes [0:FIFO_DEPTH-1];
+  logic [15:0] fifo_neg_large_q8_8 [0:FIFO_DEPTH-1];
+  logic [15:0] fifo_scale_q8_8 [0:FIFO_DEPTH-1];
+  logic        fifo_causal_en [0:FIFO_DEPTH-1];
+  logic [FIFO_PTR_W-1:0] fifo_wr_ptr;
+  logic [FIFO_PTR_W-1:0] fifo_rd_ptr;
+  logic [FIFO_COUNT_W-1:0] fifo_count;
+  logic [3:0]  fifo_count_status;
+
+  logic        queue_busy_exec;
+  logic        queue_overflow_sticky;
+  logic        queue_underflow_sticky;
+  logic        queue_desc_error_sticky;
+  logic [31:0] task_accept_count;
+  logic [31:0] task_done_count;
+  logic [31:0] task_error_count;
+  logic [31:0] last_error;
+
   logic        core_busy, core_done, core_error;
   logic [31:0] core_cycles;
+  logic        run_busy, run_done, run_error;
+  logic [31:0] run_cycles;
+  logic        core_start_pulse;
+  logic [31:0] completed_run_cycles;
+  logic [31:0] run_cycles_hold;
+  logic        run_error_latched;
 
   logic        perf_ms_load_q;
   logic        perf_ms_init_context;
@@ -121,7 +158,6 @@ module fa_attention_ip_top #(
   logic [31:0] perf_cs_score_done_cycles;
   logic [31:0] perf_cs_softmax_prep_cycles;
 
-  // DMA reader <-> core
   logic        dma_rd_cmd_valid, dma_rd_cmd_ready;
   logic [31:0] dma_rd_cmd_addr;
   logic [15:0] dma_rd_cmd_len;
@@ -131,7 +167,6 @@ module fa_attention_ip_top #(
   logic        dma_rd_error;
   logic [31:0] rd_bytes;
 
-  // DMA writer <-> core
   logic        dma_wr_cmd_valid, dma_wr_cmd_ready;
   logic [31:0] dma_wr_cmd_addr;
   logic [15:0] dma_wr_cmd_len;
@@ -141,7 +176,27 @@ module fa_attention_ip_top #(
   logic        dma_wr_error;
   logic [31:0] wr_bytes;
 
-  // ==== Register file ====
+  logic enqueue_desc_valid;
+  logic enqueue_desc_aligned;
+  logic enqueue_accept;
+  logic issue_req;
+  logic [FIFO_COUNT_W-1:0] fifo_count_next;
+  logic        perf_batch_start;
+
+  function automatic [FIFO_PTR_W-1:0] fifo_ptr_advance(input logic [FIFO_PTR_W-1:0] ptr);
+    if (ptr == FIFO_PTR_W'(FIFO_DEPTH - 1)) begin
+      fifo_ptr_advance = '0;
+    end else begin
+      fifo_ptr_advance = ptr + 1'b1;
+    end
+  endfunction
+
+  initial begin
+    if ((FIFO_DEPTH < 1) || (FIFO_DEPTH > 15)) begin
+      $error("fa_attention_ip_top FIFO_DEPTH must be in [1,15], got %0d", FIFO_DEPTH);
+    end
+  end
+
 `ifndef FA_UVM_DISABLE_REGS
   fa_axi_lite_regs u_regs (
     .clk(clk), .rst_n(rst_n),
@@ -150,7 +205,12 @@ module fa_attention_ip_top #(
     .s_axil_bresp(s_axil_bresp), .s_axil_bvalid(s_axil_bvalid), .s_axil_bready(s_axil_bready),
     .s_axil_araddr(s_axil_araddr), .s_axil_arvalid(s_axil_arvalid), .s_axil_arready(s_axil_arready),
     .s_axil_rdata(s_axil_rdata), .s_axil_rresp(s_axil_rresp), .s_axil_rvalid(s_axil_rvalid), .s_axil_rready(s_axil_rready),
-    .i_busy(core_busy), .i_done(core_done), .i_error(core_error), .i_cycles(core_cycles),
+    .i_busy(run_busy), .i_done(run_done), .i_error(run_error), .i_cycles(run_cycles),
+    .i_queue_count(fifo_count_status), .i_queue_capacity(FIFO_DEPTH[7:0]), .i_queue_busy_exec(queue_busy_exec),
+    .i_queue_overflow_sticky(queue_overflow_sticky), .i_queue_underflow_sticky(queue_underflow_sticky),
+    .i_queue_desc_error_sticky(queue_desc_error_sticky),
+    .i_task_accept_count(task_accept_count), .i_task_done_count(task_done_count), .i_task_error_count(task_error_count),
+    .i_last_error(last_error),
     .i_perf_run_count(perf_run_count), .i_perf_busy_cycles(perf_busy_cycles),
     .i_perf_dma_rd_cmd_count(perf_dma_rd_cmd_count), .i_perf_dma_rd_beat_count(perf_dma_rd_beat_count),
     .i_perf_dma_wr_cmd_count(perf_dma_wr_cmd_count), .i_perf_dma_wr_beat_count(perf_dma_wr_beat_count),
@@ -162,9 +222,11 @@ module fa_attention_ip_top #(
     .i_perf_ms_normalize_cycles(perf_ms_normalize_cycles), .i_perf_ms_write_o_cycles(perf_ms_write_o_cycles),
     .i_perf_ms_next_q_cycles(perf_ms_next_q_cycles), .i_perf_cs_dp_run_cycles(perf_cs_dp_run_cycles),
     .i_perf_cs_score_done_cycles(perf_cs_score_done_cycles), .i_perf_cs_softmax_prep_cycles(perf_cs_softmax_prep_cycles),
-    .o_start_pulse(start_pulse), .o_soft_reset(soft_reset), .o_irq_en(irq_en), .o_causal_en(causal_en),
-    .o_q_base(q_base), .o_k_base(k_base), .o_v_base(v_base), .o_o_base(o_base),
-    .o_stride_bytes(stride_bytes), .o_neg_large_q8_8(neg_large_q8_8), .o_scale_q8_8(scale_q8_8)
+    .o_start_pulse(start_pulse), .o_soft_reset(soft_reset), .o_irq_en(irq_en), .o_clear_done(clear_done),
+    .o_clear_queue_overflow(clear_queue_overflow), .o_clear_queue_underflow(clear_queue_underflow),
+    .o_clear_queue_desc_error(clear_queue_desc_error), .o_flush_queue(flush_queue), .o_causal_en(staging_causal_en),
+    .o_q_base(staging_q_base), .o_k_base(staging_k_base), .o_v_base(staging_v_base), .o_o_base(staging_o_base),
+    .o_stride_bytes(staging_stride_bytes), .o_neg_large_q8_8(staging_neg_large_q8_8), .o_scale_q8_8(staging_scale_q8_8)
   );
 `else
   assign s_axil_awready = 1'b0;
@@ -178,21 +240,165 @@ module fa_attention_ip_top #(
   assign start_pulse = 1'b0;
   assign soft_reset = 1'b0;
   assign irq_en = 1'b0;
-  assign causal_en = 1'b0;
-  assign q_base = 64'd0;
-  assign k_base = 64'd0;
-  assign v_base = 64'd0;
-  assign o_base = 64'd0;
-  assign stride_bytes = 32'd0;
-  assign neg_large_q8_8 = 16'd0;
-  assign scale_q8_8 = 16'd0;
+  assign clear_done = 1'b0;
+  assign clear_queue_overflow = 1'b0;
+  assign clear_queue_underflow = 1'b0;
+  assign clear_queue_desc_error = 1'b0;
+  assign flush_queue = 1'b0;
+  assign staging_causal_en = 1'b0;
+  assign staging_q_base = 64'd0;
+  assign staging_k_base = 64'd0;
+  assign staging_v_base = 64'd0;
+  assign staging_o_base = 64'd0;
+  assign staging_stride_bytes = 32'd0;
+  assign staging_neg_large_q8_8 = 16'd0;
+  assign staging_scale_q8_8 = 16'd0;
 `endif
+
+  assign fifo_count_status = 4'(fifo_count);
+  assign enqueue_desc_aligned =
+    (staging_q_base[3:0] == 4'd0) &&
+    (staging_k_base[3:0] == 4'd0) &&
+    (staging_v_base[3:0] == 4'd0) &&
+    (staging_o_base[3:0] == 4'd0) &&
+    (staging_stride_bytes[3:0] == 4'd0);
+  assign enqueue_desc_valid = (staging_stride_bytes != 32'd0) && (staging_scale_q8_8 != 16'd0) && enqueue_desc_aligned;
+  assign enqueue_accept = start_pulse && enqueue_desc_valid && (fifo_count < FIFO_COUNT_W'(FIFO_DEPTH));
+  assign issue_req = !soft_reset && !core_busy && !active_task_valid && (fifo_count != '0);
+  assign queue_busy_exec = active_task_valid || core_busy;
+  assign fifo_count_next = fifo_count + (enqueue_accept ? FIFO_COUNT_W'(1) : FIFO_COUNT_W'(0)) - (issue_req ? FIFO_COUNT_W'(1) : FIFO_COUNT_W'(0));
+  assign perf_batch_start = enqueue_accept && !run_busy;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      fifo_wr_ptr <= '0;
+      fifo_rd_ptr <= '0;
+      fifo_count <= '0;
+      active_task_valid <= 1'b0;
+      active_causal_en <= 1'b0;
+      active_q_base <= 64'd0;
+      active_k_base <= 64'd0;
+      active_v_base <= 64'd0;
+      active_o_base <= 64'd0;
+      active_stride_bytes <= 32'd0;
+      active_neg_large_q8_8 <= 16'd0;
+      active_scale_q8_8 <= 16'd0;
+      queue_overflow_sticky <= 1'b0;
+      queue_underflow_sticky <= 1'b0;
+      queue_desc_error_sticky <= 1'b0;
+      task_accept_count <= 32'd0;
+      task_done_count <= 32'd0;
+      task_error_count <= 32'd0;
+      last_error <= 32'd0;
+      core_start_pulse <= 1'b0;
+      completed_run_cycles <= 32'd0;
+      run_cycles_hold <= 32'd0;
+      run_done <= 1'b0;
+      run_error_latched <= 1'b0;
+    end else begin
+      core_start_pulse <= 1'b0;
+      run_done <= 1'b0;
+
+      if (clear_queue_overflow) begin
+        queue_overflow_sticky <= 1'b0;
+      end
+      if (clear_queue_underflow) begin
+        queue_underflow_sticky <= 1'b0;
+      end
+      if (clear_queue_desc_error) begin
+        queue_desc_error_sticky <= 1'b0;
+      end
+
+      if (soft_reset) begin
+        fifo_wr_ptr <= '0;
+        fifo_rd_ptr <= '0;
+        fifo_count <= '0;
+        active_task_valid <= 1'b0;
+        completed_run_cycles <= completed_run_cycles + core_cycles;
+        run_cycles_hold <= completed_run_cycles + core_cycles;
+        run_error_latched <= 1'b0;
+      end else begin
+        if (flush_queue) begin
+          if ((fifo_count == '0) && !queue_busy_exec) begin
+            queue_underflow_sticky <= 1'b1;
+            last_error <= 32'd2;
+          end
+          fifo_wr_ptr <= '0;
+          fifo_rd_ptr <= '0;
+          fifo_count <= '0;
+        end else begin
+          fifo_count <= fifo_count_next;
+
+          if (enqueue_accept) begin
+            fifo_q_base[fifo_wr_ptr] <= staging_q_base;
+            fifo_k_base[fifo_wr_ptr] <= staging_k_base;
+            fifo_v_base[fifo_wr_ptr] <= staging_v_base;
+            fifo_o_base[fifo_wr_ptr] <= staging_o_base;
+            fifo_stride_bytes[fifo_wr_ptr] <= staging_stride_bytes;
+            fifo_neg_large_q8_8[fifo_wr_ptr] <= staging_neg_large_q8_8;
+            fifo_scale_q8_8[fifo_wr_ptr] <= staging_scale_q8_8;
+            fifo_causal_en[fifo_wr_ptr] <= staging_causal_en;
+            fifo_wr_ptr <= fifo_ptr_advance(fifo_wr_ptr);
+            task_accept_count <= task_accept_count + 32'd1;
+            if (!run_busy) begin
+              completed_run_cycles <= 32'd0;
+              run_cycles_hold <= 32'd0;
+              run_error_latched <= 1'b0;
+            end
+          end else if (start_pulse && !enqueue_desc_valid) begin
+            queue_desc_error_sticky <= 1'b1;
+            last_error <= 32'd3;
+          end else if (start_pulse) begin
+            queue_overflow_sticky <= 1'b1;
+            last_error <= 32'd1;
+          end
+
+          if (issue_req) begin
+            active_q_base <= fifo_q_base[fifo_rd_ptr];
+            active_k_base <= fifo_k_base[fifo_rd_ptr];
+            active_v_base <= fifo_v_base[fifo_rd_ptr];
+            active_o_base <= fifo_o_base[fifo_rd_ptr];
+            active_stride_bytes <= fifo_stride_bytes[fifo_rd_ptr];
+            active_neg_large_q8_8 <= fifo_neg_large_q8_8[fifo_rd_ptr];
+            active_scale_q8_8 <= fifo_scale_q8_8[fifo_rd_ptr];
+            active_causal_en <= fifo_causal_en[fifo_rd_ptr];
+            active_task_valid <= 1'b1;
+            core_start_pulse <= 1'b1;
+            fifo_rd_ptr <= fifo_ptr_advance(fifo_rd_ptr);
+          end
+        end
+
+        if (core_busy) begin
+          run_cycles_hold <= completed_run_cycles + core_cycles;
+        end
+
+        if (core_done) begin
+          active_task_valid <= 1'b0;
+          completed_run_cycles <= completed_run_cycles + core_cycles;
+          run_cycles_hold <= completed_run_cycles + core_cycles;
+          run_error_latched <= run_error_latched | core_error;
+          task_done_count <= task_done_count + 32'd1;
+          if (core_error) begin
+            task_error_count <= task_error_count + 32'd1;
+            last_error <= 32'd4;
+          end
+          if ((fifo_count_next == '0) && !issue_req) begin
+            run_done <= 1'b1;
+          end
+        end
+      end
+    end
+  end
+
+  assign run_busy = (fifo_count != '0) || active_task_valid || core_busy;
+  assign run_error = run_error_latched | core_error | queue_overflow_sticky | queue_underflow_sticky | queue_desc_error_sticky;
+  assign run_cycles = run_cycles_hold;
 
 `ifndef FA_UVM_DISABLE_PERF
   fa_perf_counters u_perf (
     .clk(clk),
     .rst_n(rst_n),
-    .i_run_start(start_pulse),
+    .i_run_start(perf_batch_start),
     .i_soft_reset(soft_reset),
     .i_ms_load_q(perf_ms_load_q),
     .i_ms_init_context(perf_ms_init_context),
@@ -261,7 +467,6 @@ module fa_attention_ip_top #(
   assign perf_cs_softmax_prep_cycles = 32'd0;
 `endif
 
-  // ==== DMA Reader ====
 `ifndef FA_UVM_DISABLE_DMA
   fa_dma_reader #(
     .AXI_ADDR_W(AXI_ADDR_W), .AXI_DATA_W(AXI_DATA_W), .AXI_ID_W(AXI_ID_W)
@@ -279,7 +484,6 @@ module fa_attention_ip_top #(
     .error(dma_rd_error), .rd_bytes(rd_bytes)
   );
 
-  // ==== DMA Writer ====
   fa_dma_writer #(
     .AXI_ADDR_W(AXI_ADDR_W), .AXI_DATA_W(AXI_DATA_W), .AXI_ID_W(AXI_ID_W)
   ) u_dma_wr (
@@ -328,16 +532,15 @@ module fa_attention_ip_top #(
   assign wr_bytes = 32'd0;
 `endif
 
-  // ==== Attention Core ====
 `ifndef FA_UVM_DISABLE_CORE
   fa_attention_core u_core (
     .clk(clk), .rst_n(rst_n),
-    .i_start(start_pulse), .i_soft_reset(soft_reset),
-    .i_causal_en(causal_en), .i_scale_q8_8(scale_q8_8),
-    .i_neg_large_q8_8(neg_large_q8_8),
+    .i_start(core_start_pulse), .i_soft_reset(soft_reset),
+    .i_causal_en(active_causal_en), .i_scale_q8_8(active_scale_q8_8),
+    .i_neg_large_q8_8(active_neg_large_q8_8),
     .o_busy(core_busy), .o_done(core_done), .o_error(core_error), .o_cycles(core_cycles),
-    .i_q_base(q_base), .i_k_base(k_base), .i_v_base(v_base), .i_o_base(o_base),
-    .i_stride_bytes(stride_bytes),
+    .i_q_base(active_q_base), .i_k_base(active_k_base), .i_v_base(active_v_base), .i_o_base(active_o_base),
+    .i_stride_bytes(active_stride_bytes),
     .dma_rd_cmd_valid(dma_rd_cmd_valid), .dma_rd_cmd_ready(dma_rd_cmd_ready),
     .dma_rd_cmd_addr(dma_rd_cmd_addr), .dma_rd_cmd_len(dma_rd_cmd_len),
     .dma_rd_data_valid(dma_rd_out_valid), .dma_rd_data_ready(dma_rd_out_ready),
@@ -394,7 +597,6 @@ module fa_attention_ip_top #(
   assign perf_norm_recip_rsp = 1'b0;
 `endif
 
-  // Error aggregation
   logic unused_irq;
   assign unused_irq = irq_en;
 endmodule

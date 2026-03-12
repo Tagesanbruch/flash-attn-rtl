@@ -24,6 +24,13 @@ REG_SCALE = 0x3C
 REG_Q_BASE_L = 0x14
 REG_Q_BASE_H = 0x18
 REG_CYCLES = 0x40
+REG_QUEUE_CMD = 0x44
+REG_QUEUE_STATUS = 0x48
+REG_QUEUE_CAPACITY = 0x4C
+REG_TASK_ACCEPT_COUNT = 0x50
+REG_TASK_DONE_COUNT = 0x54
+REG_TASK_ERROR_COUNT = 0x58
+REG_LAST_ERROR = 0x5C
 REG_PERF_RUN_COUNT = 0x80
 REG_PERF_BUSY_CYCLES = 0x84
 REG_PERF_DMA_RD_CMD_COUNT = 0x88
@@ -55,6 +62,24 @@ TQ = 32
 TK = 64
 ROW_PAR = 2
 DP_CHUNKS = D // 32
+FIFO_DEPTH = int(os.environ.get("PARAM_FIFO_DEPTH", 4))
+QUEUE_CAPACITY_REG = (8 << 8) | FIFO_DEPTH
+
+
+def _queue_status_fields(status):
+    return {
+        "empty": (status >> 0) & 0x1,
+        "full": (status >> 1) & 0x1,
+        "ready": (status >> 2) & 0x1,
+        "busy_exec": (status >> 3) & 0x1,
+        "count": (status >> 4) & 0xF,
+        "free_slots": (status >> 8) & 0xF,
+        "overflow": (status >> 12) & 0x1,
+        "underflow": (status >> 13) & 0x1,
+        "desc_error": (status >> 14) & 0x1,
+        "scheduler_active": (status >> 15) & 0x1,
+        "last_error": (status >> 24) & 0xFF,
+    }
 
 
 def _q8_8_to_float(v):
@@ -313,6 +338,14 @@ async def _capture_top_write_stream(dut, captured_beats):
             captured_beats.append(int(dut.dma_wr_in_data.value))
 
 
+async def _wait_queue_ready(master, timeout_cycles=200000):
+    for _ in range(timeout_cycles):
+        status = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+        if status["ready"]:
+            return status
+    raise AssertionError("Timed out waiting for queue_ready_for_enqueue")
+
+
 async def _monitor_logical_read_stream(dut, mem, issues):
     bytes_per_beat = BUS_W // 8
     pending = []
@@ -371,8 +404,7 @@ def _init_dma_inputs(dut):
 
 @cocotb.test()
 async def test_reg_rw_and_start_busy(dut):
-    """Test register read/write and that START asserts BUSY.
-    DONE requires full DMA data flow and is tested in the core-level test."""
+    """Test register read/write and that enqueue causes BUSY."""
     cocotb.start_soon(Clock(dut.clk, 2, units="ns").start())
 
     dut.rst_n.value = 0
@@ -390,14 +422,14 @@ async def test_reg_rw_and_start_busy(dut):
     assert (cfg & 0x1) == 0x1, f"CFG causal bit mismatch: {cfg:#x}"
 
     # Q base register
-    await master.write(REG_Q_BASE_L, 0x12345678)
+    await master.write(REG_Q_BASE_L, 0x12345670)
     await master.write(REG_Q_BASE_H, 0x9ABCDEF0)
     ql = await master.read(REG_Q_BASE_L)
     qh = await master.read(REG_Q_BASE_H)
-    assert ql == 0x12345678 and qh == 0x9ABCDEF0, "Q base register mismatch"
+    assert ql == 0x12345670 and qh == 0x9ABCDEF0, "Q base register mismatch"
 
-    # Trigger START and check BUSY
-    await master.write(REG_CTRL, 0x1)
+    # Trigger enqueue and check BUSY
+    await master.write(REG_QUEUE_CMD, 0x1)
 
     saw_busy = False
     for _ in range(20):
@@ -408,7 +440,7 @@ async def test_reg_rw_and_start_busy(dut):
             break
         await RisingEdge(dut.clk)
 
-    assert saw_busy, "BUSY was never asserted after START"
+    assert saw_busy, "BUSY was never asserted after enqueue"
 
 
 @cocotb.test()
@@ -439,6 +471,18 @@ async def test_reg_map_defaults_and_permissions(dut):
     assert await master.read(REG_NEG_LARGE) == 0xFFFF8000
     assert await master.read(REG_SCALE) == 0x00000020
     assert await master.read(REG_CYCLES) == 0x00000000
+    queue_status = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert queue_status["empty"] == 1
+    assert queue_status["full"] == 0
+    assert queue_status["ready"] == 1
+    assert queue_status["busy_exec"] == 0
+    assert queue_status["count"] == 0
+    assert queue_status["free_slots"] == FIFO_DEPTH
+    assert await master.read(REG_QUEUE_CAPACITY) == QUEUE_CAPACITY_REG
+    assert await master.read(REG_TASK_ACCEPT_COUNT) == 0x00000000
+    assert await master.read(REG_TASK_DONE_COUNT) == 0x00000000
+    assert await master.read(REG_TASK_ERROR_COUNT) == 0x00000000
+    assert await master.read(REG_LAST_ERROR) == 0x00000000
 
     # R/W fields
     await master.write(REG_CFG, 0x1)
@@ -467,6 +511,7 @@ async def test_reg_map_defaults_and_permissions(dut):
     assert await master.read(REG_STRIDE_BYTES) == 0x00000100
     assert await master.read(REG_NEG_LARGE) == 0xFFFF0000
     assert await master.read(REG_SCALE) == 0x00000040
+    assert await master.read(REG_QUEUE_CMD) == 0x00000000
 
     # Read-only CYCLES should not be writable.
     await master.write(REG_CYCLES, 0xDEADBEEF)
@@ -514,8 +559,8 @@ async def test_register_dataflow_precision_and_cycles(dut):
     await master.write(REG_NEG_LARGE, 0xFFFFE000)  # -8192
     await master.write(REG_CFG, 0x1)               # causal
 
-    # start
-    await master.write(REG_CTRL, 0x1)
+    # enqueue
+    await master.write(REG_QUEUE_CMD, 0x1)
 
     # Observe cycles while BUSY
     await RisingEdge(dut.clk)
@@ -600,7 +645,7 @@ async def test_perf_counters_full_run(dut):
     await master.write(REG_NEG_LARGE, neg_large_q8_8 & 0xFFFFFFFF)
     await master.write(REG_CFG, 0x1 if causal else 0x0)
 
-    await master.write(REG_CTRL, 0x1)
+    await master.write(REG_QUEUE_CMD, 0x1)
 
     done_seen = False
     wait_internal_done = int(os.environ.get("TOP_WAIT_INTERNAL_DONE", "0")) != 0
@@ -804,3 +849,301 @@ async def test_perf_counters_full_run(dut):
         worst_fp32,
     )
     assert max_err_i16 < 256, f"top output mismatch too large: max_err={max_err_i16}, worst={worst_i16}, mae={mae_i16:.4f}"
+
+
+@cocotb.test(timeout_time=900000, timeout_unit="ms")
+async def test_task_fifo_status_transitions(dut):
+    cocotb.start_soon(Clock(dut.clk, 2, units="ns").start())
+
+    dut.rst_n.value = 0
+    _init_dma_inputs(dut)
+    master = AxiLiteMaster(dut)
+    await master.reset_master()
+    for _ in range(5):
+        await RisingEdge(dut.clk)
+    dut.rst_n.value = 1
+    await RisingEdge(dut.clk)
+
+    stride_bytes = D * 2
+    await master.write(REG_K_BASE_L, 0x00010000)
+    await master.write(REG_V_BASE_L, 0x00020000)
+    await master.write(REG_STRIDE_BYTES, stride_bytes)
+    await master.write(REG_SCALE, 0x20)
+    await master.write(REG_NEG_LARGE, 0xFFFFE000)
+
+    st0 = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert st0["empty"] == 1 and st0["full"] == 0 and st0["ready"] == 1
+    assert st0["count"] == 0 and st0["free_slots"] == FIFO_DEPTH
+
+    # Stall DMA so task0 stays active while pending FIFO can be filled.
+    dut.m_axi_arready.value = 1
+    dut.m_axi_awready.value = 1
+    dut.m_axi_wready.value = 1
+    dut.m_axi_bvalid.value = 0
+    dut.m_axi_rvalid.value = 0
+
+    for idx in range(FIFO_DEPTH + 1):
+        base = 0x01000000 + idx * 0x00100000
+        await master.write(REG_CFG, idx & 0x1)
+        await master.write(REG_Q_BASE_L, base + 0x0000)
+        await master.write(REG_O_BASE_L, base + 0x4000)
+        await master.write(REG_QUEUE_CMD, 0x1)
+        for _ in range(8):
+            await RisingEdge(dut.clk)
+
+    st1 = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert st1["busy_exec"] == 1
+    assert st1["count"] == FIFO_DEPTH, f"pending fifo count mismatch: {st1}"
+    assert st1["full"] == 1 and st1["ready"] == 0 and st1["free_slots"] == 0
+    assert await master.read(REG_TASK_ACCEPT_COUNT) == FIFO_DEPTH + 1
+
+    # Sixth enqueue should overflow.
+    await master.write(REG_Q_BASE_L, 0x09000000)
+    await master.write(REG_O_BASE_L, 0x09004000)
+    await master.write(REG_QUEUE_CMD, 0x1)
+    for _ in range(8):
+        await RisingEdge(dut.clk)
+
+    st2 = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert st2["overflow"] == 1, f"overflow sticky not set: {st2}"
+    assert st2["last_error"] == 1, f"last_error mismatch: {st2}"
+    assert await master.read(REG_TASK_ACCEPT_COUNT) == FIFO_DEPTH + 1
+
+    await master.write(REG_QUEUE_CMD, 0x2)
+    for _ in range(4):
+        await RisingEdge(dut.clk)
+    st3 = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert st3["overflow"] == 0, f"overflow sticky not cleared: {st3}"
+
+    await master.write(REG_CTRL, 0x2)
+    for _ in range(10):
+        await RisingEdge(dut.clk)
+    st4 = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert st4["count"] == 0 and st4["empty"] == 1 and st4["ready"] == 1, f"soft reset did not clear queue: {st4}"
+
+
+@cocotb.test(timeout_time=900000, timeout_unit="ms")
+async def test_task_fifo_desc_error_and_busy_flush(dut):
+    cocotb.start_soon(Clock(dut.clk, 2, units="ns").start())
+
+    dut.rst_n.value = 0
+    _init_dma_inputs(dut)
+    master = AxiLiteMaster(dut)
+    mem = AxiMemoryModel(dut)
+    cocotb.start_soon(mem.run())
+    await master.reset_master()
+    for _ in range(5):
+        await RisingEdge(dut.clk)
+    dut.rst_n.value = 1
+    await RisingEdge(dut.clk)
+
+    stride_bytes = D * 2
+    scale_q8_8 = 32
+    neg_large_q8_8 = to_s16(0xE000)
+
+    await master.write(REG_Q_BASE_L, 0x10000004)
+    await master.write(REG_K_BASE_L, 0x11000000)
+    await master.write(REG_V_BASE_L, 0x12000000)
+    await master.write(REG_O_BASE_L, 0x13000000)
+    await master.write(REG_STRIDE_BYTES, stride_bytes + 4)
+    await master.write(REG_SCALE, scale_q8_8)
+    await master.write(REG_NEG_LARGE, neg_large_q8_8 & 0xFFFFFFFF)
+    await master.write(REG_QUEUE_CMD, 0x1)
+    for _ in range(8):
+        await RisingEdge(dut.clk)
+
+    st_err = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert st_err["desc_error"] == 1, f"descriptor error sticky not set: {st_err}"
+    assert st_err["last_error"] == 3, f"descriptor error code mismatch: {st_err}"
+    assert st_err["count"] == 0, f"invalid descriptor should not enter queue: {st_err}"
+    assert await master.read(REG_TASK_ACCEPT_COUNT) == 0
+
+    await master.write(REG_QUEUE_CMD, 0x8)
+    for _ in range(4):
+        await RisingEdge(dut.clk)
+    st_cleared = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert st_cleared["desc_error"] == 0, f"descriptor error sticky not cleared: {st_cleared}"
+
+    random.seed(20260312 + 8)
+    tasks = []
+    for idx in range(2):
+        base = 0x20000000 + idx * 0x01000000
+        task = {
+            "q_base": base + 0x00000000,
+            "k_base": base + 0x00100000,
+            "v_base": base + 0x00200000,
+            "o_base": base + 0x00300000,
+            "causal": idx == 0,
+            "Q": [[random.randint(-64, 64) for _ in range(D)] for _ in range(S)],
+            "K": [[random.randint(-64, 64) for _ in range(D)] for _ in range(S)],
+            "V": [[random.randint(-64, 64) for _ in range(D)] for _ in range(S)],
+        }
+        tasks.append(task)
+        mem.store_matrix_q8_8(task["q_base"], task["Q"], stride_bytes)
+        mem.store_matrix_q8_8(task["k_base"], task["K"], stride_bytes)
+        mem.store_matrix_q8_8(task["v_base"], task["V"], stride_bytes)
+
+    for task in tasks:
+        await _wait_queue_ready(master)
+        await master.write(REG_Q_BASE_L, task["q_base"])
+        await master.write(REG_Q_BASE_H, 0)
+        await master.write(REG_K_BASE_L, task["k_base"])
+        await master.write(REG_K_BASE_H, 0)
+        await master.write(REG_V_BASE_L, task["v_base"])
+        await master.write(REG_V_BASE_H, 0)
+        await master.write(REG_O_BASE_L, task["o_base"])
+        await master.write(REG_O_BASE_H, 0)
+        await master.write(REG_STRIDE_BYTES, stride_bytes)
+        await master.write(REG_SCALE, scale_q8_8 & 0xFFFF)
+        await master.write(REG_NEG_LARGE, neg_large_q8_8 & 0xFFFFFFFF)
+        await master.write(REG_CFG, 0x1 if task["causal"] else 0x0)
+        await master.write(REG_QUEUE_CMD, 0x1)
+
+    for _ in range(64):
+        await RisingEdge(dut.clk)
+    st_busy = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert st_busy["busy_exec"] == 1, f"queue should be executing before flush: {st_busy}"
+    assert st_busy["count"] >= 1, f"expected at least one pending task before flush: {st_busy}"
+
+    await master.write(REG_QUEUE_CMD, 0x10)
+    for _ in range(16):
+        await RisingEdge(dut.clk)
+    st_flushed = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert st_flushed["count"] == 0, f"flush should clear pending queue entries: {st_flushed}"
+
+    done_seen = False
+    for _ in range(60000):
+        for _ in range(32):
+            await RisingEdge(dut.clk)
+        status = await master.read(REG_STATUS)
+        if status & 0x2:
+            done_seen = True
+            break
+
+    assert done_seen, "Timed out waiting for active task to finish after flush"
+    assert await master.read(REG_TASK_ACCEPT_COUNT) == 2
+    assert await master.read(REG_TASK_DONE_COUNT) == 1
+    assert await master.read(REG_TASK_ERROR_COUNT) == 0
+
+    qstatus = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert qstatus["count"] == 0 and qstatus["empty"] == 1, f"queue not empty after busy flush completion: {qstatus}"
+
+    await master.write(REG_QUEUE_CMD, 0x10)
+    for _ in range(8):
+        await RisingEdge(dut.clk)
+    st_underflow = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert st_underflow["underflow"] == 1, f"idle flush should raise underflow sticky: {st_underflow}"
+    assert st_underflow["last_error"] == 2, f"underflow error code mismatch: {st_underflow}"
+
+    await master.write(REG_QUEUE_CMD, 0x4)
+    for _ in range(4):
+        await RisingEdge(dut.clk)
+    st_underflow_cleared = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert st_underflow_cleared["underflow"] == 0, f"underflow sticky not cleared: {st_underflow_cleared}"
+
+    out0 = mem.load_matrix_q8_8(tasks[0]["o_base"], S, D, stride_bytes)
+    gold0 = _fixed_flash_attention_ref(tasks[0]["Q"], tasks[0]["K"], tasks[0]["V"], scale=scale_q8_8, neg_large=neg_large_q8_8, causal=tasks[0]["causal"])
+    _, max_err0, worst0 = _calc_i16_metrics(out0, gold0)
+    assert max_err0 < 256, f"active task corrupted by flush: max_err={max_err0}, worst={worst0}"
+
+    out1 = mem.load_matrix_q8_8(tasks[1]["o_base"], S, D, stride_bytes)
+    assert all(to_s16(v) == 0 for row in out1 for v in row), "flushed pending task unexpectedly produced output"
+
+
+@cocotb.test(timeout_time=900000, timeout_unit="ms")
+async def test_task_fifo_four_task_chain(dut):
+    cocotb.start_soon(Clock(dut.clk, 2, units="ns").start())
+
+    dut.rst_n.value = 0
+    _init_dma_inputs(dut)
+    master = AxiLiteMaster(dut)
+    mem = AxiMemoryModel(dut)
+    cocotb.start_soon(mem.run())
+    await master.reset_master()
+    for _ in range(5):
+        await RisingEdge(dut.clk)
+    dut.rst_n.value = 1
+    await RisingEdge(dut.clk)
+
+    stride_bytes = D * 2
+    scale_q8_8 = 32
+    neg_large_q8_8 = to_s16(0xE000)
+
+    tasks = []
+    random.seed(20260312)
+    for idx in range(4):
+        base = idx * 0x10000000
+        task = {
+            "q_base": base + 0x00000000,
+            "k_base": base + 0x01000000,
+            "v_base": base + 0x02000000,
+            "o_base": base + 0x03000000,
+            "causal": (idx % 2) == 0,
+            "Q": [[random.randint(-64, 64) for _ in range(D)] for _ in range(S)],
+            "K": [[random.randint(-64, 64) for _ in range(D)] for _ in range(S)],
+            "V": [[random.randint(-64, 64) for _ in range(D)] for _ in range(S)],
+        }
+        tasks.append(task)
+        mem.store_matrix_q8_8(task["q_base"], task["Q"], stride_bytes)
+        mem.store_matrix_q8_8(task["k_base"], task["K"], stride_bytes)
+        mem.store_matrix_q8_8(task["v_base"], task["V"], stride_bytes)
+
+    for task in tasks:
+        await _wait_queue_ready(master)
+        await master.write(REG_Q_BASE_L, task["q_base"])
+        await master.write(REG_Q_BASE_H, 0)
+        await master.write(REG_K_BASE_L, task["k_base"])
+        await master.write(REG_K_BASE_H, 0)
+        await master.write(REG_V_BASE_L, task["v_base"])
+        await master.write(REG_V_BASE_H, 0)
+        await master.write(REG_O_BASE_L, task["o_base"])
+        await master.write(REG_O_BASE_H, 0)
+        await master.write(REG_STRIDE_BYTES, stride_bytes)
+        await master.write(REG_SCALE, scale_q8_8 & 0xFFFF)
+        await master.write(REG_NEG_LARGE, neg_large_q8_8 & 0xFFFFFFFF)
+        await master.write(REG_CFG, 0x1 if task["causal"] else 0x0)
+        await master.write(REG_QUEUE_CMD, 0x1)
+
+    accept_count = await master.read(REG_TASK_ACCEPT_COUNT)
+    assert accept_count == len(tasks), f"task_accept_count mismatch: {accept_count}"
+
+    done_seen = False
+    for _ in range(60000):
+        for _ in range(64):
+            await RisingEdge(dut.clk)
+        status = await master.read(REG_STATUS)
+        if status & 0x2:
+            done_seen = True
+            break
+
+    assert done_seen, "Timed out waiting for four-task FIFO drain"
+
+    qstatus = _queue_status_fields(await master.read(REG_QUEUE_STATUS))
+    assert qstatus["count"] == 0 and qstatus["empty"] == 1, f"queue not empty after drain: {qstatus}"
+
+    task_done_count = await master.read(REG_TASK_DONE_COUNT)
+    task_error_count = await master.read(REG_TASK_ERROR_COUNT)
+    run_count = await master.read(REG_PERF_RUN_COUNT)
+    rd_cmd_count = await master.read(REG_PERF_DMA_RD_CMD_COUNT)
+    wr_cmd_count = await master.read(REG_PERF_DMA_WR_CMD_COUNT)
+    comp_launch_count = await master.read(REG_PERF_COMP_LAUNCH_COUNT)
+
+    num_q_tiles = S // TQ
+    num_k_tiles = S // TK
+    expected_comp_launch = len(tasks) * num_q_tiles * num_k_tiles * 2
+
+    assert task_done_count == len(tasks), f"task_done_count mismatch: {task_done_count}"
+    assert task_error_count == 0, f"task_error_count mismatch: {task_error_count}"
+    assert run_count == 1, f"perf run_count should represent one FIFO drain batch, got {run_count}"
+    assert rd_cmd_count == mem.rd_cmds, f"fifo rd_cmd mismatch: got {rd_cmd_count}, obs {mem.rd_cmds}"
+    assert wr_cmd_count == mem.wr_cmds, f"fifo wr_cmd mismatch: got {wr_cmd_count}, obs {mem.wr_cmds}"
+    assert comp_launch_count == expected_comp_launch, f"fifo comp_launch mismatch: got {comp_launch_count}, exp {expected_comp_launch}"
+
+    for idx, task in enumerate(tasks):
+        out = mem.load_matrix_q8_8(task["o_base"], S, D, stride_bytes)
+        gold = _fixed_flash_attention_ref(task["Q"], task["K"], task["V"], scale=scale_q8_8, neg_large=neg_large_q8_8, causal=task["causal"])
+        gold_fp32 = _fp32_ref(task["Q"], task["K"], task["V"], causal=task["causal"])
+        _, max_err, worst = _calc_i16_metrics(out, gold)
+        mae_fp32, max_fp32, worst_fp32 = _calc_fp32_metrics(out, gold_fp32)
+        assert max_err < 256, f"task{idx} fixed mismatch too large: max_err={max_err}, worst={worst}"
+        assert mae_fp32 <= 0.03 and max_fp32 <= 0.10, f"task{idx} fp32 mismatch too large: mae={mae_fp32}, max={max_fp32}, worst={worst_fp32}"

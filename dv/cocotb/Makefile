@@ -1,6 +1,12 @@
 include common.mk
 include ../../cfg/module_targets.mk
 
+ifneq ($(strip $(PARAM_FIFO_DEPTH)),)
+ifeq ($(TOPLEVEL),fa_attention_ip_top)
+EXTRA_ARGS += -GFIFO_DEPTH=$(PARAM_FIFO_DEPTH)
+endif
+endif
+
 .PHONY: test regress clean list
 
 test:

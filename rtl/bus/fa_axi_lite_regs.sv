@@ -28,6 +28,16 @@ module fa_axi_lite_regs #(
   input  logic                 i_done,
   input  logic                 i_error,
   input  logic [31:0]          i_cycles,
+  input  logic [3:0]           i_queue_count,
+  input  logic [7:0]           i_queue_capacity,
+  input  logic                 i_queue_busy_exec,
+  input  logic                 i_queue_overflow_sticky,
+  input  logic                 i_queue_underflow_sticky,
+  input  logic                 i_queue_desc_error_sticky,
+  input  logic [31:0]          i_task_accept_count,
+  input  logic [31:0]          i_task_done_count,
+  input  logic [31:0]          i_task_error_count,
+  input  logic [31:0]          i_last_error,
   input  logic [31:0]          i_perf_run_count,
   input  logic [31:0]          i_perf_busy_cycles,
   input  logic [31:0]          i_perf_dma_rd_cmd_count,
@@ -54,6 +64,11 @@ module fa_axi_lite_regs #(
   output logic                 o_start_pulse,
   output logic                 o_soft_reset,
   output logic                 o_irq_en,
+  output logic                 o_clear_done,
+  output logic                 o_clear_queue_overflow,
+  output logic                 o_clear_queue_underflow,
+  output logic                 o_clear_queue_desc_error,
+  output logic                 o_flush_queue,
   output logic                 o_causal_en,
   output logic [63:0]          o_q_base,
   output logic [63:0]          o_k_base,
@@ -63,21 +78,28 @@ module fa_axi_lite_regs #(
   output logic [15:0]          o_neg_large_q8_8,
   output logic [15:0]          o_scale_q8_8
 );
-  localparam logic [7:0] REG_CTRL         = 8'h00;
-  localparam logic [7:0] REG_STATUS       = 8'h04;
-  localparam logic [7:0] REG_CFG          = 8'h08;
-  localparam logic [7:0] REG_Q_BASE_L     = 8'h14;
-  localparam logic [7:0] REG_Q_BASE_H     = 8'h18;
-  localparam logic [7:0] REG_K_BASE_L     = 8'h1C;
-  localparam logic [7:0] REG_K_BASE_H     = 8'h20;
-  localparam logic [7:0] REG_V_BASE_L     = 8'h24;
-  localparam logic [7:0] REG_V_BASE_H     = 8'h28;
-  localparam logic [7:0] REG_O_BASE_L     = 8'h2C;
-  localparam logic [7:0] REG_O_BASE_H     = 8'h30;
-  localparam logic [7:0] REG_STRIDE_BYTES = 8'h34;
-  localparam logic [7:0] REG_NEG_LARGE    = 8'h38;
-  localparam logic [7:0] REG_SCALE        = 8'h3C;
-  localparam logic [7:0] REG_CYCLES       = 8'h40;
+  localparam logic [7:0] REG_CTRL           = 8'h00;
+  localparam logic [7:0] REG_STATUS         = 8'h04;
+  localparam logic [7:0] REG_CFG            = 8'h08;
+  localparam logic [7:0] REG_Q_BASE_L       = 8'h14;
+  localparam logic [7:0] REG_Q_BASE_H       = 8'h18;
+  localparam logic [7:0] REG_K_BASE_L       = 8'h1C;
+  localparam logic [7:0] REG_K_BASE_H       = 8'h20;
+  localparam logic [7:0] REG_V_BASE_L       = 8'h24;
+  localparam logic [7:0] REG_V_BASE_H       = 8'h28;
+  localparam logic [7:0] REG_O_BASE_L       = 8'h2C;
+  localparam logic [7:0] REG_O_BASE_H       = 8'h30;
+  localparam logic [7:0] REG_STRIDE_BYTES   = 8'h34;
+  localparam logic [7:0] REG_NEG_LARGE      = 8'h38;
+  localparam logic [7:0] REG_SCALE          = 8'h3C;
+  localparam logic [7:0] REG_CYCLES         = 8'h40;
+  localparam logic [7:0] REG_QUEUE_CMD      = 8'h44;
+  localparam logic [7:0] REG_QUEUE_STATUS   = 8'h48;
+  localparam logic [7:0] REG_QUEUE_CAPACITY = 8'h4C;
+  localparam logic [7:0] REG_TASK_ACCEPT_COUNT = 8'h50;
+  localparam logic [7:0] REG_TASK_DONE_COUNT   = 8'h54;
+  localparam logic [7:0] REG_TASK_ERROR_COUNT  = 8'h58;
+  localparam logic [7:0] REG_LAST_ERROR        = 8'h5C;
   localparam logic [7:0] REG_PERF_RUN_COUNT            = 8'h80;
   localparam logic [7:0] REG_PERF_BUSY_CYCLES          = 8'h84;
   localparam logic [7:0] REG_PERF_DMA_RD_CMD_COUNT     = 8'h88;
@@ -115,45 +137,70 @@ module fa_axi_lite_regs #(
   logic [31:0] reg_neg_large;
   logic [31:0] reg_scale;
 
-  logic done_sticky;
-
+  logic        done_sticky;
   logic [ADDR_W-1:0] awaddr_latched;
   logic [DATA_W-1:0] wdata_latched;
   logic aw_seen;
   logic w_seen;
   logic write_fire;
-
   logic [7:0] wr_addr;
   logic [7:0] rd_addr;
+  logic [7:0] queue_free_slots;
+  logic       queue_empty;
+  logic       queue_full;
+  logic       queue_ready_for_enqueue;
 
   always_comb begin
     wr_addr = awaddr_latched[7:0];
     rd_addr = s_axil_araddr[7:0];
+    queue_empty = (i_queue_count == 4'd0);
+    queue_full = (i_queue_count >= i_queue_capacity[3:0]);
+    queue_ready_for_enqueue = !queue_full;
+    queue_free_slots = i_queue_capacity - {4'd0, i_queue_count};
 
     s_axil_awready = !aw_seen;
     s_axil_wready  = !w_seen;
     s_axil_bresp   = 2'b00;
-
     s_axil_arready = !s_axil_rvalid;
     s_axil_rresp   = 2'b00;
 
     s_axil_rdata = 32'd0;
     unique case (rd_addr)
-      REG_CTRL:         s_axil_rdata = reg_ctrl;
-      REG_STATUS:       s_axil_rdata = {29'd0, i_error, done_sticky, i_busy};
-      REG_CFG:          s_axil_rdata = reg_cfg;
-      REG_Q_BASE_L:     s_axil_rdata = reg_q_base_l;
-      REG_Q_BASE_H:     s_axil_rdata = reg_q_base_h;
-      REG_K_BASE_L:     s_axil_rdata = reg_k_base_l;
-      REG_K_BASE_H:     s_axil_rdata = reg_k_base_h;
-      REG_V_BASE_L:     s_axil_rdata = reg_v_base_l;
-      REG_V_BASE_H:     s_axil_rdata = reg_v_base_h;
-      REG_O_BASE_L:     s_axil_rdata = reg_o_base_l;
-      REG_O_BASE_H:     s_axil_rdata = reg_o_base_h;
-      REG_STRIDE_BYTES: s_axil_rdata = reg_stride_bytes;
-      REG_NEG_LARGE:    s_axil_rdata = reg_neg_large;
-      REG_SCALE:        s_axil_rdata = reg_scale;
-      REG_CYCLES:       s_axil_rdata = i_cycles;
+      REG_CTRL:           s_axil_rdata = reg_ctrl;
+      REG_STATUS:         s_axil_rdata = {29'd0, i_error, done_sticky, i_busy};
+      REG_CFG:            s_axil_rdata = reg_cfg;
+      REG_Q_BASE_L:       s_axil_rdata = reg_q_base_l;
+      REG_Q_BASE_H:       s_axil_rdata = reg_q_base_h;
+      REG_K_BASE_L:       s_axil_rdata = reg_k_base_l;
+      REG_K_BASE_H:       s_axil_rdata = reg_k_base_h;
+      REG_V_BASE_L:       s_axil_rdata = reg_v_base_l;
+      REG_V_BASE_H:       s_axil_rdata = reg_v_base_h;
+      REG_O_BASE_L:       s_axil_rdata = reg_o_base_l;
+      REG_O_BASE_H:       s_axil_rdata = reg_o_base_h;
+      REG_STRIDE_BYTES:   s_axil_rdata = reg_stride_bytes;
+      REG_NEG_LARGE:      s_axil_rdata = reg_neg_large;
+      REG_SCALE:          s_axil_rdata = reg_scale;
+      REG_CYCLES:         s_axil_rdata = i_cycles;
+      REG_QUEUE_CMD:      s_axil_rdata = 32'd0;
+      REG_QUEUE_STATUS:   s_axil_rdata = {
+        i_last_error[7:0],
+        8'd0,
+        i_busy,
+        i_queue_desc_error_sticky,
+        i_queue_underflow_sticky,
+        i_queue_overflow_sticky,
+        queue_free_slots[3:0],
+        i_queue_count[3:0],
+        i_queue_busy_exec,
+        queue_ready_for_enqueue,
+        queue_full,
+        queue_empty
+      };
+      REG_QUEUE_CAPACITY: s_axil_rdata = {16'd0, 8'd8, i_queue_capacity};
+      REG_TASK_ACCEPT_COUNT: s_axil_rdata = i_task_accept_count;
+      REG_TASK_DONE_COUNT:   s_axil_rdata = i_task_done_count;
+      REG_TASK_ERROR_COUNT:  s_axil_rdata = i_task_error_count;
+      REG_LAST_ERROR:        s_axil_rdata = i_last_error;
       REG_PERF_RUN_COUNT:              s_axil_rdata = i_perf_run_count;
       REG_PERF_BUSY_CYCLES:            s_axil_rdata = i_perf_busy_cycles;
       REG_PERF_DMA_RD_CMD_COUNT:       s_axil_rdata = i_perf_dma_rd_cmd_count;
@@ -176,7 +223,7 @@ module fa_axi_lite_regs #(
       REG_PERF_CS_DP_RUN_CYCLES:       s_axil_rdata = i_perf_cs_dp_run_cycles;
       REG_PERF_CS_SCORE_DONE_CYCLES:   s_axil_rdata = i_perf_cs_score_done_cycles;
       REG_PERF_CS_SOFTMAX_PREP_CYCLES: s_axil_rdata = i_perf_cs_softmax_prep_cycles;
-      default:          s_axil_rdata = 32'd0;
+      default:            s_axil_rdata = 32'd0;
     endcase
   end
 
@@ -206,8 +253,18 @@ module fa_axi_lite_regs #(
       reg_scale <= 32'd32;
       done_sticky <= 1'b0;
       o_start_pulse <= 1'b0;
+      o_clear_done <= 1'b0;
+      o_clear_queue_overflow <= 1'b0;
+      o_clear_queue_underflow <= 1'b0;
+      o_clear_queue_desc_error <= 1'b0;
+      o_flush_queue <= 1'b0;
     end else begin
       o_start_pulse <= 1'b0;
+      o_clear_done <= 1'b0;
+      o_clear_queue_overflow <= 1'b0;
+      o_clear_queue_underflow <= 1'b0;
+      o_clear_queue_desc_error <= 1'b0;
+      o_flush_queue <= 1'b0;
 
       if (s_axil_awvalid && s_axil_awready) begin
         aw_seen <= 1'b1;
@@ -234,20 +291,39 @@ module fa_axi_lite_regs #(
           REG_STATUS: begin
             if (wdata_latched[1]) begin
               done_sticky <= 1'b0;
+              o_clear_done <= 1'b1;
             end
           end
-          REG_CFG:          reg_cfg <= wdata_latched;
-          REG_Q_BASE_L:     reg_q_base_l <= wdata_latched;
-          REG_Q_BASE_H:     reg_q_base_h <= wdata_latched;
-          REG_K_BASE_L:     reg_k_base_l <= wdata_latched;
-          REG_K_BASE_H:     reg_k_base_h <= wdata_latched;
-          REG_V_BASE_L:     reg_v_base_l <= wdata_latched;
-          REG_V_BASE_H:     reg_v_base_h <= wdata_latched;
-          REG_O_BASE_L:     reg_o_base_l <= wdata_latched;
-          REG_O_BASE_H:     reg_o_base_h <= wdata_latched;
-          REG_STRIDE_BYTES: reg_stride_bytes <= wdata_latched;
-          REG_NEG_LARGE:    reg_neg_large <= wdata_latched;
-          REG_SCALE:        reg_scale <= wdata_latched;
+          REG_CFG:            reg_cfg <= wdata_latched;
+          REG_Q_BASE_L:       reg_q_base_l <= wdata_latched;
+          REG_Q_BASE_H:       reg_q_base_h <= wdata_latched;
+          REG_K_BASE_L:       reg_k_base_l <= wdata_latched;
+          REG_K_BASE_H:       reg_k_base_h <= wdata_latched;
+          REG_V_BASE_L:       reg_v_base_l <= wdata_latched;
+          REG_V_BASE_H:       reg_v_base_h <= wdata_latched;
+          REG_O_BASE_L:       reg_o_base_l <= wdata_latched;
+          REG_O_BASE_H:       reg_o_base_h <= wdata_latched;
+          REG_STRIDE_BYTES:   reg_stride_bytes <= wdata_latched;
+          REG_NEG_LARGE:      reg_neg_large <= wdata_latched;
+          REG_SCALE:          reg_scale <= wdata_latched;
+          REG_QUEUE_CMD: begin
+            if (wdata_latched[0]) begin
+              o_start_pulse <= 1'b1;
+              done_sticky <= 1'b0;
+            end
+            if (wdata_latched[1]) begin
+              o_clear_queue_overflow <= 1'b1;
+            end
+            if (wdata_latched[2]) begin
+              o_clear_queue_underflow <= 1'b1;
+            end
+            if (wdata_latched[3]) begin
+              o_clear_queue_desc_error <= 1'b1;
+            end
+            if (wdata_latched[4]) begin
+              o_flush_queue <= 1'b1;
+            end
+          end
           default: begin end
         endcase
       end
@@ -271,7 +347,6 @@ module fa_axi_lite_regs #(
   assign o_soft_reset = reg_ctrl[1];
   assign o_irq_en = reg_ctrl[2];
   assign o_causal_en = reg_cfg[0];
-
   assign o_q_base = {reg_q_base_h, reg_q_base_l};
   assign o_k_base = {reg_k_base_h, reg_k_base_l};
   assign o_v_base = {reg_v_base_h, reg_v_base_l};
