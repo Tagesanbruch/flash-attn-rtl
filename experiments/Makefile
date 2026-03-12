@@ -42,8 +42,10 @@ CLOCKED_MODULES := fa_row_reduction_core fa_online_softmax_update fa_recip_nr_q1
 IS_CLOCKED := $(filter $(MOD),$(CLOCKED_MODULES))
 STA_SDC_FILE := $(if $(IS_CLOCKED),$(STA_SDC_CLOCKED),$(STA_SDC_COMB))
 
-# Top-level module name (same as MOD)
-TOPLEVEL := $(MOD)
+# Top-level module name defaults to the leaf directory name so nested experiment
+# groups such as bf16/<module> can be addressed without changing the RTL module
+# names themselves.
+TOPLEVEL := $(notdir $(MOD))
 
 # ─── Targets ──────────────────────────────────────────────────────
 
@@ -72,12 +74,13 @@ list:
 
 # ─── Verification (cocotb + verilator) ───────────────────────────
 VERIF_BUILD  := $(abspath build/verif_$(MOD)_$(EXP))
-VERIF_TEST   := $(wildcard $(TB_DIR)/test_$(MOD).py)
-VERIF_MODULE := test_$(MOD)
+VERIF_BASENAME := $(notdir $(MOD))
+VERIF_TEST   := $(wildcard $(TB_DIR)/test_$(VERIF_BASENAME).py)
+VERIF_MODULE := test_$(VERIF_BASENAME)
 
 verif:
 	@test -d "$(EXP_DIR)" || (echo "[ERR] Experiment dir not found: $(EXP_DIR)" && exit 1)
-	@test -f "$(TB_DIR)/test_$(MOD).py" || (echo "[ERR] Test not found: $(TB_DIR)/test_$(MOD).py" && exit 1)
+	@test -f "$(TB_DIR)/test_$(VERIF_BASENAME).py" || (echo "[ERR] Test not found: $(TB_DIR)/test_$(VERIF_BASENAME).py" && exit 1)
 	@mkdir -p $(VERIF_BUILD)
 	VIRTUAL_ENV=$(ROOT)/.venv PATH=$(ROOT)/.venv/bin:$$PATH \
 	SIM=$(SIM) TOPLEVEL_LANG=$(TOPLEVEL_LANG) TOPLEVEL=$(TOPLEVEL) \
