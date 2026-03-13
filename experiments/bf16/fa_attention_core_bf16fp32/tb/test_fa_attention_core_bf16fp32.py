@@ -1,6 +1,8 @@
 import math
 import os
 import random
+import csv
+from pathlib import Path
 
 import cocotb
 from cocotb.clock import Clock
@@ -8,20 +10,23 @@ from cocotb.triggers import RisingEdge
 
 from bf16.common.golden_models import (
     attention_bf16_fp32_reference,
+    bits_to_f32,
     calc_abs_error_stats,
     f32_to_bits,
     fp32_to_bf16_bits,
+    online_softmax_fp32_step,
 )
+from bf16.common.cmodel_ref import fp32_add, fp32_mul_q16, fp32_recip
 
 
 BUS_W = 128
 ELEMS_PER_BEAT = BUS_W // 16
 BYTES_PER_BEAT = BUS_W // 8
 
-Q_BASE = 0x0000
-K_BASE = 0x4000
-V_BASE = 0x8000
-O_BASE = 0xC000
+Q_BASE = 0x0000_0000
+K_BASE = 0x0010_0000
+V_BASE = 0x0020_0000
+O_BASE = 0x0030_0000
 
 
 def expected_cycles_mvp(seq_len: int, d: int, tq: int, tk: int) -> int:
@@ -50,6 +55,24 @@ def resolve_param(dut, name: str, default: int) -> int:
         return int(getattr(dut, name).value)
     except AttributeError:
         return default
+
+
+def assert_non_overlapping_regions(seq_len: int, d: int, stride_bytes: int) -> None:
+    matrix_bytes = seq_len * stride_bytes
+    regions = [
+        ("Q", Q_BASE, Q_BASE + matrix_bytes),
+        ("K", K_BASE, K_BASE + matrix_bytes),
+        ("V", V_BASE, V_BASE + matrix_bytes),
+        ("O", O_BASE, O_BASE + matrix_bytes),
+    ]
+    for i in range(len(regions)):
+        n0, s0, e0 = regions[i]
+        for j in range(i + 1, len(regions)):
+            n1, s1, e1 = regions[j]
+            if not (e0 <= s1 or e1 <= s0):
+                raise AssertionError(
+                    f"DMA region overlap: {n0}[0x{s0:08x},0x{e0:08x}) vs {n1}[0x{s1:08x},0x{e1:08x})"
+                )
 
 
 class DmaMemory:
@@ -154,6 +177,7 @@ async def run_case(dut, causal: bool, seed: int) -> None:
     tq = resolve_param(dut, "TQ", 32)
     tk = resolve_param(dut, "TK", 64)
     stride_bytes = d * 2
+    assert_non_overlapping_regions(seq_len, d, stride_bytes)
     random.seed(seed)
     dut._log.info(
         f"params: SEQ_LEN={seq_len} D={d} TQ={tq} TK={tk} BUS_W={BUS_W}"
@@ -230,6 +254,7 @@ async def run_case(dut, causal: bool, seed: int) -> None:
         scale_bits=scale_bits,
         neg_large_bits=neg_large_bits,
         causal=causal,
+        bitaccurate=True,
     )
     ref_o = ref["o_bf16"]
 
@@ -243,10 +268,49 @@ async def run_case(dut, causal: bool, seed: int) -> None:
             flat_ref_fp32.append(ref_bits)
 
     stats = calc_abs_error_stats(flat_ref_fp32, flat_got_fp32)
+    worst = {"ae": -1.0, "i": 0, "j": 0, "got": 0, "ref": 0}
+    rows = []
+    for i in range(seq_len):
+        for j in range(d):
+            idx = i * d + j
+            got_bits = flat_got_fp32[idx]
+            ref_bits = flat_ref_fp32[idx]
+            got_f = bits_to_f32(got_bits)
+            ref_f = bits_to_f32(ref_bits)
+            ae = abs(got_f - ref_f)
+            if ae > worst["ae"]:
+                worst = {"ae": ae, "i": i, "j": j, "got": got_bits, "ref": ref_bits}
+            rows.append(
+                {
+                    "i": i,
+                    "j": j,
+                    "got_bf16": f"0x{got_o[i][j]:04x}",
+                    "ref_bf16": f"0x{ref_o[i][j]:04x}",
+                    "got_fp32_bits": f"0x{got_bits:08x}",
+                    "ref_fp32_bits": f"0x{ref_bits:08x}",
+                    "got_fp32": got_f,
+                    "ref_fp32": ref_f,
+                    "ae": ae,
+                }
+            )
+
+    if os.environ.get("CORE_AE_DUMP", "1") not in {"0", "false", "False"}:
+        out_dir = Path(os.environ.get("CORE_AE_LOG_DIR", "logs/bf16_module_ae")).resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_csv = out_dir / f"fa_attention_core_bf16fp32_seed{seed}_{'causal' if causal else 'noncausal'}.csv"
+        with out_csv.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+        dut._log.info("core_detail_csv=%s", out_csv)
+
     cycles = int(dut.o_cycles.value)
     dut._log.info(
         f"causal={causal} cycles={cycles} expected_cycles={expected_cycles} ref_cycle_model={ref['cycle_model']} "
-        f"mae={stats['mae']:.6f} maxe={stats['maxe']:.6f}"
+        f"MAE={stats['mae']:.6f} MaxAE={stats['maxe']:.6f}"
+    )
+    dut._log.info(
+        f"worst_point: i={worst['i']} j={worst['j']} ae={worst['ae']:.6f} got=0x{worst['got']:08x} ref=0x{worst['ref']:08x}"
     )
     dut._log.info(
         "perf cycles: "
@@ -264,6 +328,243 @@ async def run_case(dut, causal: bool, seed: int) -> None:
         assert cycles == expected_cycles, f"unexpected cycle count: got={cycles} exp={expected_cycles}"
     assert stats["mae"] <= 2.5e-4, f"mae too large: {stats['mae']}"
     assert stats["maxe"] <= 4.5e-3, f"maxe too large: {stats['maxe']}"
+
+
+def score_bf16_ref_for_pair(
+    q_mat: list[list[int]],
+    k_mat: list[list[int]],
+    q_idx: int,
+    k_idx: int,
+    d: int,
+    scale_bits: int,
+    causal: bool,
+    neg_large_bits: int,
+) -> int:
+    score_bits = 0
+    for kk in range(d):
+        prod_bits = fp32_mul_q16((q_mat[q_idx][kk] & 0xFFFF) << 16, (k_mat[k_idx][kk] & 0xFFFF) << 16)
+        score_bits = fp32_add(score_bits, prod_bits)
+    score_bits = fp32_mul_q16(score_bits, scale_bits)
+    if causal and k_idx > q_idx:
+        score_bits = neg_large_bits
+    return fp32_to_bf16_bits(score_bits)
+
+
+@cocotb.test()
+async def test_attention_core_trace_first_divergence(dut):
+    if os.environ.get("CORE_TRACE_ENABLE", "0") != "1":
+        dut._log.info("trace test skipped (set CORE_TRACE_ENABLE=1 to enable)")
+        return
+
+    cocotb.start_soon(Clock(dut.clk, 2, units="ns").start())
+    await reset_dut(dut)
+
+    seq_len = resolve_param(dut, "SEQ_LEN", 256)
+    d = resolve_param(dut, "D", 64)
+    tq = resolve_param(dut, "TQ", 32)
+    tk = resolve_param(dut, "TK", 64)
+    stride_bytes = d * 2
+    assert_non_overlapping_regions(seq_len, d, stride_bytes)
+    seed = int(os.environ.get("CORE_TRACE_SEED", "20260312"))
+    causal = bool(int(os.environ.get("CORE_TRACE_CAUSAL", "0")))
+
+    random.seed(seed)
+    q_mat = [[rand_bf16(-1.0, 1.0) for _ in range(d)] for _ in range(seq_len)]
+    k_mat = [[rand_bf16(-1.0, 1.0) for _ in range(d)] for _ in range(seq_len)]
+    v_mat = [[rand_bf16(-1.0, 1.0) for _ in range(d)] for _ in range(seq_len)]
+
+    scale_bits = f32_to_bits(1.0 / math.sqrt(d))
+    neg_large_bits = f32_to_bits(-64.0)
+
+    mem = DmaMemory()
+    mem.store_matrix_bf16(Q_BASE, q_mat, stride_bytes)
+    mem.store_matrix_bf16(K_BASE, k_mat, stride_bytes)
+    mem.store_matrix_bf16(V_BASE, v_mat, stride_bytes)
+
+    cocotb.start_soon(dma_read_driver(dut, mem))
+    cocotb.start_soon(dma_write_driver(dut, mem))
+
+    dut.i_causal_en.value = 1 if causal else 0
+    dut.i_scale_fp32.value = scale_bits
+    dut.i_neg_large_fp32.value = neg_large_bits
+    dut.i_stride_bytes.value = stride_bytes
+    dut.i_start.value = 1
+    await RisingEdge(dut.clk)
+    dut.i_start.value = 0
+
+    num_q_tiles = seq_len // tq
+    num_k_tiles = seq_len // tk
+    ref_m = [0 for _ in range(seq_len)]
+    ref_l = [0 for _ in range(seq_len)]
+
+    q_tile_idx = 0
+    k_tile_idx = 0
+    qi = 0
+    kj = 0
+
+    first_div = None
+    first_score_div = None
+    first_index_div = None
+    max_l_ae = 0.0
+    max_m_ae = 0.0
+    max_inv_ae = 0.0
+    max_score_ae = 0.0
+    traced_pairs = 0
+
+    expected_cycles = expected_cycles_mvp(seq_len, d, tq, tk)
+    timeout_cycles = min(int(os.environ.get("CORE_MAX_CYCLES", "9000000")), max(1000, expected_cycles * 4))
+
+    for _ in range(timeout_cycles):
+        await RisingEdge(dut.clk)
+        if int(dut.o_perf_norm_recip_req.value):
+            dut_q_tile = int(dut.q_tile_idx.value)
+            dut_k_tile = int(dut.k_tile_idx.value)
+            dut_qi = int(dut.qi.value)
+            dut_kj = int(dut.kj.value)
+            if first_index_div is None and (dut_q_tile != q_tile_idx or dut_k_tile != k_tile_idx or dut_qi != qi or dut_kj != kj):
+                first_index_div = {
+                    "dut_q_tile": dut_q_tile,
+                    "dut_k_tile": dut_k_tile,
+                    "dut_qi": dut_qi,
+                    "dut_kj": dut_kj,
+                    "sw_q_tile": q_tile_idx,
+                    "sw_k_tile": k_tile_idx,
+                    "sw_qi": qi,
+                    "sw_kj": kj,
+                }
+
+            q_global = q_tile_idx * tq + qi
+            k_global = k_tile_idx * tk + kj
+            row_start = (k_tile_idx == 0 and kj == 0)
+
+            score_bf16 = score_bf16_ref_for_pair(
+                q_mat=q_mat,
+                k_mat=k_mat,
+                q_idx=q_global,
+                k_idx=k_global,
+                d=d,
+                scale_bits=scale_bits,
+                causal=causal,
+                neg_large_bits=neg_large_bits,
+            )
+            ref = online_softmax_fp32_step(
+                m_old_bits=ref_m[q_global],
+                l_old_bits=ref_l[q_global],
+                acc_old_bits=0,
+                score_bf16=score_bf16,
+                value_bf16=0,
+                row_start=row_start,
+                bitaccurate=True,
+            )
+            ref_m[q_global] = ref["m_new_bits"]
+            ref_l[q_global] = ref["l_new_bits"]
+            ref_inv = 0 if bits_to_f32(ref["l_new_bits"]) == 0.0 else fp32_recip(ref["l_new_bits"])
+
+            got_m = int(dut.m_new_fp32.value) & 0xFFFFFFFF
+            got_l = int(dut.l_new_fp32.value) & 0xFFFFFFFF
+            got_inv = int(dut.inv_l_new_fp32.value) & 0xFFFFFFFF
+            got_score_bf16 = int(dut.score_bf16.value) & 0xFFFF
+
+            score_ae = abs(bits_to_f32((got_score_bf16 & 0xFFFF) << 16) - bits_to_f32((score_bf16 & 0xFFFF) << 16))
+            max_score_ae = max(max_score_ae, score_ae)
+            if first_score_div is None and got_score_bf16 != score_bf16:
+                first_score_div = {
+                    "q": q_global,
+                    "k": k_global,
+                    "got": got_score_bf16,
+                    "ref": score_bf16,
+                    "ae": score_ae,
+                }
+
+            m_ae = abs(bits_to_f32(got_m) - bits_to_f32(ref["m_new_bits"]))
+            l_ae = abs(bits_to_f32(got_l) - bits_to_f32(ref["l_new_bits"]))
+            inv_ae = abs(bits_to_f32(got_inv) - bits_to_f32(ref_inv))
+            max_m_ae = max(max_m_ae, m_ae)
+            max_l_ae = max(max_l_ae, l_ae)
+            max_inv_ae = max(max_inv_ae, inv_ae)
+            traced_pairs += 1
+
+            if first_div is None and (l_ae > 0.01 or m_ae > 0.01 or inv_ae > 0.01):
+                first_div = {
+                    "q": q_global,
+                    "k": k_global,
+                    "m_ae": m_ae,
+                    "l_ae": l_ae,
+                    "inv_ae": inv_ae,
+                    "got_m": got_m,
+                    "ref_m": ref["m_new_bits"],
+                    "got_l": got_l,
+                    "ref_l": ref["l_new_bits"],
+                    "got_inv": got_inv,
+                    "ref_inv": ref_inv,
+                }
+
+            kj += 1
+            if kj == tk:
+                kj = 0
+                qi += 1
+                if qi == tq:
+                    qi = 0
+                    k_tile_idx += 1
+                    if k_tile_idx == num_k_tiles:
+                        k_tile_idx = 0
+                        q_tile_idx += 1
+                        if q_tile_idx == num_q_tiles:
+                            q_tile_idx = 0
+
+        if int(dut.o_done.value):
+            break
+    else:
+        raise AssertionError(f"trace timeout after {timeout_cycles} cycles")
+
+    dut._log.info(
+        "trace_summary: seed=%d causal=%d traced_pairs=%d max_score_ae=%.6f max_m_ae=%.6f max_l_ae=%.6f max_inv_ae=%.6f",
+        seed,
+        int(causal),
+        traced_pairs,
+        max_score_ae,
+        max_m_ae,
+        max_l_ae,
+        max_inv_ae,
+    )
+    if first_score_div is None:
+        dut._log.info("trace_first_score_divergence: none (bf16 bits identical)")
+    else:
+        dut._log.info(
+            "trace_first_score_divergence: q=%d k=%d ae=%.6f got=0x%04x ref=0x%04x",
+            first_score_div["q"],
+            first_score_div["k"],
+            first_score_div["ae"],
+            first_score_div["got"],
+            first_score_div["ref"],
+        )
+    if first_index_div is None:
+        dut._log.info("trace_index_alignment: pass")
+    else:
+        dut._log.info(
+            "trace_index_alignment: first_mismatch dut=(qt=%d,kt=%d,qi=%d,kj=%d) sw=(qt=%d,kt=%d,qi=%d,kj=%d)",
+            first_index_div["dut_q_tile"],
+            first_index_div["dut_k_tile"],
+            first_index_div["dut_qi"],
+            first_index_div["dut_kj"],
+            first_index_div["sw_q_tile"],
+            first_index_div["sw_k_tile"],
+            first_index_div["sw_qi"],
+            first_index_div["sw_kj"],
+        )
+    if first_div is None:
+        dut._log.info("trace_first_divergence: none (threshold=0.01)")
+    else:
+        dut._log.info(
+            "trace_first_divergence: q=%d k=%d m_ae=%.6f l_ae=%.6f inv_ae=%.6f got_l=0x%08x ref_l=0x%08x",
+            first_div["q"],
+            first_div["k"],
+            first_div["m_ae"],
+            first_div["l_ae"],
+            first_div["inv_ae"],
+            first_div["got_l"],
+            first_div["ref_l"],
+        )
 
 
 @cocotb.test()

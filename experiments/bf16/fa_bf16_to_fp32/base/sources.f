@@ -1,1 +1,0 @@
-bf16/fa_fp32_softmax_update_scalar/base/fa_bf16_to_fp32.sv

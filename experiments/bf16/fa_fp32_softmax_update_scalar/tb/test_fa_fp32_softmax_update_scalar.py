@@ -1,4 +1,5 @@
 import random
+import math
 
 import cocotb
 from cocotb.triggers import Timer
@@ -52,6 +53,14 @@ async def check_case(dut, row_start: int, score_bf16: int, value_bf16: int, m_ol
     ref_inv = 0.0 if bits_to_f32(ref["l_new_bits"]) == 0.0 else 1.0 / bits_to_f32(ref["l_new_bits"])
     approx_equal_bits(got_inv, f32_to_bits(ref_inv), rel_tol=0.12, abs_tol=5e-3)
 
+    return {
+        "exp_old_ae": abs(bits_to_f32(got_exp_old) - bits_to_f32(ref["exp_old_bits"])),
+        "exp_new_ae": abs(bits_to_f32(got_exp_new) - bits_to_f32(ref["exp_new_bits"])),
+        "l_ae": abs(bits_to_f32(got_l) - bits_to_f32(ref["l_new_bits"])),
+        "acc_ae": abs(bits_to_f32(got_acc) - bits_to_f32(ref["acc_new_bits"])),
+        "inv_ae": abs(bits_to_f32(got_inv) - ref_inv),
+    }
+
 
 @cocotb.test()
 async def test_fp32_softmax_update_scalar_directed(dut):
@@ -68,6 +77,7 @@ async def test_fp32_softmax_update_scalar_directed(dut):
 @cocotb.test()
 async def test_fp32_softmax_update_scalar_random(dut):
     random.seed(20260312)
+    metrics = {"exp_old_ae": [], "exp_new_ae": [], "l_ae": [], "acc_ae": [], "inv_ae": []}
     for _ in range(3000):
         row_start = 1 if random.random() < 0.1 else 0
         score_bf16 = random_bf16_in_range(-8.0, 8.0)
@@ -80,4 +90,13 @@ async def test_fp32_softmax_update_scalar_random(dut):
             m_old = f32_to_bits(random.uniform(-8.0, 8.0))
             l_old = f32_to_bits(random.uniform(0.0, 8.0))
             acc_old = f32_to_bits(random.uniform(-8.0, 8.0))
-        await check_case(dut, row_start, score_bf16, value_bf16, m_old, l_old, acc_old)
+        stat = await check_case(dut, row_start, score_bf16, value_bf16, m_old, l_old, acc_old)
+        for key in metrics:
+            value = stat[key]
+            if math.isfinite(value):
+                metrics[key].append(value)
+
+    for key, arr in metrics.items():
+        mae = (sum(arr) / len(arr)) if arr else 0.0
+        maxae = max(arr) if arr else 0.0
+        dut._log.info("softmax_update_scalar_%s: samples=%d MAE=%.6f MaxAE=%.6f", key, len(arr), mae, maxae)

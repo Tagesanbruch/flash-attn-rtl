@@ -3,6 +3,16 @@ import math
 import struct
 from typing import Iterable
 
+try:
+    from bf16.common.cmodel_ref import fp32_add as cmodel_fp32_add
+    from bf16.common.cmodel_ref import fp32_exp2_pwl as cmodel_fp32_exp2_pwl
+    from bf16.common.cmodel_ref import fp32_mul_q16 as cmodel_fp32_mul_q16
+    from bf16.common.cmodel_ref import fp32_recip as cmodel_fp32_recip
+
+    HAS_CMODEL_BITACCURATE = True
+except Exception:
+    HAS_CMODEL_BITACCURATE = False
+
 
 def bits_to_f32(bits: int) -> float:
     return struct.unpack('>f', struct.pack('>I', bits & 0xFFFFFFFF))[0]
@@ -187,6 +197,31 @@ def _pow2_bits(delta_bits: int) -> int:
     return f32_to_bits(f32(2.0 ** delta))
 
 
+def _fp32_add_model(a_bits: int, b_bits: int, bitaccurate: bool) -> int:
+    if bitaccurate and HAS_CMODEL_BITACCURATE:
+        return cmodel_fp32_add(a_bits, b_bits)
+    return fp32_add_bits(a_bits, b_bits)
+
+
+def _fp32_mul_model(a_bits: int, b_bits: int, bitaccurate: bool) -> int:
+    if bitaccurate and HAS_CMODEL_BITACCURATE:
+        return cmodel_fp32_mul_q16(a_bits, b_bits)
+    return fp32_mul_q16_bits(a_bits, b_bits)
+
+
+def _fp32_exp2_model(delta_bits: int, bitaccurate: bool) -> int:
+    if bitaccurate and HAS_CMODEL_BITACCURATE:
+        return cmodel_fp32_exp2_pwl(delta_bits)
+    return _pow2_bits(delta_bits)
+
+
+def _fp32_recip_model(x_bits: int, bitaccurate: bool) -> int:
+    if bitaccurate and HAS_CMODEL_BITACCURATE:
+        return cmodel_fp32_recip(x_bits)
+    x_val = bits_to_f32(x_bits)
+    return 0 if x_val == 0.0 else f32_to_bits(f32(1.0 / x_val))
+
+
 def online_softmax_fp32_step(
     m_old_bits: int,
     l_old_bits: int,
@@ -194,6 +229,7 @@ def online_softmax_fp32_step(
     score_bf16: int,
     value_bf16: int,
     row_start: bool,
+    bitaccurate: bool = False,
 ) -> dict[str, int]:
     score_bits = bf16_to_fp32_bits(score_bf16)
     value_bits = bf16_to_fp32_bits(value_bf16)
@@ -205,15 +241,21 @@ def online_softmax_fp32_step(
         m_old = bits_to_f32(m_old_bits)
         score = bits_to_f32(score_bits)
         m_new_bits = score_bits if score > m_old else m_old_bits
-        exp_old_bits = _pow2_bits(fp32_add_bits(m_old_bits, f32_to_bits(-bits_to_f32(m_new_bits))))
+        exp_old_bits = _fp32_exp2_model(
+            _fp32_add_model(m_old_bits, f32_to_bits(-bits_to_f32(m_new_bits)), bitaccurate),
+            bitaccurate,
+        )
 
-    exp_new_bits = _pow2_bits(fp32_add_bits(score_bits, f32_to_bits(-bits_to_f32(m_new_bits))))
-    l_scaled_bits = 0 if row_start else f32_to_bits(f32(bits_to_f32(l_old_bits) * bits_to_f32(exp_old_bits)))
-    l_new_bits = fp32_add_bits(l_scaled_bits, exp_new_bits)
+    exp_new_bits = _fp32_exp2_model(
+        _fp32_add_model(score_bits, f32_to_bits(-bits_to_f32(m_new_bits)), bitaccurate),
+        bitaccurate,
+    )
+    l_scaled_bits = 0 if row_start else _fp32_mul_model(l_old_bits, exp_old_bits, bitaccurate)
+    l_new_bits = _fp32_add_model(l_scaled_bits, exp_new_bits, bitaccurate)
 
-    acc_scaled_bits = 0 if row_start else f32_to_bits(f32(bits_to_f32(acc_old_bits) * bits_to_f32(exp_old_bits)))
-    v_term_bits = f32_to_bits(f32(bits_to_f32(exp_new_bits) * bits_to_f32(value_bits)))
-    acc_new_bits = fp32_add_bits(acc_scaled_bits, v_term_bits)
+    acc_scaled_bits = 0 if row_start else _fp32_mul_model(acc_old_bits, exp_old_bits, bitaccurate)
+    v_term_bits = _fp32_mul_model(exp_new_bits, value_bits, bitaccurate)
+    acc_new_bits = _fp32_add_model(acc_scaled_bits, v_term_bits, bitaccurate)
 
     return {
         "m_new_bits": m_new_bits,
@@ -261,6 +303,7 @@ def attention_bf16_fp32_reference(
     scale_bits: int,
     neg_large_bits: int,
     causal: bool = False,
+    bitaccurate: bool = False,
 ) -> dict[str, list[list[int]]]:
     seq_len = len(q_mat_bf16)
     d = len(q_mat_bf16[0]) if seq_len > 0 else 0
@@ -278,12 +321,13 @@ def attention_bf16_fp32_reference(
         for j in range(seq_len):
             score_bits = zero_bits
             for kk in range(d):
-                prod_bits = fp32_mul_q16_bits(
+                prod_bits = _fp32_mul_model(
                     bf16_to_fp32_bits(q_mat_bf16[i][kk]),
                     bf16_to_fp32_bits(k_mat_bf16[j][kk]),
+                    bitaccurate,
                 )
-                score_bits = fp32_add_bits(score_bits, prod_bits)
-            score_bits = fp32_mul_q16_bits(score_bits, scale_bits)
+                score_bits = _fp32_add_model(score_bits, prod_bits, bitaccurate)
+            score_bits = _fp32_mul_model(score_bits, scale_bits, bitaccurate)
             if causal and j > i:
                 score_bits = neg_large_bits
             score_bf16 = fp32_to_bf16_bits(score_bits)
@@ -295,22 +339,22 @@ def attention_bf16_fp32_reference(
                 score_bf16=score_bf16,
                 value_bf16=zero_bf16,
                 row_start=(j == 0),
+                bitaccurate=bitaccurate,
             )
             m_bits = step_ref["m_new_bits"]
             l_bits = step_ref["l_new_bits"]
             exp_old_bits = step_ref["exp_old_bits"]
             exp_new_bits = step_ref["exp_new_bits"]
 
-            l_val = bits_to_f32(l_bits)
-            inv_l_bits = zero_bits if l_val == 0.0 else f32_to_bits(f32(1.0 / l_val))
+            inv_l_bits = zero_bits if bits_to_f32(l_bits) == 0.0 else _fp32_recip_model(l_bits, bitaccurate)
 
             for kk in range(d):
-                acc_scaled = zero_bits if j == 0 else fp32_mul_q16_bits(acc_bits[kk], exp_old_bits)
-                v_term = fp32_mul_q16_bits(bf16_to_fp32_bits(v_mat_bf16[j][kk]), exp_new_bits)
-                acc_bits[kk] = fp32_add_bits(acc_scaled, v_term)
+                acc_scaled = zero_bits if j == 0 else _fp32_mul_model(acc_bits[kk], exp_old_bits, bitaccurate)
+                v_term = _fp32_mul_model(bf16_to_fp32_bits(v_mat_bf16[j][kk]), exp_new_bits, bitaccurate)
+                acc_bits[kk] = _fp32_add_model(acc_scaled, v_term, bitaccurate)
 
         for kk in range(d):
-            out_bits = fp32_mul_q16_bits(acc_bits[kk], inv_l_bits)
+            out_bits = _fp32_mul_model(acc_bits[kk], inv_l_bits, bitaccurate)
             out_fp32_bits[i][kk] = out_bits
             out_bf16[i][kk] = fp32_to_bf16_bits(out_bits)
 

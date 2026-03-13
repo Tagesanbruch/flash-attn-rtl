@@ -3,16 +3,25 @@ import random
 import cocotb
 from cocotb.triggers import Timer
 
+from bf16.common.ae_logging import (
+    float_abs_error,
+    resolve_seed,
+    resolve_samples,
+    should_dump_rows,
+    write_case_csv,
+)
 from bf16.common.cmodel_ref import fp32_add
 from bf16.common.cocotb_utils import bits_to_f32, rand_fp32_bits
 
 
 @cocotb.test()
 async def test_fp32_add_matches_cmodel(dut):
-    rng = random.Random(20260312)
-    samples = 2000
+    seed = resolve_seed(20260312)
+    samples = resolve_samples(2000)
+    rng = random.Random(seed)
     mismatches = 0
     errs = []
+    rows = []
 
     for _ in range(samples):
         a_bits = rand_fp32_bits(rng, -8.0, 8.0)
@@ -24,9 +33,26 @@ async def test_fp32_add_matches_cmodel(dut):
         exp = fp32_add(a_bits, b_bits)
         if got != exp:
             mismatches += 1
-        errs.append(abs(bits_to_f32(got) - bits_to_f32(exp)))
+        ae = float_abs_error(got, exp)
+        errs.append(ae)
+        if should_dump_rows():
+            rows.append(
+                {
+                    "idx": len(rows),
+                    "a_bits": f"0x{a_bits:08x}",
+                    "b_bits": f"0x{b_bits:08x}",
+                    "rtl_bits": f"0x{got:08x}",
+                    "cmodel_bits": f"0x{exp:08x}",
+                    "rtl_f32": bits_to_f32(got),
+                    "cmodel_f32": bits_to_f32(exp),
+                    "ae": ae,
+                }
+            )
 
     mae = sum(errs) / len(errs)
     maxe = max(errs) if errs else 0.0
-    dut._log.info("fp32_add: samples=%d mismatches=%d mae=%.6g maxe=%.6g", samples, mismatches, mae, maxe)
+    if should_dump_rows():
+        csv_path = write_case_csv("fa_fp32_add", seed, rows)
+        dut._log.info("fp32_add: detail_csv=%s", csv_path)
+    dut._log.info("fp32_add: seed=%d samples=%d mismatches=%d MAE=%.6f MaxAE=%.6f", seed, samples, mismatches, mae, maxe)
     assert mismatches == 0

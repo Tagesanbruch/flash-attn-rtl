@@ -275,6 +275,11 @@ module fa_attention_ip_top #(
   output logic                        m_axi_bready
 );
 
+`ifdef FA_UVM_DISABLE_REGS_PERF
+`define FA_UVM_DISABLE_REGS
+`define FA_UVM_DISABLE_PERF
+`endif
+
   // ---- Internal wires ----
   logic        start_pulse;
   logic        soft_reset;
@@ -347,6 +352,7 @@ module fa_attention_ip_top #(
   logic [31:0] wr_bytes;
 
   // ==== Register file ====
+`ifndef FA_UVM_DISABLE_REGS
   fa_axi_lite_regs u_regs (
     .clk(clk), .rst_n(rst_n),
     .s_axil_awaddr(s_axil_awaddr), .s_axil_awvalid(s_axil_awvalid), .s_axil_awready(s_axil_awready),
@@ -370,7 +376,29 @@ module fa_attention_ip_top #(
     .o_q_base(q_base), .o_k_base(k_base), .o_v_base(v_base), .o_o_base(o_base),
     .o_stride_bytes(stride_bytes), .o_neg_large_q8_8(neg_large_q8_8), .o_scale_q8_8(scale_q8_8)
   );
+`else
+  assign s_axil_awready = 1'b0;
+  assign s_axil_wready = 1'b0;
+  assign s_axil_bresp = 2'b00;
+  assign s_axil_bvalid = 1'b0;
+  assign s_axil_arready = 1'b0;
+  assign s_axil_rdata = '0;
+  assign s_axil_rresp = 2'b00;
+  assign s_axil_rvalid = 1'b0;
+  assign start_pulse = 1'b0;
+  assign soft_reset = 1'b0;
+  assign irq_en = 1'b0;
+  assign causal_en = 1'b0;
+  assign q_base = 64'd0;
+  assign k_base = 64'd0;
+  assign v_base = 64'd0;
+  assign o_base = 64'd0;
+  assign stride_bytes = 32'd0;
+  assign neg_large_q8_8 = 16'd0;
+  assign scale_q8_8 = 16'd0;
+`endif
 
+`ifndef FA_UVM_DISABLE_PERF
   fa_perf_counters u_perf (
     .clk(clk),
     .rst_n(rst_n),
@@ -418,8 +446,33 @@ module fa_attention_ip_top #(
     .o_cs_score_done_cycles(perf_cs_score_done_cycles),
     .o_cs_softmax_prep_cycles(perf_cs_softmax_prep_cycles)
   );
+`else
+  assign perf_run_count = 32'd0;
+  assign perf_busy_cycles = 32'd0;
+  assign perf_dma_rd_cmd_count = 32'd0;
+  assign perf_dma_rd_beat_count = 32'd0;
+  assign perf_dma_wr_cmd_count = 32'd0;
+  assign perf_dma_wr_beat_count = 32'd0;
+  assign perf_comp_launch_count = 32'd0;
+  assign perf_exp_eval_count = 32'd0;
+  assign perf_mul_eval_count = 32'd0;
+  assign perf_recip_req_count = 32'd0;
+  assign perf_recip_rsp_count = 32'd0;
+  assign perf_ms_load_q_cycles = 32'd0;
+  assign perf_ms_init_context_cycles = 32'd0;
+  assign perf_ms_load_k_cycles = 32'd0;
+  assign perf_ms_load_v_cycles = 32'd0;
+  assign perf_ms_compute_cycles = 32'd0;
+  assign perf_ms_normalize_cycles = 32'd0;
+  assign perf_ms_write_o_cycles = 32'd0;
+  assign perf_ms_next_q_cycles = 32'd0;
+  assign perf_cs_dp_run_cycles = 32'd0;
+  assign perf_cs_score_done_cycles = 32'd0;
+  assign perf_cs_softmax_prep_cycles = 32'd0;
+`endif
 
   // ==== DMA Reader ====
+`ifndef FA_UVM_DISABLE_DMA
   fa_dma_reader #(
     .AXI_ADDR_W(AXI_ADDR_W), .AXI_DATA_W(AXI_DATA_W), .AXI_ID_W(AXI_ID_W)
   ) u_dma_rd (
@@ -454,8 +507,39 @@ module fa_attention_ip_top #(
     .m_axi_bvalid(m_axi_bvalid), .m_axi_bready(m_axi_bready),
     .error(dma_wr_error), .wr_bytes(wr_bytes)
   );
+`else
+  assign m_axi_arid = '0;
+  assign m_axi_araddr = '0;
+  assign m_axi_arlen = '0;
+  assign m_axi_arsize = '0;
+  assign m_axi_arburst = '0;
+  assign m_axi_arvalid = 1'b0;
+  assign m_axi_rready = 1'b0;
+  assign m_axi_awid = '0;
+  assign m_axi_awaddr = '0;
+  assign m_axi_awlen = '0;
+  assign m_axi_awsize = '0;
+  assign m_axi_awburst = '0;
+  assign m_axi_awvalid = 1'b0;
+  assign m_axi_wdata = '0;
+  assign m_axi_wstrb = '0;
+  assign m_axi_wlast = 1'b0;
+  assign m_axi_wvalid = 1'b0;
+  assign m_axi_bready = 1'b0;
+  assign dma_rd_cmd_ready = 1'b0;
+  assign dma_rd_out_valid = 1'b0;
+  assign dma_rd_out_data = '0;
+  assign dma_rd_out_last = 1'b0;
+  assign dma_rd_error = 1'b0;
+  assign rd_bytes = 32'd0;
+  assign dma_wr_cmd_ready = 1'b0;
+  assign dma_wr_in_ready = 1'b0;
+  assign dma_wr_error = 1'b0;
+  assign wr_bytes = 32'd0;
+`endif
 
   // ==== Attention Core ====
+`ifndef FA_UVM_DISABLE_CORE
   fa_attention_core u_core (
     .clk(clk), .rst_n(rst_n),
     .i_start(start_pulse), .i_soft_reset(soft_reset),
@@ -488,72 +572,517 @@ module fa_attention_ip_top #(
     .o_perf_norm_recip_req(perf_norm_recip_req),
     .o_perf_norm_recip_rsp(perf_norm_recip_rsp)
   );
+`else
+  assign core_busy = 1'b0;
+  assign core_done = 1'b0;
+  assign core_error = 1'b0;
+  assign core_cycles = 32'd0;
+  assign dma_rd_cmd_valid = 1'b0;
+  assign dma_rd_cmd_addr = 32'd0;
+  assign dma_rd_cmd_len = 16'd0;
+  assign dma_rd_out_ready = 1'b0;
+  assign dma_wr_cmd_valid = 1'b0;
+  assign dma_wr_cmd_addr = 32'd0;
+  assign dma_wr_cmd_len = 16'd0;
+  assign dma_wr_in_valid = 1'b0;
+  assign dma_wr_in_data = '0;
+  assign dma_wr_in_last = 1'b0;
+  assign perf_ms_load_q = 1'b0;
+  assign perf_ms_init_context = 1'b0;
+  assign perf_ms_load_k = 1'b0;
+  assign perf_ms_load_v = 1'b0;
+  assign perf_ms_compute = 1'b0;
+  assign perf_ms_normalize = 1'b0;
+  assign perf_ms_write_o = 1'b0;
+  assign perf_ms_next_q = 1'b0;
+  assign perf_cs_dp_run = 1'b0;
+  assign perf_cs_score_done = 1'b0;
+  assign perf_cs_softmax_prep = 1'b0;
+  assign perf_comp_launch = 1'b0;
+  assign perf_active_rows = 2'b00;
+  assign perf_norm_recip_req = 1'b0;
+  assign perf_norm_recip_rsp = 1'b0;
+`endif
 
   // Error aggregation
   logic unused_irq;
   assign unused_irq = irq_en;
 endmodule
+module fa_online_softmax_ctx (
+  input  logic                clk,
+  input  logic                rst_n,
+  input  logic                i_valid,
+  input  logic                i_row_start,
+  input  logic                i_row_end,
+  input  logic [1:0]          i_ctx_id,
+  input  logic signed [15:0]  i_init_m_q8_8,
+  input  logic        [31:0]  i_init_l_q16_16,
+  input  logic signed [31:0]  i_init_acc_q16_16,
+  input  logic signed [15:0]  i_score_q8_8,
+  input  logic signed [15:0]  i_value_q8_8,
+  output logic                o_valid,
+  output logic                o_row_done,
+  output logic [1:0]          o_ctx_id,
+  output logic signed [15:0]  o_m_q8_8,
+  output logic        [31:0]  o_l_q16_16,
+  output logic signed [31:0]  o_acc_q16_16
+);
+  localparam int CTX_COUNT = 4;
+  localparam int LOG2E_Q8_8 = 16'sd369;
+
+  logic signed [15:0] m_state   [CTX_COUNT];
+  logic        [31:0] l_state   [CTX_COUNT];
+  logic signed [31:0] acc_state [CTX_COUNT];
+
+  logic               s0_valid, s0_row_end;
+  logic [1:0]         s0_ctx_id;
+  logic signed [15:0] s0_score, s0_value;
+  logic signed [15:0] s0_m_prev;
+  logic [31:0]        s0_l_prev;
+  logic signed [31:0] s0_acc_prev;
+
+  logic               s1_valid, s1_row_end;
+  logic [1:0]         s1_ctx_id;
+  logic signed [15:0] s1_m_new;
+  logic signed [15:0] s1_diff_old, s1_diff_new;
+  logic [31:0]        s1_l_prev;
+  logic signed [31:0] s1_acc_prev;
+  logic signed [15:0] s1_value;
+
+  logic               s2_valid, s2_row_end;
+  logic [1:0]         s2_ctx_id;
+  logic signed [15:0] s2_m_new;
+  logic [31:0]        s2_l_prev;
+  logic signed [31:0] s2_acc_prev;
+  logic signed [15:0] s2_value;
+  logic [15:0]        s2_exp_old, s2_exp_new;
+
+  logic               s3_valid, s3_row_end;
+  logic [1:0]         s3_ctx_id;
+  logic signed [15:0] s3_m_new;
+  logic [15:0]        s3_exp_new;
+  logic [63:0]        s3_l_scaled_q32_31;
+  logic signed [63:0] s3_acc_scaled_q33_31;
+  logic signed [33:0] s3_v_mul_q9_23;
+
+  logic               s4_valid, s4_row_end;
+  logic [1:0]         s4_ctx_id;
+  logic signed [15:0] s4_m_new;
+  logic [31:0]        s4_l_new;
+  logic signed [31:0] s4_acc_new;
+
+  function automatic [15:0] exp2_approx(input logic signed [15:0] x_q8_8);
+    logic signed [15:0] x_clip_q8_8;
+    logic [15:0] mag_q8_8;
+    logic [31:0] z_mul_q16_16;
+    logic [15:0] z_q8_8;
+    logic [7:0]  int_part;
+    logic [7:0]  frac_part;
+    logic [15:0] frac_val;
+    begin
+      if (x_q8_8 > 16'sd0)
+        x_clip_q8_8 = 16'sd0;
+      else if (x_q8_8 < -16'sd4096)
+        x_clip_q8_8 = -16'sd4096;
+      else
+        x_clip_q8_8 = x_q8_8;
+      mag_q8_8 = $unsigned(-x_clip_q8_8);
+      z_mul_q16_16 = mag_q8_8 * LOG2E_Q8_8;
+      z_q8_8 = (z_mul_q16_16 + 32'd128) >> 8;
+      int_part = z_q8_8[15:8];
+      frac_part = z_q8_8[7:0];
+      case (frac_part[7:3])
+        5'd0: frac_val = 16'd32768;
+        5'd1: frac_val = 16'd32066;
+        5'd2: frac_val = 16'd31379;
+        5'd3: frac_val = 16'd30706;
+        5'd4: frac_val = 16'd30048;
+        5'd5: frac_val = 16'd29405;
+        5'd6: frac_val = 16'd28774;
+        5'd7: frac_val = 16'd28158;
+        5'd8: frac_val = 16'd27554;
+        5'd9: frac_val = 16'd26964;
+        5'd10: frac_val = 16'd26386;
+        5'd11: frac_val = 16'd25821;
+        5'd12: frac_val = 16'd25268;
+        5'd13: frac_val = 16'd24726;
+        5'd14: frac_val = 16'd24196;
+        5'd15: frac_val = 16'd23678;
+        5'd16: frac_val = 16'd23170;
+        5'd17: frac_val = 16'd22674;
+        5'd18: frac_val = 16'd22188;
+        5'd19: frac_val = 16'd21713;
+        5'd20: frac_val = 16'd21247;
+        5'd21: frac_val = 16'd20792;
+        5'd22: frac_val = 16'd20347;
+        5'd23: frac_val = 16'd19911;
+        5'd24: frac_val = 16'd19484;
+        5'd25: frac_val = 16'd19066;
+        5'd26: frac_val = 16'd18658;
+        5'd27: frac_val = 16'd18258;
+        5'd28: frac_val = 16'd17867;
+        5'd29: frac_val = 16'd17484;
+        5'd30: frac_val = 16'd17109;
+        default: frac_val = 16'd16743;
+      endcase
+      if (int_part >= 8'd16)
+        exp2_approx = 16'd0;
+      else
+        exp2_approx = frac_val >> int_part;
+    end
+  endfunction
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    int idx;
+    logic signed [15:0] fwd_m_prev;
+    logic [31:0]        fwd_l_prev;
+    logic signed [31:0] fwd_acc_prev;
+    if (!rst_n) begin
+      for (int c = 0; c < CTX_COUNT; c++) begin
+        m_state[c] <= -16'sd32768;
+        l_state[c] <= 32'd0;
+        acc_state[c] <= 32'sd0;
+      end
+      s0_valid <= 1'b0;
+      s1_valid <= 1'b0;
+      s2_valid <= 1'b0;
+      s3_valid <= 1'b0;
+      s4_valid <= 1'b0;
+      o_valid <= 1'b0;
+      o_row_done <= 1'b0;
+      o_ctx_id <= 2'd0;
+      o_m_q8_8 <= -16'sd32768;
+      o_l_q16_16 <= 32'd0;
+      o_acc_q16_16 <= 32'sd0;
+    end else begin
+      if (i_valid) begin
+        idx = i_ctx_id;
+        fwd_m_prev = m_state[idx];
+        fwd_l_prev = l_state[idx];
+        fwd_acc_prev = acc_state[idx];
+        if (s4_valid && (s4_ctx_id == i_ctx_id)) begin
+          fwd_m_prev = s4_m_new;
+          fwd_l_prev = s4_l_new;
+          fwd_acc_prev = s4_acc_new;
+        end else if (s3_valid && (s3_ctx_id == i_ctx_id)) begin
+          fwd_m_prev = s3_m_new;
+          fwd_l_prev = s3_l_scaled_q32_31[46:15] + {15'd0, s3_exp_new, 1'b0};
+          fwd_acc_prev = s3_acc_scaled_q33_31[46:15] + {{5{s3_v_mul_q9_23[33]}}, s3_v_mul_q9_23[33:7]};
+        end
+        s0_valid <= 1'b1;
+        s0_row_end <= i_row_end;
+        s0_ctx_id <= i_ctx_id;
+        s0_score <= i_score_q8_8;
+        s0_value <= i_value_q8_8;
+        s0_m_prev <= i_row_start ? i_init_m_q8_8 : fwd_m_prev;
+        s0_l_prev <= i_row_start ? i_init_l_q16_16 : fwd_l_prev;
+        s0_acc_prev <= i_row_start ? i_init_acc_q16_16 : fwd_acc_prev;
+      end else begin
+        s0_valid <= 1'b0;
+      end
+
+      if (s0_valid) begin
+        s1_valid <= 1'b1;
+        s1_row_end <= s0_row_end;
+        s1_ctx_id <= s0_ctx_id;
+        s1_m_new <= (s0_score > s0_m_prev) ? s0_score : s0_m_prev;
+        s1_diff_old <= s0_m_prev - ((s0_score > s0_m_prev) ? s0_score : s0_m_prev);
+        s1_diff_new <= s0_score - ((s0_score > s0_m_prev) ? s0_score : s0_m_prev);
+        s1_l_prev <= s0_l_prev;
+        s1_acc_prev <= s0_acc_prev;
+        s1_value <= s0_value;
+      end else begin
+        s1_valid <= 1'b0;
+      end
+
+      if (s1_valid) begin
+        s2_valid <= 1'b1;
+        s2_row_end <= s1_row_end;
+        s2_ctx_id <= s1_ctx_id;
+        s2_m_new <= s1_m_new;
+        s2_l_prev <= s1_l_prev;
+        s2_acc_prev <= s1_acc_prev;
+        s2_value <= s1_value;
+        s2_exp_old <= exp2_approx(s1_diff_old);
+        s2_exp_new <= exp2_approx(s1_diff_new);
+      end else begin
+        s2_valid <= 1'b0;
+      end
+
+      if (s2_valid) begin
+        s3_valid <= 1'b1;
+        s3_row_end <= s2_row_end;
+        s3_ctx_id <= s2_ctx_id;
+        s3_m_new <= s2_m_new;
+        s3_exp_new <= s2_exp_new;
+        s3_l_scaled_q32_31 <= s2_l_prev * s2_exp_old;
+        s3_acc_scaled_q33_31 <= s2_acc_prev * $signed({1'b0, s2_exp_old});
+        s3_v_mul_q9_23 <= $signed({1'b0, s2_exp_new}) * s2_value;
+      end else begin
+        s3_valid <= 1'b0;
+      end
+
+      if (s3_valid) begin
+        s4_valid <= 1'b1;
+        s4_row_end <= s3_row_end;
+        s4_ctx_id <= s3_ctx_id;
+        s4_m_new <= s3_m_new;
+        s4_l_new <= s3_l_scaled_q32_31[46:15] + {15'd0, s3_exp_new, 1'b0};
+        s4_acc_new <= s3_acc_scaled_q33_31[46:15] + {{5{s3_v_mul_q9_23[33]}}, s3_v_mul_q9_23[33:7]};
+      end else begin
+        s4_valid <= 1'b0;
+      end
+
+      o_valid <= s4_valid;
+      o_row_done <= s4_valid && s4_row_end;
+      o_ctx_id <= s4_ctx_id;
+      o_m_q8_8 <= s4_m_new;
+      if (s4_valid) begin
+        idx = s4_ctx_id;
+        m_state[idx] <= s4_m_new;
+        l_state[idx] <= s4_l_new;
+        acc_state[idx] <= s4_acc_new;
+        o_l_q16_16 <= s4_l_new;
+        o_acc_q16_16 <= s4_acc_new;
+      end
+    end
+  end
+endmodule
 module fa_qk_dotprod_slice #(
-  parameter int D        = 64,
-  parameter int DP_LANES = 32
+  parameter int LANES = 32
 ) (
-  input  logic signed [15:0] i_q_row0 [D],
-  input  logic signed [15:0] i_q_row1 [D],
-  input  logic               i_row1_valid,
-  input  logic signed [15:0] i_k_row  [D],
-  input  logic [$clog2(D)-1:0] i_chunk_idx,
-  output logic signed [39:0] o_partial_sum0,
-  output logic signed [39:0] o_partial_sum1
+  input  logic                     clk,
+  input  logic                     rst_n,
+  input  logic                     i_valid,
+  input  logic                     i_row1_valid,
+  input  logic [LANES*16-1:0]      i_q0_chunk_q8_8,
+  input  logic [LANES*16-1:0]      i_q1_chunk_q8_8,
+  input  logic [LANES*16-1:0]      i_k_chunk_q8_8,
+  output logic                     o_valid,
+  output logic signed [39:0]       o_partial_sum0,
+  output logic signed [39:0]       o_partial_sum1
 );
 
-  always_comb begin
-    int d_idx;
-    o_partial_sum0 = '0;
-    o_partial_sum1 = '0;
-    for (int lane = 0; lane < DP_LANES; lane++) begin
-      d_idx = i_chunk_idx * DP_LANES + lane;
-      o_partial_sum0 = o_partial_sum0 + 40'(i_q_row0[d_idx]) * 40'(i_k_row[d_idx]);
-      if (i_row1_valid)
-        o_partial_sum1 = o_partial_sum1 + 40'(i_q_row1[d_idx]) * 40'(i_k_row[d_idx]);
+  localparam int N1 = LANES / 2;
+  localparam int N2 = N1 / 2;
+  localparam int N3 = N2 / 2;
+  localparam int N4 = N3 / 2;
+
+  function automatic logic signed [15:0] lane16(
+    input logic [LANES*16-1:0] vec,
+    input int                  idx
+  );
+    lane16 = $signed(vec[idx*16 +: 16]);
+  endfunction
+
+  logic [LANES*16-1:0]         q0_in_r;
+  logic [LANES*16-1:0]         q1_in_r;
+  logic [LANES*16-1:0]         k_in_r;
+  logic signed [31:0]          mult0_r [LANES];
+  logic signed [31:0]          mult1_r [LANES];
+  logic signed [32:0]          add1_0_r [N1];
+  logic signed [32:0]          add1_1_r [N1];
+  logic signed [33:0]          add2_0_r [N2];
+  logic signed [33:0]          add2_1_r [N2];
+  logic signed [34:0]          add3_0_r [N3];
+  logic signed [34:0]          add3_1_r [N3];
+  logic signed [35:0]          add4_0_r [N4];
+  logic signed [35:0]          add4_1_r [N4];
+  logic signed [36:0]          final0_r;
+  logic signed [36:0]          final1_r;
+  logic                        v0_r, v1_r, v2_r, v3_r, v4_r, v5_r, v6_r;
+  logic                        row1_v0_r, row1_v1_r, row1_v2_r, row1_v3_r, row1_v4_r, row1_v5_r, row1_v6_r;
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      q0_in_r <= '0;
+      q1_in_r <= '0;
+      k_in_r <= '0;
+      for (int i = 0; i < LANES; i++) begin
+        mult0_r[i] <= '0;
+        mult1_r[i] <= '0;
+      end
+      for (int i = 0; i < N1; i++) begin
+        add1_0_r[i] <= '0;
+        add1_1_r[i] <= '0;
+      end
+      for (int i = 0; i < N2; i++) begin
+        add2_0_r[i] <= '0;
+        add2_1_r[i] <= '0;
+      end
+      for (int i = 0; i < N3; i++) begin
+        add3_0_r[i] <= '0;
+        add3_1_r[i] <= '0;
+      end
+      for (int i = 0; i < N4; i++) begin
+        add4_0_r[i] <= '0;
+        add4_1_r[i] <= '0;
+      end
+      final0_r <= '0;
+      final1_r <= '0;
+      v0_r <= 1'b0;
+      v1_r <= 1'b0;
+      v2_r <= 1'b0;
+      v3_r <= 1'b0;
+      v4_r <= 1'b0;
+      v5_r <= 1'b0;
+      v6_r <= 1'b0;
+      row1_v0_r <= 1'b0;
+      row1_v1_r <= 1'b0;
+      row1_v2_r <= 1'b0;
+      row1_v3_r <= 1'b0;
+      row1_v4_r <= 1'b0;
+      row1_v5_r <= 1'b0;
+      row1_v6_r <= 1'b0;
+      o_valid <= 1'b0;
+      o_partial_sum0 <= '0;
+      o_partial_sum1 <= '0;
+    end else begin
+      q0_in_r <= i_q0_chunk_q8_8;
+      q1_in_r <= i_q1_chunk_q8_8;
+      k_in_r <= i_k_chunk_q8_8;
+      v0_r <= i_valid;
+      row1_v0_r <= i_row1_valid;
+
+      for (int i = 0; i < LANES; i++) begin
+        mult0_r[i] <= lane16(q0_in_r, i) * lane16(k_in_r, i);
+        if (row1_v0_r)
+          mult1_r[i] <= lane16(q1_in_r, i) * lane16(k_in_r, i);
+        else
+          mult1_r[i] <= '0;
+      end
+      v1_r <= v0_r;
+      row1_v1_r <= row1_v0_r;
+
+      for (int i = 0; i < N1; i++) begin
+        add1_0_r[i] <= {mult0_r[i*2][31], mult0_r[i*2]} + {mult0_r[i*2 + 1][31], mult0_r[i*2 + 1]};
+        add1_1_r[i] <= {mult1_r[i*2][31], mult1_r[i*2]} + {mult1_r[i*2 + 1][31], mult1_r[i*2 + 1]};
+      end
+      v2_r <= v1_r;
+      row1_v2_r <= row1_v1_r;
+
+      for (int i = 0; i < N2; i++) begin
+        add2_0_r[i] <= {add1_0_r[i*2][32], add1_0_r[i*2]} + {add1_0_r[i*2 + 1][32], add1_0_r[i*2 + 1]};
+        add2_1_r[i] <= {add1_1_r[i*2][32], add1_1_r[i*2]} + {add1_1_r[i*2 + 1][32], add1_1_r[i*2 + 1]};
+      end
+      v3_r <= v2_r;
+      row1_v3_r <= row1_v2_r;
+
+      for (int i = 0; i < N3; i++) begin
+        add3_0_r[i] <= {add2_0_r[i*2][33], add2_0_r[i*2]} + {add2_0_r[i*2 + 1][33], add2_0_r[i*2 + 1]};
+        add3_1_r[i] <= {add2_1_r[i*2][33], add2_1_r[i*2]} + {add2_1_r[i*2 + 1][33], add2_1_r[i*2 + 1]};
+      end
+      v4_r <= v3_r;
+      row1_v4_r <= row1_v3_r;
+
+      for (int i = 0; i < N4; i++) begin
+        add4_0_r[i] <= {add3_0_r[i*2][34], add3_0_r[i*2]} + {add3_0_r[i*2 + 1][34], add3_0_r[i*2 + 1]};
+        add4_1_r[i] <= {add3_1_r[i*2][34], add3_1_r[i*2]} + {add3_1_r[i*2 + 1][34], add3_1_r[i*2 + 1]};
+      end
+      v5_r <= v4_r;
+      row1_v5_r <= row1_v4_r;
+
+      final0_r <= {add4_0_r[0][35], add4_0_r[0]} + {add4_0_r[1][35], add4_0_r[1]};
+      final1_r <= {add4_1_r[0][35], add4_1_r[0]} + {add4_1_r[1][35], add4_1_r[1]};
+      v6_r <= v5_r;
+      row1_v6_r <= row1_v5_r;
+
+      o_valid <= v6_r;
+      if (v6_r) begin
+        o_partial_sum0 <= {{3{final0_r[36]}}, final0_r};
+        o_partial_sum1 <= row1_v6_r ? {{3{final1_r[36]}}, final1_r} : 40'sd0;
+      end
     end
   end
 endmodulemodule fa_o_normalize_block #(
-  parameter int NORM_LANES = 8
+  parameter int LANES = 8
 ) (
+  input  logic                     clk,
+  input  logic                     rst_n,
+  input  logic                     i_valid,
   input  logic                     i_den_zero,
   input  logic [31:0]              i_recip_q16_16,
-  input  logic signed [63:0]       i_acc [NORM_LANES],
-  output logic signed [15:0]       o_data [NORM_LANES]
+  input  logic [LANES*64-1:0]      i_acc_flat,
+  output logic                     o_valid,
+  output logic [LANES*16-1:0]      o_data_flat
 );
 
-  always_comb begin
-    for (int lane = 0; lane < NORM_LANES; lane++) begin
-      logic signed [63:0] num;
-      logic signed [95:0] norm_mul_q32_32;
-      logic signed [95:0] norm_rounded_q32_32;
-      logic signed [79:0] norm_result;
+  function automatic logic signed [63:0] lane64(
+    input logic [LANES*64-1:0] vec,
+    input int                  idx
+  );
+    lane64 = $signed(vec[idx*64 +: 64]);
+  endfunction
 
-      num = i_acc[lane];
-      norm_mul_q32_32 = '0;
-      norm_rounded_q32_32 = '0;
-      norm_result = '0;
-      if (i_den_zero) begin
-        norm_result = (num >= 0) ? 80'sd32767 : -80'sd32768;
-      end else begin
-        norm_mul_q32_32 = num * $signed({1'b0, i_recip_q16_16});
-        if (norm_mul_q32_32 >= 0)
-          norm_rounded_q32_32 = norm_mul_q32_32 + 96'sd2147483648;
-        else
-          norm_rounded_q32_32 = norm_mul_q32_32 - 96'sd2147483648;
-        norm_result = norm_rounded_q32_32 >>> 32;
+  function automatic logic signed [15:0] sat16(
+    input logic signed [79:0] value
+  );
+    begin
+      if (value > 80'sd32767)
+        sat16 = 16'sd32767;
+      else if (value < -80'sd32768)
+        sat16 = -16'sd32768;
+      else
+        sat16 = value[15:0];
+    end
+  endfunction
+
+  logic                 s0_valid, s0_den_zero;
+  logic signed [63:0]   s0_acc [LANES];
+  logic signed [80:0]   s0_pp_lo [LANES];
+  logic signed [80:0]   s0_pp_hi [LANES];
+
+  logic                 s1_valid;
+  logic signed [79:0]   s1_res [LANES];
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      s0_valid <= 1'b0;
+      s0_den_zero <= 1'b0;
+      s1_valid <= 1'b0;
+      o_valid <= 1'b0;
+      o_data_flat <= '0;
+      for (int lane = 0; lane < LANES; lane++) begin
+        s0_acc[lane] <= '0;
+        s0_pp_lo[lane] <= '0;
+        s0_pp_hi[lane] <= '0;
+        s1_res[lane] <= '0;
+      end
+    end else begin
+      s0_valid <= i_valid;
+      s0_den_zero <= i_den_zero;
+      if (i_valid) begin
+        for (int lane = 0; lane < LANES; lane++) begin
+          s0_acc[lane] <= lane64(i_acc_flat, lane);
+          s0_pp_lo[lane] <= lane64(i_acc_flat, lane) * $signed({1'b0, i_recip_q16_16[15:0]});
+          s0_pp_hi[lane] <= lane64(i_acc_flat, lane) * $signed({1'b0, i_recip_q16_16[31:16]});
+        end
       end
 
-      if (norm_result > 80'sd32767)
-        o_data[lane] = 16'sd32767;
-      else if (norm_result < -80'sd32768)
-        o_data[lane] = -16'sd32768;
-      else
-        o_data[lane] = norm_result[15:0];
+      s1_valid <= s0_valid;
+      if (s0_valid) begin
+        for (int lane = 0; lane < LANES; lane++) begin
+          logic signed [111:0] norm_mul_q32_32;
+          logic signed [111:0] norm_round_q32_32;
+          if (s0_den_zero) begin
+            s1_res[lane] <= (s0_acc[lane] >= 0) ? 80'sd32767 : -80'sd32768;
+          end else begin
+            norm_mul_q32_32 = $signed({{31{s0_pp_lo[lane][80]}}, s0_pp_lo[lane]}) +
+                              ($signed({{31{s0_pp_hi[lane][80]}}, s0_pp_hi[lane]}) <<< 16);
+            if (norm_mul_q32_32 >= 0)
+              norm_round_q32_32 = norm_mul_q32_32 + 112'sd2147483648;
+            else
+              norm_round_q32_32 = norm_mul_q32_32 - 112'sd2147483648;
+            s1_res[lane] <= norm_round_q32_32 >>> 32;
+          end
+        end
+      end
+
+      o_valid <= s1_valid;
+      if (s1_valid) begin
+        for (int lane = 0; lane < LANES; lane++)
+          o_data_flat[lane*16 +: 16] <= sat16(s1_res[lane]);
+      end
     end
   end
 endmodule// ============================================================================
@@ -963,6 +1492,10 @@ module fa_attention_core #(
   localparam int ROW_PAR = 2;
   localparam int NORM_LANES = 8;
   localparam int RECIP_LAT = 10;
+  localparam int SOFTMAX_CTXS = 4;
+  localparam int QPAIR_BATCH_ROWS = ROW_PAR * SOFTMAX_CTXS;
+  localparam int QK_LAT = 8;
+  localparam int QK_CHUNK_W = (DP_CHUNKS <= 1) ? 1 : $clog2(DP_CHUNKS);
 
   // ---- Master state machine ----
   typedef enum logic [3:0] {
@@ -1013,17 +1546,33 @@ module fa_attention_core #(
   logic signed [63:0] row_acc [TQ][D];
 
   // ---- Compute engine state ----
-  logic [$clog2(TQ)-1:0] comp_qpair;
-  logic [$clog2(TK)-1:0] comp_kj;
-  logic [$clog2(D)-1:0]  comp_d;
-  logic signed [39:0]    dp_acc0;
-  logic signed [39:0]    dp_acc1;
-  logic signed [15:0]    score_q8_8_0;
-  logic signed [15:0]    score_q8_8_1;
+  logic [$clog2(TQ)-1:0] comp_batch_base;
+  logic [1:0]           qk_issue_slot;
+  logic [$clog2(TK)-1:0] qk_issue_kj;
+  logic [QK_CHUNK_W-1:0] qk_issue_chunk;
+  logic                  qk_issue_done;
+  logic [SOFTMAX_CTXS-1:0] batch_done_mask;
+  logic                  score_issue_valid;
+  logic [1:0]            score_issue_slot;
+  logic [$clog2(TK)-1:0] score_issue_kj;
+  logic                  score_issue_row1_valid;
+  logic signed [39:0]    score_issue_dp0;
+  logic signed [39:0]    score_issue_dp1;
+  logic                  ret_first_valid;
+  logic [1:0]            ret_first_slot;
+  logic [$clog2(TK)-1:0] ret_first_kj;
+  logic                  ret_first_row1_valid;
+  logic signed [39:0]    ret_first_sum0;
+  logic signed [39:0]    ret_first_sum1;
+  logic                  perf_cs_dp_run;
+  logic                  perf_cs_score_done;
+  logic                  perf_cs_softmax_prep;
+  logic [SOFTMAX_CTXS-1:0] batch_done_next;
 
   // ---- Normalization / write-out state ----
   logic [$clog2(TQ)-1:0] norm_qi;
   logic [$clog2(D)-1:0]  norm_d;
+  logic [$clog2(D)-1:0]  norm_recv_d;
   logic [$clog2(TQ*D/ELEMS_PER_BEAT):0] o_write_cnt;
   logic                  norm_recip_in_valid;
   logic                  norm_recip_out_valid;
@@ -1032,12 +1581,10 @@ module fa_attention_core #(
   logic                  norm_row_ready;
   logic                  norm_row_den_zero;
   logic [31:0]           norm_row_recip;
+  logic                  norm_issue_done;
 
   // ---- O output buffer ----
   logic signed [15:0] o_buf [TQ][D];
-
-  logic [15:0] exp_old_out0, exp_new_out0;
-  logic [15:0] exp_old_out1, exp_new_out1;
 
   // Inner compute FSM
   typedef enum logic [3:0] {
@@ -1050,107 +1597,237 @@ module fa_attention_core #(
   comp_state_t cs;
 
   logic comp_start, comp_done;
-  logic signed [15:0] m_old0, m_new0;
-  logic signed [15:0] m_old1, m_new1;
-  logic [31:0] l_scaled0, l_term0, l_new_val0;
-  logic [31:0] l_scaled1, l_term1, l_new_val1;
-  logic [31:0] l_new_safe0, l_new_safe1;
-  logic [63:0] l_scaled_wide0;
-  logic [63:0] l_scaled_wide1;
   logic signed [39:0] dp_partial_sum0;
   logic signed [39:0] dp_partial_sum1;
-  logic                     comp_row1_valid;
+  logic               dp_partial_valid;
+  logic                     qk_issue_valid;
+  logic [$clog2(TQ)-1:0]    qk_issue_row0;
+  logic                     qk_issue_row1_valid;
+  logic [$clog2(TQ)-1:0]    score_issue_row0;
+  logic                     sm_row_start;
+  logic                     sm_row_end;
+  logic                     sm_issue_valid0;
+  logic                     sm_issue_valid1;
   logic signed [15:0]       dp_q_row0 [D];
   logic signed [15:0]       dp_q_row1 [D];
   logic signed [15:0]       dp_k_row  [D];
-  logic signed [63:0]       sm_acc_old0 [D];
-  logic signed [63:0]       sm_acc_old1 [D];
+  logic [DP_LANES*16-1:0]   dp_q0_chunk_flat;
+  logic [DP_LANES*16-1:0]   dp_q1_chunk_flat;
+  logic [DP_LANES*16-1:0]   dp_k_chunk_flat;
   logic signed [15:0]       sm_v_row    [D];
-  logic signed [63:0]       sm_acc_new0 [D];
-  logic signed [63:0]       sm_acc_new1 [D];
+  logic                     sm_row0_valid;
+  logic                     sm_row0_done;
+  logic [1:0]               sm_row0_ctx_id;
+  logic signed [15:0]       sm_row0_m_q8_8;
+  logic [31:0]              sm_row0_l_q16_16;
+  logic signed [31:0]       sm_row0_acc_q16_16 [D];
+  logic                     sm_row1_valid;
+  logic                     sm_row1_done;
+  logic [1:0]               sm_row1_ctx_id;
+  logic signed [15:0]       sm_row1_m_q8_8;
+  logic [31:0]              sm_row1_l_q16_16;
+  logic signed [31:0]       sm_row1_acc_q16_16 [D];
+  logic                     qk_pipe_busy;
+  logic                     batch_all_done;
+  logic                     score_issue_fire;
+  logic                     qk_tag_valid [QK_LAT];
+  logic [1:0]               qk_tag_slot [QK_LAT];
+  logic [$clog2(TK)-1:0]    qk_tag_kj [QK_LAT];
+  logic                     qk_tag_chunk_last [QK_LAT];
+  logic                     qk_tag_row1_valid [QK_LAT];
   logic signed [63:0]       norm_acc_chunk [NORM_LANES];
   logic signed [15:0]       norm_o_chunk   [NORM_LANES];
+  logic                     norm_chunk_valid;
+  logic [NORM_LANES*64-1:0] norm_acc_flat;
+  logic [NORM_LANES*16-1:0] norm_o_flat;
+  logic signed [31:0]       sm_init_acc0 [D];
+  logic signed [31:0]       sm_init_acc1 [D];
+  logic signed [31:0]       score_issue_shifted0;
+  logic signed [31:0]       score_issue_shifted1;
+  logic signed [15:0]       score_scaled0;
+  logic signed [15:0]       score_scaled1;
+  logic signed [15:0]       score_issue_q8_8_0;
+  logic signed [15:0]       score_issue_q8_8_1;
 
   always_comb begin
-    m_old0 = row_m[comp_qpair];
-    m_old1 = (comp_qpair + 1 < TQ) ? row_m[comp_qpair + 1] : i_neg_large_q8_8;
-    comp_row1_valid = (comp_qpair + 1 < TQ);
+    int row0_idx;
+    int row1_idx;
+    row0_idx = comp_batch_base + qk_issue_slot * ROW_PAR;
+    row1_idx = row0_idx + 1;
+    qk_issue_row0 = row0_idx[$clog2(TQ)-1:0];
+    qk_issue_row1_valid = (row1_idx < TQ);
+    row0_idx = comp_batch_base + score_issue_slot * ROW_PAR;
+    row1_idx = row0_idx + 1;
+    score_issue_row0 = row0_idx[$clog2(TQ)-1:0];
+    sm_row_start = (score_issue_kj == '0);
+    sm_row_end = (score_issue_kj == TK - 1);
     for (int k = 0; k < D; k++) begin
-      dp_q_row0[k] = q_buf[comp_qpair][k];
-      dp_q_row1[k] = comp_row1_valid ? q_buf[comp_qpair + 1][k] : 16'sd0;
-      dp_k_row[k] = active_bank ? k_buf1[comp_kj][k] : k_buf0[comp_kj][k];
-      sm_acc_old0[k] = row_acc[comp_qpair][k];
-      sm_acc_old1[k] = comp_row1_valid ? row_acc[comp_qpair + 1][k] : 64'sd0;
-      sm_v_row[k] = active_bank ? v_buf1[comp_kj][k] : v_buf0[comp_kj][k];
+      dp_q_row0[k] = q_buf[qk_issue_row0][k];
+      dp_q_row1[k] = qk_issue_row1_valid ? q_buf[qk_issue_row0 + 1][k] : 16'sd0;
+      dp_k_row[k] = active_bank ? k_buf1[qk_issue_kj][k] : k_buf0[qk_issue_kj][k];
+      sm_v_row[k] = active_bank ? v_buf1[score_issue_kj][k] : v_buf0[score_issue_kj][k];
+      sm_init_acc0[k] = row_acc[score_issue_row0][k][31:0];
+      sm_init_acc1[k] = score_issue_row1_valid ? row_acc[score_issue_row0 + 1][k][31:0] : 32'sd0;
+    end
+    for (int lane = 0; lane < DP_LANES; lane++) begin
+      int d_idx;
+      d_idx = qk_issue_chunk * DP_LANES + lane;
+      if (d_idx < D) begin
+        dp_q0_chunk_flat[lane*16 +: 16] = dp_q_row0[d_idx];
+        dp_q1_chunk_flat[lane*16 +: 16] = dp_q_row1[d_idx];
+        dp_k_chunk_flat[lane*16 +: 16] = dp_k_row[d_idx];
+      end else begin
+        dp_q0_chunk_flat[lane*16 +: 16] = 16'sd0;
+        dp_q1_chunk_flat[lane*16 +: 16] = 16'sd0;
+        dp_k_chunk_flat[lane*16 +: 16] = 16'sd0;
+      end
     end
     for (int lane = 0; lane < NORM_LANES; lane++) begin
       if ((norm_d + lane) < D)
-        norm_acc_chunk[lane] = row_acc[norm_qi][norm_d + lane];
+        norm_acc_chunk[lane] = row_acc[norm_qi][norm_d + lane] <<< 8;
       else
         norm_acc_chunk[lane] = 64'sd0;
+      norm_acc_flat[lane*64 +: 64] = norm_acc_chunk[lane];
+      norm_o_chunk[lane] = $signed(norm_o_flat[lane*16 +: 16]);
     end
+    qk_pipe_busy = 1'b0;
+    for (int st = 0; st < QK_LAT; st++)
+      qk_pipe_busy |= qk_tag_valid[st];
+    batch_done_next = batch_done_mask;
+    if (sm_row0_valid && sm_row0_done)
+      batch_done_next[sm_row0_ctx_id] = 1'b1;
+    batch_all_done = &batch_done_next;
   end
 
+  assign qk_issue_valid = (cs == C_DP_RUN) && !qk_issue_done;
+  assign sm_issue_valid0 = score_issue_valid;
+  assign sm_issue_valid1 = score_issue_valid && score_issue_row1_valid;
+  assign score_issue_fire = score_issue_valid;
+
   fa_qk_dotprod_slice #(
-    .D(D),
-    .DP_LANES(DP_LANES)
+    .LANES(DP_LANES)
   ) u_qk_dotprod_slice (
-    .i_q_row0(dp_q_row0),
-    .i_q_row1(dp_q_row1),
-    .i_row1_valid(comp_row1_valid),
-    .i_k_row(dp_k_row),
-    .i_chunk_idx(comp_d),
+    .clk(clk),
+    .rst_n(rst_n),
+    .i_valid(qk_issue_valid),
+    .i_row1_valid(qk_issue_row1_valid),
+    .i_q0_chunk_q8_8(dp_q0_chunk_flat),
+    .i_q1_chunk_q8_8(dp_q1_chunk_flat),
+    .i_k_chunk_q8_8(dp_k_chunk_flat),
+    .o_valid(dp_partial_valid),
     .o_partial_sum0(dp_partial_sum0),
     .o_partial_sum1(dp_partial_sum1)
   );
 
-  // Scale mul: dp_acc -> score
-  // Extract Q8.8 from 40-bit accumulator (which is in Q16.16 after multiply)
-  // dp_acc is sum of (Q8.8 * Q8.8) = Q16.16, so shift >>8 gives Q8.8
-  logic signed [15:0] dp_to_q8_8_0;
-  logic signed [15:0] dp_to_q8_8_1;
-  logic signed [31:0] dp_shifted0;
-  logic signed [31:0] dp_shifted1;
+  // Scale mul: score issue datapath
   always_comb begin
-    dp_shifted0 = dp_acc0[39:8]; // Q8.8 portion (with extra precision)
-    dp_shifted1 = dp_acc1[39:8]; // Q8.8 portion (with extra precision)
+    score_issue_shifted0 = score_issue_dp0[39:8];
+    score_issue_shifted1 = score_issue_dp1[39:8];
+    score_issue_q8_8_0 = score_scaled0;
+    score_issue_q8_8_1 = score_scaled1;
+    if (score_issue_valid && i_causal_en) begin
+      if ((q_tile_idx * TQ + score_issue_row0) < (k_tile_idx * TK + score_issue_kj))
+        score_issue_q8_8_0 = i_neg_large_q8_8;
+      if (score_issue_row1_valid && ((q_tile_idx * TQ + score_issue_row0 + 1) < (k_tile_idx * TK + score_issue_kj)))
+        score_issue_q8_8_1 = i_neg_large_q8_8;
+    end
   end
   fa_mul_sat_q8_8 u_score_scale0 (
-    .i_a_q8_8(dp_shifted0[15:0]),
+    .i_a_q8_8(score_issue_shifted0[15:0]),
     .i_b_q8_8(i_scale_q8_8),
-    .o_y_q8_8(dp_to_q8_8_0)
+    .o_y_q8_8(score_scaled0)
   );
   fa_mul_sat_q8_8 u_score_scale1 (
-    .i_a_q8_8(dp_shifted1[15:0]),
+    .i_a_q8_8(score_issue_shifted1[15:0]),
     .i_b_q8_8(i_scale_q8_8),
-    .o_y_q8_8(dp_to_q8_8_1)
+    .o_y_q8_8(score_scaled1)
   );
 
-  fa_online_softmax_pair #(
-    .D(D)
-  ) u_online_softmax_pair (
-    .i_row1_valid(comp_row1_valid),
-    .i_neg_large_q8_8(i_neg_large_q8_8),
-    .i_score0(score_q8_8_0),
-    .i_score1(score_q8_8_1),
-    .i_m_old0(m_old0),
-    .i_m_old1(m_old1),
-    .i_l_old0(row_l[comp_qpair]),
-    .i_l_old1(comp_row1_valid ? row_l[comp_qpair + 1] : 32'd0),
-    .i_acc_old0(sm_acc_old0),
-    .i_acc_old1(sm_acc_old1),
-    .i_v_row(sm_v_row),
-    .o_m_new0(m_new0),
-    .o_m_new1(m_new1),
-    .o_l_new0(l_new_safe0),
-    .o_l_new1(l_new_safe1),
-    .o_exp_old0(exp_old_out0),
-    .o_exp_new0(exp_new_out0),
-    .o_exp_old1(exp_old_out1),
-    .o_exp_new1(exp_new_out1),
-    .o_acc_new0(sm_acc_new0),
-    .o_acc_new1(sm_acc_new1)
-  );
+  generate
+    for (genvar gk = 0; gk < D; gk++) begin : gen_softmax_ctx
+      if (gk == 0) begin : gen_lane0
+        fa_online_softmax_ctx u_sm_ctx_row0 (
+          .clk(clk),
+          .rst_n(rst_n),
+          .i_valid(sm_issue_valid0),
+          .i_row_start(sm_row_start),
+          .i_row_end(sm_row_end),
+          .i_ctx_id(score_issue_slot),
+          .i_init_m_q8_8(row_m[score_issue_row0]),
+          .i_init_l_q16_16(row_l[score_issue_row0]),
+          .i_init_acc_q16_16(sm_init_acc0[gk]),
+          .i_score_q8_8(score_issue_q8_8_0),
+          .i_value_q8_8(sm_v_row[gk]),
+          .o_valid(sm_row0_valid),
+          .o_row_done(sm_row0_done),
+          .o_ctx_id(sm_row0_ctx_id),
+          .o_m_q8_8(sm_row0_m_q8_8),
+          .o_l_q16_16(sm_row0_l_q16_16),
+          .o_acc_q16_16(sm_row0_acc_q16_16[gk])
+        );
+
+        fa_online_softmax_ctx u_sm_ctx_row1 (
+          .clk(clk),
+          .rst_n(rst_n),
+          .i_valid(sm_issue_valid1),
+          .i_row_start(sm_row_start),
+          .i_row_end(sm_row_end),
+          .i_ctx_id(score_issue_slot),
+          .i_init_m_q8_8(row_m[score_issue_row0 + 1]),
+          .i_init_l_q16_16(row_l[score_issue_row0 + 1]),
+          .i_init_acc_q16_16(sm_init_acc1[gk]),
+          .i_score_q8_8(score_issue_q8_8_1),
+          .i_value_q8_8(sm_v_row[gk]),
+          .o_valid(sm_row1_valid),
+          .o_row_done(sm_row1_done),
+          .o_ctx_id(sm_row1_ctx_id),
+          .o_m_q8_8(sm_row1_m_q8_8),
+          .o_l_q16_16(sm_row1_l_q16_16),
+          .o_acc_q16_16(sm_row1_acc_q16_16[gk])
+        );
+      end else begin : gen_laneN
+        fa_online_softmax_ctx u_sm_ctx_row0 (
+          .clk(clk),
+          .rst_n(rst_n),
+          .i_valid(sm_issue_valid0),
+          .i_row_start(sm_row_start),
+          .i_row_end(sm_row_end),
+          .i_ctx_id(score_issue_slot),
+          .i_init_m_q8_8(row_m[score_issue_row0]),
+          .i_init_l_q16_16(row_l[score_issue_row0]),
+          .i_init_acc_q16_16(sm_init_acc0[gk]),
+          .i_score_q8_8(score_issue_q8_8_0),
+          .i_value_q8_8(sm_v_row[gk]),
+          .o_valid(),
+          .o_row_done(),
+          .o_ctx_id(),
+          .o_m_q8_8(),
+          .o_l_q16_16(),
+          .o_acc_q16_16(sm_row0_acc_q16_16[gk])
+        );
+
+        fa_online_softmax_ctx u_sm_ctx_row1 (
+          .clk(clk),
+          .rst_n(rst_n),
+          .i_valid(sm_issue_valid1),
+          .i_row_start(sm_row_start),
+          .i_row_end(sm_row_end),
+          .i_ctx_id(score_issue_slot),
+          .i_init_m_q8_8(row_m[score_issue_row0 + 1]),
+          .i_init_l_q16_16(row_l[score_issue_row0 + 1]),
+          .i_init_acc_q16_16(sm_init_acc1[gk]),
+          .i_score_q8_8(score_issue_q8_8_1),
+          .i_value_q8_8(sm_v_row[gk]),
+          .o_valid(),
+          .o_row_done(),
+          .o_ctx_id(),
+          .o_m_q8_8(),
+          .o_l_q16_16(),
+          .o_acc_q16_16(sm_row1_acc_q16_16[gk])
+        );
+      end
+    end
+  endgenerate
 
   fa_recip_nr_q16_16 u_norm_recip (
     .clk(clk),
@@ -1162,101 +1839,169 @@ module fa_attention_core #(
   );
 
   fa_o_normalize_block #(
-    .NORM_LANES(NORM_LANES)
+    .LANES(NORM_LANES)
   ) u_o_normalize_block (
+    .clk(clk),
+    .rst_n(rst_n),
+    .i_valid(ms == S_NORMALIZE && norm_row_ready && !norm_issue_done),
     .i_den_zero(norm_row_den_zero),
     .i_recip_q16_16(norm_row_recip),
-    .i_acc(norm_acc_chunk),
-    .o_data(norm_o_chunk)
+    .i_acc_flat(norm_acc_flat),
+    .o_valid(norm_chunk_valid),
+    .o_data_flat(norm_o_flat)
   );
 
   // ---- Inner compute FSM ----
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       cs        <= C_IDLE;
-      comp_qpair <= '0;
-      comp_kj   <= '0;
-      comp_d    <= '0;
-      dp_acc0   <= '0;
-      dp_acc1   <= '0;
+      comp_batch_base <= '0;
+      qk_issue_slot <= '0;
+      qk_issue_kj <= '0;
+      qk_issue_chunk <= '0;
+      qk_issue_done <= 1'b0;
+      batch_done_mask <= '0;
+      score_issue_valid <= 1'b0;
+      score_issue_slot <= '0;
+      score_issue_kj <= '0;
+      score_issue_row1_valid <= 1'b0;
+      score_issue_dp0 <= '0;
+      score_issue_dp1 <= '0;
+      ret_first_valid <= 1'b0;
+      ret_first_slot <= '0;
+      ret_first_kj <= '0;
+      ret_first_row1_valid <= 1'b0;
+      ret_first_sum0 <= '0;
+      ret_first_sum1 <= '0;
+      perf_cs_dp_run <= 1'b0;
+      perf_cs_score_done <= 1'b0;
+      perf_cs_softmax_prep <= 1'b0;
+      for (int st = 0; st < QK_LAT; st++) begin
+        qk_tag_valid[st] <= 1'b0;
+        qk_tag_slot[st] <= '0;
+        qk_tag_kj[st] <= '0;
+        qk_tag_chunk_last[st] <= 1'b0;
+        qk_tag_row1_valid[st] <= 1'b0;
+      end
       comp_done <= 1'b0;
-      score_q8_8_0 <= '0;
-      score_q8_8_1 <= '0;
     end else begin
       comp_done <= 1'b0;
+      score_issue_valid <= 1'b0;
+      perf_cs_dp_run <= 1'b0;
+      perf_cs_score_done <= 1'b0;
+      perf_cs_softmax_prep <= 1'b0;
 
       case (cs)
         C_IDLE: begin
           if (comp_start) begin
-            comp_qpair <= '0;
-            comp_kj <= '0;
-            dp_acc0 <= '0;
-            dp_acc1 <= '0;
-            comp_d <= '0;
+            comp_batch_base <= '0;
+            qk_issue_slot <= '0;
+            qk_issue_kj <= '0;
+            qk_issue_chunk <= '0;
+            qk_issue_done <= 1'b0;
+            batch_done_mask <= '0;
+            ret_first_valid <= 1'b0;
+            for (int st = 0; st < QK_LAT; st++)
+              qk_tag_valid[st] <= 1'b0;
             cs      <= C_DP_RUN;
           end
         end
 
         C_DP_RUN: begin
-          dp_acc0 <= dp_acc0 + dp_partial_sum0;
-          dp_acc1 <= dp_acc1 + dp_partial_sum1;
-          if (comp_d == DP_CHUNKS - 1)
-            cs <= C_SCORE_DONE;
-          else
-            comp_d <= comp_d + 1'b1;
-        end
+          perf_cs_dp_run <= qk_issue_valid || qk_pipe_busy || ret_first_valid;
 
-        C_SCORE_DONE: begin
-          // Apply scale
-          score_q8_8_0 <= dp_to_q8_8_0;
-          score_q8_8_1 <= dp_to_q8_8_1;
-          // Apply causal mask
-          if (i_causal_en) begin
-            if ((q_tile_idx * TQ + comp_qpair) < (k_tile_idx * TK + comp_kj))
-              score_q8_8_0 <= i_neg_large_q8_8;
-            else
-              score_q8_8_0 <= dp_to_q8_8_0;
-
-            if ((comp_qpair + 1 < TQ) && ((q_tile_idx * TQ + comp_qpair + 1) < (k_tile_idx * TK + comp_kj)))
-              score_q8_8_1 <= i_neg_large_q8_8;
-            else
-              score_q8_8_1 <= dp_to_q8_8_1;
+          for (int st = QK_LAT-1; st > 0; st--) begin
+            qk_tag_valid[st] <= qk_tag_valid[st-1];
+            qk_tag_slot[st] <= qk_tag_slot[st-1];
+            qk_tag_kj[st] <= qk_tag_kj[st-1];
+            qk_tag_chunk_last[st] <= qk_tag_chunk_last[st-1];
+            qk_tag_row1_valid[st] <= qk_tag_row1_valid[st-1];
           end
-          cs <= C_SOFTMAX_PREP;
-        end
+          qk_tag_valid[0] <= qk_issue_valid;
+          qk_tag_slot[0] <= qk_issue_slot;
+          qk_tag_kj[0] <= qk_issue_kj;
+          qk_tag_chunk_last[0] <= (qk_issue_chunk == DP_CHUNKS - 1);
+          qk_tag_row1_valid[0] <= qk_issue_row1_valid;
 
-        C_SOFTMAX_PREP: begin
-          // Update row context: m, l
-          row_m[comp_qpair] <= m_new0;
-          row_l[comp_qpair] <= l_new_safe0;
-          if (comp_qpair + 1 < TQ) begin
-            row_m[comp_qpair + 1] <= m_new1;
-            row_l[comp_qpair + 1] <= l_new_safe1;
+          if (!qk_issue_done) begin
+            if (qk_issue_chunk == DP_CHUNKS - 1) begin
+              qk_issue_chunk <= '0;
+              if (qk_issue_slot == SOFTMAX_CTXS - 1) begin
+                qk_issue_slot <= '0;
+                if (qk_issue_kj == TK - 1)
+                  qk_issue_done <= 1'b1;
+                else
+                  qk_issue_kj <= qk_issue_kj + 1'b1;
+              end else begin
+                qk_issue_slot <= qk_issue_slot + 1'b1;
+              end
+            end else begin
+              qk_issue_chunk <= qk_issue_chunk + 1'b1;
+            end
           end
 
-          for (int k = 0; k < D; k++) begin
-            row_acc[comp_qpair][k] <= sm_acc_new0[k];
-            if (comp_qpair + 1 < TQ)
-              row_acc[comp_qpair + 1][k] <= sm_acc_new1[k];
+          if (dp_partial_valid) begin
+            if (qk_tag_chunk_last[QK_LAT-1] && !ret_first_valid) begin
+              score_issue_valid <= 1'b1;
+              score_issue_slot <= qk_tag_slot[QK_LAT-1];
+              score_issue_kj <= qk_tag_kj[QK_LAT-1];
+              score_issue_row1_valid <= qk_tag_row1_valid[QK_LAT-1];
+              score_issue_dp0 <= dp_partial_sum0;
+              score_issue_dp1 <= dp_partial_sum1;
+              perf_cs_score_done <= 1'b1;
+              perf_cs_softmax_prep <= 1'b1;
+            end else if (!ret_first_valid) begin
+              ret_first_valid <= 1'b1;
+              ret_first_slot <= qk_tag_slot[QK_LAT-1];
+              ret_first_kj <= qk_tag_kj[QK_LAT-1];
+              ret_first_row1_valid <= qk_tag_row1_valid[QK_LAT-1];
+              ret_first_sum0 <= dp_partial_sum0;
+              ret_first_sum1 <= dp_partial_sum1;
+            end else begin
+              ret_first_valid <= 1'b0;
+              score_issue_valid <= 1'b1;
+              score_issue_slot <= ret_first_slot;
+              score_issue_kj <= ret_first_kj;
+              score_issue_row1_valid <= ret_first_row1_valid;
+              score_issue_dp0 <= ret_first_sum0 + dp_partial_sum0;
+              score_issue_dp1 <= ret_first_sum1 + dp_partial_sum1;
+              perf_cs_score_done <= 1'b1;
+              perf_cs_softmax_prep <= 1'b1;
+            end
           end
 
-          if (comp_kj == TK - 1) begin
-            if (comp_qpair >= TQ - ROW_PAR) begin
+          if (sm_row0_valid && sm_row0_done) begin
+            row_m[comp_batch_base + sm_row0_ctx_id * ROW_PAR] <= sm_row0_m_q8_8;
+            row_l[comp_batch_base + sm_row0_ctx_id * ROW_PAR] <= sm_row0_l_q16_16;
+            for (int k = 0; k < D; k++)
+              row_acc[comp_batch_base + sm_row0_ctx_id * ROW_PAR][k] <= {{32{sm_row0_acc_q16_16[k][31]}}, sm_row0_acc_q16_16[k]};
+          end
+
+          if (sm_row1_valid && sm_row1_done) begin
+            row_m[comp_batch_base + sm_row1_ctx_id * ROW_PAR + 1] <= sm_row1_m_q8_8;
+            row_l[comp_batch_base + sm_row1_ctx_id * ROW_PAR + 1] <= sm_row1_l_q16_16;
+            for (int k = 0; k < D; k++)
+              row_acc[comp_batch_base + sm_row1_ctx_id * ROW_PAR + 1][k] <= {{32{sm_row1_acc_q16_16[k][31]}}, sm_row1_acc_q16_16[k]};
+          end
+
+          batch_done_mask <= batch_done_next;
+          if (&batch_done_next) begin
+            if ((comp_batch_base + QPAIR_BATCH_ROWS) >= TQ) begin
               cs <= C_DONE;
             end else begin
-              comp_qpair <= comp_qpair + ROW_PAR;
-              comp_kj <= '0;
-              dp_acc0 <= '0;
-              dp_acc1 <= '0;
-              comp_d <= '0;
-              cs      <= C_DP_RUN;
+              comp_batch_base <= comp_batch_base + QPAIR_BATCH_ROWS;
+              qk_issue_slot <= '0;
+              qk_issue_kj <= '0;
+              qk_issue_chunk <= '0;
+              qk_issue_done <= 1'b0;
+              batch_done_mask <= '0;
+              ret_first_valid <= 1'b0;
+              score_issue_valid <= 1'b0;
+              perf_cs_score_done <= 1'b0;
+              perf_cs_softmax_prep <= 1'b0;
+              for (int st = 0; st < QK_LAT; st++)
+                qk_tag_valid[st] <= 1'b0;
             end
-          end else begin
-            comp_kj <= comp_kj + 1'b1;
-            dp_acc0 <= '0;
-            dp_acc1 <= '0;
-            comp_d <= '0;
-            cs      <= C_DP_RUN;
           end
         end
 
@@ -1285,11 +2030,13 @@ module fa_attention_core #(
       pf_fill_cnt   <= '0;
       norm_qi       <= '0;
       norm_d        <= '0;
+      norm_recv_d   <= '0;
       norm_recip_in_valid <= 1'b0;
       norm_recip_pending  <= 1'b0;
       norm_row_ready      <= 1'b0;
       norm_row_den_zero   <= 1'b0;
       norm_row_recip      <= 32'd0;
+      norm_issue_done     <= 1'b0;
       o_write_cnt   <= '0;
       o_busy        <= 1'b0;
       o_done        <= 1'b0;
@@ -1513,10 +2260,12 @@ module fa_attention_core #(
               ms                <= S_NORMALIZE;
               norm_qi           <= '0;
               norm_d            <= '0;
+              norm_recv_d       <= '0;
               norm_recip_pending <= 1'b0;
               norm_row_ready     <= 1'b0;
               norm_row_den_zero  <= 1'b0;
               norm_row_recip     <= 32'd0;
+              norm_issue_done    <= 1'b0;
             end else if (pf_state == PF_DONE) begin
               k_tile_idx  <= k_tile_idx + 1'b1;
               active_bank <= pref_target_bank;
@@ -1541,6 +2290,9 @@ module fa_attention_core #(
                 norm_row_den_zero <= 1'b1;
                 norm_row_ready    <= 1'b1;
                 norm_row_recip    <= 32'd0;
+                norm_d            <= '0;
+                norm_recv_d       <= '0;
+                norm_issue_done   <= 1'b0;
               end else begin
                 norm_recip_in_valid <= 1'b1;
                 norm_recip_pending  <= 1'b1;
@@ -1550,28 +2302,42 @@ module fa_attention_core #(
               norm_recip_pending <= 1'b0;
               norm_row_ready     <= 1'b1;
               norm_row_recip     <= norm_recip_out_q16_16;
+              norm_d             <= '0;
+              norm_recv_d        <= '0;
+              norm_issue_done    <= 1'b0;
             end
           end else begin
-            for (int lane = 0; lane < NORM_LANES; lane++) begin
-              int d_idx;
-              d_idx = norm_d + lane;
-              if (d_idx < D)
-                o_buf[norm_qi][d_idx] <= norm_o_chunk[lane];
+            if (!norm_issue_done) begin
+              if (norm_d == (D - NORM_LANES))
+                norm_issue_done <= 1'b1;
+              else
+                norm_d <= norm_d + NORM_LANES;
             end
 
-            if ((norm_d + NORM_LANES) >= D) begin
-              norm_d            <= '0;
-              norm_row_ready    <= 1'b0;
-              norm_row_den_zero <= 1'b0;
-              norm_row_recip    <= 32'd0;
-              if (norm_qi == TQ - 1) begin
-                ms          <= S_WRITE_O;
-                o_write_cnt <= '0;
-              end else begin
-                norm_qi <= norm_qi + 1'b1;
+            if (norm_chunk_valid) begin
+              for (int lane = 0; lane < NORM_LANES; lane++) begin
+                int d_idx;
+                d_idx = norm_recv_d + lane;
+                if (d_idx < D)
+                  o_buf[norm_qi][d_idx] <= norm_o_chunk[lane];
               end
-            end else begin
-              norm_d <= norm_d + NORM_LANES;
+
+              if (norm_recv_d == (D - NORM_LANES)) begin
+                norm_d            <= '0;
+                norm_recv_d       <= '0;
+                norm_row_ready    <= 1'b0;
+                norm_row_den_zero <= 1'b0;
+                norm_row_recip    <= 32'd0;
+                norm_issue_done   <= 1'b0;
+                if (norm_qi == TQ - 1) begin
+                  ms          <= S_WRITE_O;
+                  o_write_cnt <= '0;
+                end else begin
+                  norm_qi <= norm_qi + 1'b1;
+                end
+              end else begin
+                norm_recv_d <= norm_recv_d + NORM_LANES;
+              end
             end
           end
         end
@@ -1641,19 +2407,18 @@ module fa_attention_core #(
   assign o_perf_ms_write_o       = (ms == S_WRITE_O);
   assign o_perf_ms_next_q        = (ms == S_NEXT_Q);
 
-  assign o_perf_cs_dp_run        = (cs == C_DP_RUN);
-  assign o_perf_cs_score_done    = (cs == C_SCORE_DONE);
-  assign o_perf_cs_softmax_prep  = (cs == C_SOFTMAX_PREP);
+  assign o_perf_cs_dp_run        = perf_cs_dp_run;
+  assign o_perf_cs_score_done    = perf_cs_score_done;
+  assign o_perf_cs_softmax_prep  = perf_cs_softmax_prep;
   assign o_perf_comp_launch      = comp_start;
   assign o_perf_norm_recip_req   = norm_recip_in_valid;
   assign o_perf_norm_recip_rsp   = norm_recip_out_valid;
 
   always_comb begin
-    if (ms == S_COMPUTE) begin
-      if ((comp_qpair + 1) < TQ)
-        o_perf_active_rows = 2'd2;
-      else
-        o_perf_active_rows = 2'd1;
+    if (score_issue_valid) begin
+      o_perf_active_rows = score_issue_row1_valid ? 2'd2 : 2'd1;
+    end else if (ms == S_COMPUTE) begin
+      o_perf_active_rows = qk_issue_row1_valid ? 2'd2 : 2'd1;
     end else begin
       o_perf_active_rows = 2'd0;
     end
@@ -1666,28 +2431,50 @@ endmodule
 module fa_online_softmax_pair #(
   parameter int D = 64
 ) (
-  input  logic                     i_row1_valid,
-  input  logic signed [15:0]       i_neg_large_q8_8,
-  input  logic signed [15:0]       i_score0,
-  input  logic signed [15:0]       i_score1,
-  input  logic signed [15:0]       i_m_old0,
-  input  logic signed [15:0]       i_m_old1,
-  input  logic [31:0]              i_l_old0,
-  input  logic [31:0]              i_l_old1,
-  input  logic signed [63:0]       i_acc_old0 [D],
-  input  logic signed [63:0]       i_acc_old1 [D],
-  input  logic signed [15:0]       i_v_row [D],
-  output logic signed [15:0]       o_m_new0,
-  output logic signed [15:0]       o_m_new1,
-  output logic [31:0]              o_l_new0,
-  output logic [31:0]              o_l_new1,
-  output logic [15:0]              o_exp_old0,
-  output logic [15:0]              o_exp_new0,
-  output logic [15:0]              o_exp_old1,
-  output logic [15:0]              o_exp_new1,
-  output logic signed [63:0]       o_acc_new0 [D],
-  output logic signed [63:0]       o_acc_new1 [D]
+  i_row1_valid,
+  i_neg_large_q8_8,
+  i_score0,
+  i_score1,
+  i_m_old0,
+  i_m_old1,
+  i_l_old0,
+  i_l_old1,
+  i_acc_old0_flat,
+  i_acc_old1_flat,
+  i_v_row_flat,
+  o_m_new0,
+  o_m_new1,
+  o_l_new0,
+  o_l_new1,
+  o_exp_old0,
+  o_exp_new0,
+  o_exp_old1,
+  o_exp_new1,
+  o_acc_new0_flat,
+  o_acc_new1_flat
 );
+
+  input  logic                     i_row1_valid;
+  input  logic signed [15:0]       i_neg_large_q8_8;
+  input  logic signed [15:0]       i_score0;
+  input  logic signed [15:0]       i_score1;
+  input  logic signed [15:0]       i_m_old0;
+  input  logic signed [15:0]       i_m_old1;
+  input  logic [31:0]              i_l_old0;
+  input  logic [31:0]              i_l_old1;
+  input  logic [D*64-1:0]          i_acc_old0_flat;
+  input  logic [D*64-1:0]          i_acc_old1_flat;
+  input  logic [D*16-1:0]          i_v_row_flat;
+  output logic signed [15:0]       o_m_new0;
+  output logic signed [15:0]       o_m_new1;
+  output logic [31:0]              o_l_new0;
+  output logic [31:0]              o_l_new1;
+  output logic [15:0]              o_exp_old0;
+  output logic [15:0]              o_exp_new0;
+  output logic [15:0]              o_exp_old1;
+  output logic [15:0]              o_exp_new1;
+  output logic [D*64-1:0]          o_acc_new0_flat;
+  output logic [D*64-1:0]          o_acc_new1_flat;
 
   logic signed [15:0] exp_diff_old_in0, exp_diff_new_in0;
   logic signed [15:0] exp_diff_old_in1, exp_diff_new_in1;
@@ -1699,6 +2486,20 @@ module fa_online_softmax_pair #(
   logic [31:0]        l_term1;
   logic [31:0]        l_new_val0;
   logic [31:0]        l_new_val1;
+
+  function automatic logic signed [63:0] lane64(
+    input logic [D*64-1:0] vec,
+    input int              idx
+  );
+    lane64 = $signed(vec[idx*64 +: 64]);
+  endfunction
+
+  function automatic logic signed [15:0] lane16(
+    input logic [D*16-1:0] vec,
+    input int              idx
+  );
+    lane16 = $signed(vec[idx*16 +: 16]);
+  endfunction
 
   fa_exp_pwl_8seg_q1_15 u_exp_old0 (.i_x_q8_8(exp_diff_old_in0), .o_exp_q1_15(o_exp_old0));
   fa_exp_pwl_8seg_q1_15 u_exp_new0 (.i_x_q8_8(exp_diff_new_in0), .o_exp_q1_15(o_exp_new0));
@@ -1749,20 +2550,20 @@ module fa_online_softmax_pair #(
       logic signed [33:0] pv_mul;
       logic signed [63:0] pv_term;
 
-      acc_sc = i_acc_old0[k] * $signed({1'b0, o_exp_old0});
+      acc_sc = lane64(i_acc_old0_flat, k) * $signed({1'b0, o_exp_old0});
       acc_old_sc = acc_sc[78:15];
-      pv_mul = $signed({1'b0, o_exp_new0}) * i_v_row[k];
+      pv_mul = $signed({1'b0, o_exp_new0}) * lane16(i_v_row_flat, k);
       pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
-      o_acc_new0[k] = acc_old_sc + pv_term;
+      o_acc_new0_flat[k*64 +: 64] = acc_old_sc + pv_term;
 
       if (i_row1_valid) begin
-        acc_sc = i_acc_old1[k] * $signed({1'b0, o_exp_old1});
+        acc_sc = lane64(i_acc_old1_flat, k) * $signed({1'b0, o_exp_old1});
         acc_old_sc = acc_sc[78:15];
-        pv_mul = $signed({1'b0, o_exp_new1}) * i_v_row[k];
+        pv_mul = $signed({1'b0, o_exp_new1}) * lane16(i_v_row_flat, k);
         pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
-        o_acc_new1[k] = acc_old_sc + pv_term;
+        o_acc_new1_flat[k*64 +: 64] = acc_old_sc + pv_term;
       end else begin
-        o_acc_new1[k] = i_acc_old1[k];
+        o_acc_new1_flat[k*64 +: 64] = lane64(i_acc_old1_flat, k);
       end
     end
   end
