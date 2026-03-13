@@ -30,11 +30,13 @@ O_BASE = 0x0030_0000
 
 
 def expected_cycles_mvp(seq_len: int, d: int, tq: int, tk: int) -> int:
+    dot_lanes = int(os.environ.get("CORE_DOT_LANES", "4"))
+    sm_lanes = int(os.environ.get("CORE_SOFTMAX_LANES", "4"))
     num_q_tiles = seq_len // tq
     num_k_tiles = seq_len // tk
     beats_q = (tq * d) // ELEMS_PER_BEAT
     beats_kv = (tk * d) // ELEMS_PER_BEAT
-    cycles_per_pair = 2 * d + 2
+    cycles_per_pair = math.ceil(d / dot_lanes) + math.ceil(d / sm_lanes)
     cycles_per_q_tile = (
         (beats_q + 1)
         + 1
@@ -223,6 +225,9 @@ async def run_case(dut, causal: bool, seed: int) -> None:
         "comp_launch": 0,
         "norm_recip_req": 0,
         "norm_recip_rsp": 0,
+        "lane_idle": 0,
+        "ctx_wait": 0,
+        "tile_switch_bubbles": 0,
     }
     for _ in range(timeout_cycles):
         await RisingEdge(dut.clk)
@@ -241,6 +246,9 @@ async def run_case(dut, causal: bool, seed: int) -> None:
             perf["comp_launch"] += int(dut.o_perf_comp_launch.value)
             perf["norm_recip_req"] += int(dut.o_perf_norm_recip_req.value)
             perf["norm_recip_rsp"] += int(dut.o_perf_norm_recip_rsp.value)
+            perf["lane_idle"] += int(dut.o_perf_lane_idle.value)
+            perf["ctx_wait"] += int(dut.o_perf_ctx_wait.value)
+            perf["tile_switch_bubbles"] += int(dut.o_perf_tile_switch_bubbles.value)
         if int(dut.o_done.value):
             break
     else:
@@ -321,6 +329,10 @@ async def run_case(dut, causal: bool, seed: int) -> None:
         "perf compute: "
         f"dp_run={perf['dp_run']} score_done={perf['score_done']} softmax_prep={perf['softmax_prep']} "
         f"comp_launch={perf['comp_launch']} recip_req={perf['norm_recip_req']} recip_rsp={perf['norm_recip_rsp']}"
+    )
+    dut._log.info(
+        "perf fine: "
+        f"lane_idle={perf['lane_idle']} ctx_wait={perf['ctx_wait']} tile_switch_bubbles={perf['tile_switch_bubbles']}"
     )
 
     assert int(dut.o_error.value) == 0

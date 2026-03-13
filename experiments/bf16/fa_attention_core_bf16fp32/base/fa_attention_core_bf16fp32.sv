@@ -51,7 +51,10 @@ module fa_attention_core_bf16fp32 #(
   output logic                     o_perf_comp_launch,
   output logic [1:0]               o_perf_active_rows,
   output logic                     o_perf_norm_recip_req,
-  output logic                     o_perf_norm_recip_rsp
+  output logic                     o_perf_norm_recip_rsp,
+  output logic                     o_perf_lane_idle,
+  output logic                     o_perf_ctx_wait,
+  output logic                     o_perf_tile_switch_bubbles
 );
   localparam int NUM_Q_TILES = SEQ_LEN / TQ;
   localparam int NUM_K_TILES = SEQ_LEN / TK;
@@ -102,14 +105,40 @@ module fa_attention_core_bf16fp32 #(
   logic [31:0] score_curr_reg;
   logic [31:0] exp_old_reg;
   logic [31:0] exp_new_reg;
+  logic [31:0] exp_old_use;
+  logic [31:0] exp_new_use;
 
-  logic [15:0] q_cur_bf16;
-  logic [15:0] k_cur_bf16;
-  logic [15:0] v_cur_bf16;
-  logic [31:0] q_cur_fp32;
-  logic [31:0] k_cur_fp32;
-  logic [31:0] v_cur_fp32;
-  logic [31:0] prod_fp32;
+  logic [15:0] q_cur_bf16_0;
+  logic [15:0] q_cur_bf16_1;
+  logic [15:0] q_cur_bf16_2;
+  logic [15:0] q_cur_bf16_3;
+  logic [15:0] k_cur_bf16_0;
+  logic [15:0] k_cur_bf16_1;
+  logic [15:0] k_cur_bf16_2;
+  logic [15:0] k_cur_bf16_3;
+  logic [15:0] v_cur_bf16_0;
+  logic [15:0] v_cur_bf16_1;
+  logic [15:0] v_cur_bf16_2;
+  logic [15:0] v_cur_bf16_3;
+  logic [31:0] q_cur_fp32_0;
+  logic [31:0] q_cur_fp32_1;
+  logic [31:0] q_cur_fp32_2;
+  logic [31:0] q_cur_fp32_3;
+  logic [31:0] k_cur_fp32_0;
+  logic [31:0] k_cur_fp32_1;
+  logic [31:0] k_cur_fp32_2;
+  logic [31:0] k_cur_fp32_3;
+  logic [31:0] v_cur_fp32_0;
+  logic [31:0] v_cur_fp32_1;
+  logic [31:0] v_cur_fp32_2;
+  logic [31:0] v_cur_fp32_3;
+  logic [31:0] prod_fp32_0;
+  logic [31:0] prod_fp32_1;
+  logic [31:0] prod_fp32_2;
+  logic [31:0] prod_fp32_3;
+  logic [31:0] dot_pair_sum01_fp32;
+  logic [31:0] dot_pair_sum23_fp32;
+  logic [31:0] dot_pair_sum_fp32;
   logic [31:0] dot_next_fp32;
   logic [31:0] score_scaled_fp32;
   logic [31:0] score_masked_fp32;
@@ -120,23 +149,81 @@ module fa_attention_core_bf16fp32 #(
   logic [31:0] inv_l_new_fp32;
   logic [31:0] exp_old_fp32;
   logic [31:0] exp_new_fp32;
-  logic [31:0] acc_scaled_fp32;
-  logic [31:0] v_term_fp32;
-  logic [31:0] acc_next_fp32;
+  logic [31:0] acc_scaled_fp32_0;
+  logic [31:0] acc_scaled_fp32_1;
+  logic [31:0] acc_scaled_fp32_2;
+  logic [31:0] acc_scaled_fp32_3;
+  logic [31:0] v_term_fp32_0;
+  logic [31:0] v_term_fp32_1;
+  logic [31:0] v_term_fp32_2;
+  logic [31:0] v_term_fp32_3;
+  logic [31:0] acc_next_fp32_0;
+  logic [31:0] acc_next_fp32_1;
+  logic [31:0] acc_next_fp32_2;
+  logic [31:0] acc_next_fp32_3;
   logic [31:0] norm_out_fp32;
   logic [15:0] norm_out_bf16;
   logic [BUS_W-1:0] wr_pack;
 
-  assign q_cur_bf16 = q_buf[qi][d_idx];
-  assign k_cur_bf16 = k_buf[kj][d_idx];
-  assign v_cur_bf16 = v_buf[kj][d_idx];
+  always_comb begin
+    q_cur_bf16_0 = q_buf[qi][d_idx];
+    k_cur_bf16_0 = k_buf[kj][d_idx];
+    q_cur_bf16_1 = 16'd0;
+    k_cur_bf16_1 = 16'd0;
+    q_cur_bf16_2 = 16'd0;
+    k_cur_bf16_2 = 16'd0;
+    q_cur_bf16_3 = 16'd0;
+    k_cur_bf16_3 = 16'd0;
+    if (({1'b0, d_idx} + 1) < D) begin
+      q_cur_bf16_1 = q_buf[qi][d_idx + 1'b1];
+      k_cur_bf16_1 = k_buf[kj][d_idx + 1'b1];
+    end
+    if (({1'b0, d_idx} + 2) < D) begin
+      q_cur_bf16_2 = q_buf[qi][d_idx + 2];
+      k_cur_bf16_2 = k_buf[kj][d_idx + 2];
+    end
+    if (({1'b0, d_idx} + 3) < D) begin
+      q_cur_bf16_3 = q_buf[qi][d_idx + 3];
+      k_cur_bf16_3 = k_buf[kj][d_idx + 3];
+    end
+  end
+  always_comb begin
+    v_cur_bf16_0 = v_buf[kj][d_idx];
+    v_cur_bf16_1 = 16'd0;
+    v_cur_bf16_2 = 16'd0;
+    v_cur_bf16_3 = 16'd0;
+    if (({1'b0, d_idx} + 1) < D) begin
+      v_cur_bf16_1 = v_buf[kj][d_idx + 1'b1];
+    end
+    if (({1'b0, d_idx} + 2) < D) begin
+      v_cur_bf16_2 = v_buf[kj][d_idx + 2];
+    end
+    if (({1'b0, d_idx} + 3) < D) begin
+      v_cur_bf16_3 = v_buf[kj][d_idx + 3];
+    end
+  end
 
-  fa_bf16_to_fp32 u_q_widen (.i_x_bf16(q_cur_bf16), .o_y_fp32(q_cur_fp32));
-  fa_bf16_to_fp32 u_k_widen (.i_x_bf16(k_cur_bf16), .o_y_fp32(k_cur_fp32));
-  fa_bf16_to_fp32 u_v_widen (.i_x_bf16(v_cur_bf16), .o_y_fp32(v_cur_fp32));
+  fa_bf16_to_fp32 u_q_widen_0 (.i_x_bf16(q_cur_bf16_0), .o_y_fp32(q_cur_fp32_0));
+  fa_bf16_to_fp32 u_q_widen_1 (.i_x_bf16(q_cur_bf16_1), .o_y_fp32(q_cur_fp32_1));
+  fa_bf16_to_fp32 u_q_widen_2 (.i_x_bf16(q_cur_bf16_2), .o_y_fp32(q_cur_fp32_2));
+  fa_bf16_to_fp32 u_q_widen_3 (.i_x_bf16(q_cur_bf16_3), .o_y_fp32(q_cur_fp32_3));
+  fa_bf16_to_fp32 u_k_widen_0 (.i_x_bf16(k_cur_bf16_0), .o_y_fp32(k_cur_fp32_0));
+  fa_bf16_to_fp32 u_k_widen_1 (.i_x_bf16(k_cur_bf16_1), .o_y_fp32(k_cur_fp32_1));
+  fa_bf16_to_fp32 u_k_widen_2 (.i_x_bf16(k_cur_bf16_2), .o_y_fp32(k_cur_fp32_2));
+  fa_bf16_to_fp32 u_k_widen_3 (.i_x_bf16(k_cur_bf16_3), .o_y_fp32(k_cur_fp32_3));
+  fa_bf16_to_fp32 u_v_widen_0 (.i_x_bf16(v_cur_bf16_0), .o_y_fp32(v_cur_fp32_0));
+  fa_bf16_to_fp32 u_v_widen_1 (.i_x_bf16(v_cur_bf16_1), .o_y_fp32(v_cur_fp32_1));
+  fa_bf16_to_fp32 u_v_widen_2 (.i_x_bf16(v_cur_bf16_2), .o_y_fp32(v_cur_fp32_2));
+  fa_bf16_to_fp32 u_v_widen_3 (.i_x_bf16(v_cur_bf16_3), .o_y_fp32(v_cur_fp32_3));
 
-  fa_fp32_mul_q16 u_dot_mul (.i_a_fp32(q_cur_fp32), .i_b_fp32(k_cur_fp32), .o_y_fp32(prod_fp32));
-  fa_fp32_add u_dot_add (.i_a_fp32(score_acc_reg), .i_b_fp32(prod_fp32), .o_y_fp32(dot_next_fp32));
+  fa_fp32_mul_q16 u_dot_mul_0 (.i_a_fp32(q_cur_fp32_0), .i_b_fp32(k_cur_fp32_0), .o_y_fp32(prod_fp32_0));
+  fa_fp32_mul_q16 u_dot_mul_1 (.i_a_fp32(q_cur_fp32_1), .i_b_fp32(k_cur_fp32_1), .o_y_fp32(prod_fp32_1));
+  fa_fp32_mul_q16 u_dot_mul_2 (.i_a_fp32(q_cur_fp32_2), .i_b_fp32(k_cur_fp32_2), .o_y_fp32(prod_fp32_2));
+  fa_fp32_mul_q16 u_dot_mul_3 (.i_a_fp32(q_cur_fp32_3), .i_b_fp32(k_cur_fp32_3), .o_y_fp32(prod_fp32_3));
+  fa_fp32_add u_dot_pair_add01 (.i_a_fp32(prod_fp32_0), .i_b_fp32(prod_fp32_1), .o_y_fp32(dot_pair_sum01_fp32));
+  fa_fp32_add u_dot_pair_add23 (.i_a_fp32(prod_fp32_2), .i_b_fp32(prod_fp32_3), .o_y_fp32(dot_pair_sum23_fp32));
+  fa_fp32_add u_dot_pair_add (.i_a_fp32(dot_pair_sum01_fp32), .i_b_fp32(dot_pair_sum23_fp32), .o_y_fp32(dot_pair_sum_fp32));
+  fa_fp32_add u_dot_add (.i_a_fp32(score_acc_reg), .i_b_fp32(dot_pair_sum_fp32), .o_y_fp32(dot_next_fp32));
   fa_fp32_mul_q16 u_score_scale (.i_a_fp32(score_curr_reg), .i_b_fp32(i_scale_fp32), .o_y_fp32(score_scaled_fp32));
 
   assign score_masked_fp32 = (i_causal_en && ((q_tile_idx * TQ + qi) < (k_tile_idx * TK + kj))) ? i_neg_large_fp32 : score_scaled_fp32;
@@ -158,12 +245,48 @@ module fa_attention_core_bf16fp32 #(
     .o_exp_new_fp32(exp_new_fp32)
   );
 
-  fa_fp32_mul_q16 u_acc_scale (.i_a_fp32(row_acc[qi][d_idx]), .i_b_fp32(exp_old_reg), .o_y_fp32(acc_scaled_fp32));
-  fa_fp32_mul_q16 u_v_term (.i_a_fp32(v_cur_fp32), .i_b_fp32(exp_new_reg), .o_y_fp32(v_term_fp32));
-  fa_fp32_add u_acc_add (
-    .i_a_fp32(((k_tile_idx == 0) && (kj == 0)) ? 32'd0 : acc_scaled_fp32),
-    .i_b_fp32(v_term_fp32),
-    .o_y_fp32(acc_next_fp32)
+  assign exp_old_use = (ms == S_SCORE_APPLY) ? exp_old_fp32 : exp_old_reg;
+  assign exp_new_use = (ms == S_SCORE_APPLY) ? exp_new_fp32 : exp_new_reg;
+
+  fa_fp32_mul_q16 u_acc_scale_0 (.i_a_fp32(row_acc[qi][d_idx]), .i_b_fp32(exp_old_use), .o_y_fp32(acc_scaled_fp32_0));
+  fa_fp32_mul_q16 u_acc_scale_1 (
+    .i_a_fp32((((({1'b0, d_idx} + 1) < D)) ? row_acc[qi][d_idx + 1'b1] : 32'd0)),
+    .i_b_fp32(exp_old_use),
+    .o_y_fp32(acc_scaled_fp32_1)
+  );
+  fa_fp32_mul_q16 u_acc_scale_2 (
+    .i_a_fp32((((({1'b0, d_idx} + 2) < D)) ? row_acc[qi][d_idx + 2] : 32'd0)),
+    .i_b_fp32(exp_old_use),
+    .o_y_fp32(acc_scaled_fp32_2)
+  );
+  fa_fp32_mul_q16 u_acc_scale_3 (
+    .i_a_fp32((((({1'b0, d_idx} + 3) < D)) ? row_acc[qi][d_idx + 3] : 32'd0)),
+    .i_b_fp32(exp_old_use),
+    .o_y_fp32(acc_scaled_fp32_3)
+  );
+  fa_fp32_mul_q16 u_v_term_0 (.i_a_fp32(v_cur_fp32_0), .i_b_fp32(exp_new_use), .o_y_fp32(v_term_fp32_0));
+  fa_fp32_mul_q16 u_v_term_1 (.i_a_fp32(v_cur_fp32_1), .i_b_fp32(exp_new_use), .o_y_fp32(v_term_fp32_1));
+  fa_fp32_mul_q16 u_v_term_2 (.i_a_fp32(v_cur_fp32_2), .i_b_fp32(exp_new_use), .o_y_fp32(v_term_fp32_2));
+  fa_fp32_mul_q16 u_v_term_3 (.i_a_fp32(v_cur_fp32_3), .i_b_fp32(exp_new_use), .o_y_fp32(v_term_fp32_3));
+  fa_fp32_add u_acc_add_0 (
+    .i_a_fp32(((k_tile_idx == 0) && (kj == 0)) ? 32'd0 : acc_scaled_fp32_0),
+    .i_b_fp32(v_term_fp32_0),
+    .o_y_fp32(acc_next_fp32_0)
+  );
+  fa_fp32_add u_acc_add_1 (
+    .i_a_fp32(((k_tile_idx == 0) && (kj == 0)) ? 32'd0 : acc_scaled_fp32_1),
+    .i_b_fp32(v_term_fp32_1),
+    .o_y_fp32(acc_next_fp32_1)
+  );
+  fa_fp32_add u_acc_add_2 (
+    .i_a_fp32(((k_tile_idx == 0) && (kj == 0)) ? 32'd0 : acc_scaled_fp32_2),
+    .i_b_fp32(v_term_fp32_2),
+    .o_y_fp32(acc_next_fp32_2)
+  );
+  fa_fp32_add u_acc_add_3 (
+    .i_a_fp32(((k_tile_idx == 0) && (kj == 0)) ? 32'd0 : acc_scaled_fp32_3),
+    .i_b_fp32(v_term_fp32_3),
+    .o_y_fp32(acc_next_fp32_3)
   );
   fa_fp32_mul_q16 u_norm_mul (.i_a_fp32(row_acc[norm_qi][norm_d]), .i_b_fp32(row_inv[norm_qi]), .o_y_fp32(norm_out_fp32));
   fa_fp32_to_bf16 u_norm_downcast (.i_x_fp32(norm_out_fp32), .o_y_bf16(norm_out_bf16));
@@ -187,6 +310,12 @@ module fa_attention_core_bf16fp32 #(
   assign o_perf_active_rows = ((ms == S_SCORE_DOT) || (ms == S_ACC_UPDATE) || (ms == S_NORMALIZE)) ? 2'd1 : 2'd0;
   assign o_perf_norm_recip_req = (ms == S_SCORE_APPLY);
   assign o_perf_norm_recip_rsp = (ms == S_SCORE_APPLY);
+    assign o_perf_lane_idle =
+        ((ms == S_SCORE_DOT) && ((({1'b0, d_idx} + 3) >= D))) ||
+      ((ms == S_ACC_UPDATE) && ((({1'b0, d_idx} + 3) >= D)));
+    assign o_perf_ctx_wait = 1'b0;
+    assign o_perf_tile_switch_bubbles =
+        (ms == S_ACC_UPDATE) && ((({1'b0, d_idx} + 4) >= D)) && (kj == TK - 1) && (qi == TQ - 1) && (k_tile_idx != NUM_K_TILES - 1);
 
   always_comb begin
     dma_rd_cmd_valid = 1'b0;
@@ -329,13 +458,13 @@ module fa_attention_core_bf16fp32 #(
             end
           end
           S_SCORE_DOT: begin
-            score_acc_reg <= (d_idx == 0) ? prod_fp32 : dot_next_fp32;
-            if (d_idx == D - 1) begin
-              score_curr_reg <= (d_idx == 0) ? prod_fp32 : dot_next_fp32;
+            score_acc_reg <= (d_idx == 0) ? dot_pair_sum_fp32 : dot_next_fp32;
+            if (({1'b0, d_idx} + 4) >= D) begin
+              score_curr_reg <= (d_idx == 0) ? dot_pair_sum_fp32 : dot_next_fp32;
               d_idx <= '0;
               ms <= S_SCORE_APPLY;
             end else begin
-              d_idx <= d_idx + 1'b1;
+              d_idx <= d_idx + 4;
             end
           end
           S_SCORE_APPLY: begin
@@ -344,16 +473,74 @@ module fa_attention_core_bf16fp32 #(
             row_inv[qi] <= inv_l_new_fp32;
             exp_old_reg <= exp_old_fp32;
             exp_new_reg <= exp_new_fp32;
-            d_idx <= '0;
-            ms <= S_ACC_UPDATE;
+            row_acc[qi][0] <= acc_next_fp32_0;
+            if (D > 1)
+              row_acc[qi][1] <= acc_next_fp32_1;
+            if (D > 2)
+              row_acc[qi][2] <= acc_next_fp32_2;
+            if (D > 3)
+              row_acc[qi][3] <= acc_next_fp32_3;
+            if (D <= 4) begin
+              d_idx <= '0;
+              score_acc_reg <= 32'd0;
+              if (kj == TK - 1) begin
+                kj <= '0;
+                if (qi == TQ - 1) begin
+                  if (k_tile_idx == NUM_K_TILES - 1) begin
+                    norm_qi <= '0;
+                    norm_d <= '0;
+                    ms <= S_NORMALIZE;
+                  end else begin
+                    k_tile_idx <= k_tile_idx + 1'b1;
+                    kv_fill_cnt <= '0;
+                    ms <= S_LOAD_K;
+                  end
+                end else begin
+                  qi <= qi + 1'b1;
+                  ms <= S_SCORE_DOT;
+                end
+              end else begin
+                kj <= kj + 1'b1;
+                ms <= S_SCORE_DOT;
+              end
+            end else begin
+              d_idx <= 4;
+              ms <= S_ACC_UPDATE;
+            end
           end
           S_ACC_UPDATE: begin
-            row_acc[qi][d_idx] <= acc_next_fp32;
-            if (d_idx == D - 1) begin
+            row_acc[qi][d_idx] <= acc_next_fp32_0;
+            if (({1'b0, d_idx} + 1) < D)
+              row_acc[qi][d_idx + 1'b1] <= acc_next_fp32_1;
+            if (({1'b0, d_idx} + 2) < D)
+              row_acc[qi][d_idx + 2] <= acc_next_fp32_2;
+            if (({1'b0, d_idx} + 3) < D)
+              row_acc[qi][d_idx + 3] <= acc_next_fp32_3;
+            if (({1'b0, d_idx} + 4) >= D) begin
               d_idx <= '0;
-              ms <= S_NEXT_PAIR;
+              score_acc_reg <= 32'd0;
+              if (kj == TK - 1) begin
+                kj <= '0;
+                if (qi == TQ - 1) begin
+                  if (k_tile_idx == NUM_K_TILES - 1) begin
+                    norm_qi <= '0;
+                    norm_d <= '0;
+                    ms <= S_NORMALIZE;
+                  end else begin
+                    k_tile_idx <= k_tile_idx + 1'b1;
+                    kv_fill_cnt <= '0;
+                    ms <= S_LOAD_K;
+                  end
+                end else begin
+                  qi <= qi + 1'b1;
+                  ms <= S_SCORE_DOT;
+                end
+              end else begin
+                kj <= kj + 1'b1;
+                ms <= S_SCORE_DOT;
+              end
             end else begin
-              d_idx <= d_idx + 1'b1;
+              d_idx <= d_idx + 4;
             end
           end
           S_NEXT_PAIR: begin
