@@ -385,9 +385,10 @@ async def test_reg_rw_and_start_busy(dut):
     await RisingEdge(dut.clk)
 
     # CFG register
-    await master.write(REG_CFG, 0x1)
+    await master.write(REG_CFG, 0x3)
     cfg = await master.read(REG_CFG)
     assert (cfg & 0x1) == 0x1, f"CFG causal bit mismatch: {cfg:#x}"
+    assert (cfg & 0x2) == 0x2, f"CFG precision_mode bit mismatch: {cfg:#x}"
 
     # Q base register
     await master.write(REG_Q_BASE_L, 0x12345678)
@@ -441,8 +442,10 @@ async def test_reg_map_defaults_and_permissions(dut):
     assert await master.read(REG_CYCLES) == 0x00000000
 
     # R/W fields
-    await master.write(REG_CFG, 0x1)
-    assert (await master.read(REG_CFG)) & 0x1 == 1
+    await master.write(REG_CFG, 0x3)
+    cfg = await master.read(REG_CFG)
+    assert (cfg & 0x1) == 1
+    assert (cfg & 0x2) == 2
 
     await master.write(REG_Q_BASE_L, 0x11111111)
     await master.write(REG_Q_BASE_H, 0x22222222)

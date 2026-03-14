@@ -12,8 +12,10 @@ from bf16.common.golden_models import (
     attention_bf16_fp32_reference,
     bits_to_f32,
     calc_abs_error_stats,
+    f16x_to_fp32_bits,
     f32_to_bits,
     fp32_to_bf16_bits,
+    fp32_to_fp16_bits,
     online_softmax_fp32_step,
 )
 from bf16.common.cmodel_ref import fp32_add, fp32_mul_q16, fp32_recip
@@ -110,6 +112,13 @@ def rand_bf16(low: float, high: float) -> int:
     return fp32_to_bf16_bits(f32_to_bits(random.uniform(low, high)))
 
 
+def rand_f16x(low: float, high: float, precision_mode: str) -> int:
+    fp32_bits = f32_to_bits(random.uniform(low, high))
+    if precision_mode == "fp16":
+        return fp32_to_fp16_bits(fp32_bits)
+    return fp32_to_bf16_bits(fp32_bits)
+
+
 async def dma_read_driver(dut, mem: DmaMemory) -> None:
     dut.dma_rd_cmd_ready.value = 1
     dut.dma_rd_data_valid.value = 0
@@ -160,6 +169,7 @@ async def reset_dut(dut) -> None:
     dut.i_start.value = 0
     dut.i_soft_reset.value = 0
     dut.i_causal_en.value = 0
+    dut.i_precision_mode.value = 0
     dut.i_scale_fp32.value = 0
     dut.i_neg_large_fp32.value = 0
     dut.i_q_base.value = Q_BASE
@@ -173,7 +183,7 @@ async def reset_dut(dut) -> None:
     await RisingEdge(dut.clk)
 
 
-async def run_case(dut, causal: bool, seed: int) -> None:
+async def run_case(dut, causal: bool, seed: int, precision_mode: str = "bf16") -> None:
     seq_len = resolve_param(dut, "SEQ_LEN", 256)
     d = resolve_param(dut, "D", 64)
     tq = resolve_param(dut, "TQ", 32)
@@ -181,12 +191,13 @@ async def run_case(dut, causal: bool, seed: int) -> None:
     stride_bytes = d * 2
     assert_non_overlapping_regions(seq_len, d, stride_bytes)
     random.seed(seed)
+    mode_is_fp16 = precision_mode == "fp16"
     dut._log.info(
-        f"params: SEQ_LEN={seq_len} D={d} TQ={tq} TK={tk} BUS_W={BUS_W}"
+        f"params: SEQ_LEN={seq_len} D={d} TQ={tq} TK={tk} BUS_W={BUS_W} mode={precision_mode}"
     )
-    q_mat = [[rand_bf16(-1.0, 1.0) for _ in range(d)] for _ in range(seq_len)]
-    k_mat = [[rand_bf16(-1.0, 1.0) for _ in range(d)] for _ in range(seq_len)]
-    v_mat = [[rand_bf16(-1.0, 1.0) for _ in range(d)] for _ in range(seq_len)]
+    q_mat = [[rand_f16x(-1.0, 1.0, precision_mode) for _ in range(d)] for _ in range(seq_len)]
+    k_mat = [[rand_f16x(-1.0, 1.0, precision_mode) for _ in range(d)] for _ in range(seq_len)]
+    v_mat = [[rand_f16x(-1.0, 1.0, precision_mode) for _ in range(d)] for _ in range(seq_len)]
 
     scale_bits = f32_to_bits(1.0 / math.sqrt(d))
     neg_large_bits = f32_to_bits(-64.0)
@@ -200,6 +211,7 @@ async def run_case(dut, causal: bool, seed: int) -> None:
     cocotb.start_soon(dma_write_driver(dut, mem))
 
     dut.i_causal_en.value = 1 if causal else 0
+    dut.i_precision_mode.value = 1 if mode_is_fp16 else 0
     dut.i_scale_fp32.value = scale_bits
     dut.i_neg_large_fp32.value = neg_large_bits
     dut.i_stride_bytes.value = stride_bytes
@@ -208,7 +220,7 @@ async def run_case(dut, causal: bool, seed: int) -> None:
     dut.i_start.value = 0
 
     expected_cycles = expected_cycles_mvp(seq_len, d, tq, tk)
-    max_cycles_cfg = int(os.environ.get("CORE_MAX_CYCLES", "400000"))
+    max_cycles_cfg = int(os.environ.get("CORE_MAX_CYCLES", "9000000"))
     timeout_cycles = min(max_cycles_cfg, max(1000, expected_cycles * 4))
     perf = {
         "load_q": 0,
@@ -263,6 +275,8 @@ async def run_case(dut, causal: bool, seed: int) -> None:
         neg_large_bits=neg_large_bits,
         causal=causal,
         bitaccurate=True,
+        input_fmt=precision_mode,
+        output_fmt=precision_mode,
     )
     ref_o = ref["o_bf16"]
 
@@ -270,8 +284,8 @@ async def run_case(dut, causal: bool, seed: int) -> None:
     flat_got_fp32 = []
     for i in range(seq_len):
         for j in range(d):
-            got_bits = (got_o[i][j] & 0xFFFF) << 16
-            ref_bits = (ref_o[i][j] & 0xFFFF) << 16
+            got_bits = f16x_to_fp32_bits(got_o[i][j], precision_mode)
+            ref_bits = f16x_to_fp32_bits(ref_o[i][j], precision_mode)
             flat_got_fp32.append(got_bits)
             flat_ref_fp32.append(ref_bits)
 
@@ -292,8 +306,9 @@ async def run_case(dut, causal: bool, seed: int) -> None:
                 {
                     "i": i,
                     "j": j,
-                    "got_bf16": f"0x{got_o[i][j]:04x}",
-                    "ref_bf16": f"0x{ref_o[i][j]:04x}",
+                    "mode": precision_mode,
+                    "got_f16x": f"0x{got_o[i][j]:04x}",
+                    "ref_f16x": f"0x{ref_o[i][j]:04x}",
                     "got_fp32_bits": f"0x{got_bits:08x}",
                     "ref_fp32_bits": f"0x{ref_bits:08x}",
                     "got_fp32": got_f,
@@ -305,7 +320,7 @@ async def run_case(dut, causal: bool, seed: int) -> None:
     if os.environ.get("CORE_AE_DUMP", "1") not in {"0", "false", "False"}:
         out_dir = Path(os.environ.get("CORE_AE_LOG_DIR", "logs/bf16_module_ae")).resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_csv = out_dir / f"fa_attention_core_bf16fp32_seed{seed}_{'causal' if causal else 'noncausal'}.csv"
+        out_csv = out_dir / f"fa_attention_core_bf16fp32_{precision_mode}_seed{seed}_{'causal' if causal else 'noncausal'}.csv"
         with out_csv.open("w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
             writer.writeheader()
@@ -314,7 +329,7 @@ async def run_case(dut, causal: bool, seed: int) -> None:
 
     cycles = int(dut.o_cycles.value)
     dut._log.info(
-        f"causal={causal} cycles={cycles} expected_cycles={expected_cycles} ref_cycle_model={ref['cycle_model']} "
+        f"mode={precision_mode} causal={causal} cycles={cycles} expected_cycles={expected_cycles} ref_cycle_model={ref['cycle_model']} "
         f"MAE={stats['mae']:.6f} MaxAE={stats['maxe']:.6f}"
     )
     dut._log.info(
@@ -338,8 +353,10 @@ async def run_case(dut, causal: bool, seed: int) -> None:
     assert int(dut.o_error.value) == 0
     if int(os.environ.get("CORE_STRICT_CYCLES", "1")):
         assert cycles == expected_cycles, f"unexpected cycle count: got={cycles} exp={expected_cycles}"
-    assert stats["mae"] <= 2.5e-4, f"mae too large: {stats['mae']}"
-    assert stats["maxe"] <= 4.5e-3, f"maxe too large: {stats['maxe']}"
+    mae_th = 2.5e-4 if precision_mode == "bf16" else 2.0e-4
+    maxe_th = 4.5e-3 if precision_mode == "bf16" else 3.0e-3
+    assert stats["mae"] <= mae_th, f"mae too large: {stats['mae']} mode={precision_mode}"
+    assert stats["maxe"] <= maxe_th, f"maxe too large: {stats['maxe']} mode={precision_mode}"
 
 
 def score_bf16_ref_for_pair(
@@ -583,11 +600,25 @@ async def test_attention_core_trace_first_divergence(dut):
 async def test_attention_core_noncausal(dut):
     cocotb.start_soon(Clock(dut.clk, 2, units="ns").start())
     await reset_dut(dut)
-    await run_case(dut, causal=False, seed=20260312)
+    await run_case(dut, causal=False, seed=20260312, precision_mode="bf16")
 
 
 @cocotb.test()
 async def test_attention_core_causal(dut):
     cocotb.start_soon(Clock(dut.clk, 2, units="ns").start())
     await reset_dut(dut)
-    await run_case(dut, causal=True, seed=20260313)
+    await run_case(dut, causal=True, seed=20260313, precision_mode="bf16")
+
+
+@cocotb.test()
+async def test_attention_core_noncausal_fp16(dut):
+    cocotb.start_soon(Clock(dut.clk, 2, units="ns").start())
+    await reset_dut(dut)
+    await run_case(dut, causal=False, seed=20260314, precision_mode="fp16")
+
+
+@cocotb.test()
+async def test_attention_core_causal_fp16(dut):
+    cocotb.start_soon(Clock(dut.clk, 2, units="ns").start())
+    await reset_dut(dut)
+    await run_case(dut, causal=True, seed=20260315, precision_mode="fp16")

@@ -10,6 +10,7 @@ module fa_attention_core_bf16fp32 #(
   input  logic                     i_start,
   input  logic                     i_soft_reset,
   input  logic                     i_causal_en,
+  input  logic                     i_precision_mode,
   input  logic [31:0]              i_scale_fp32,
   input  logic [31:0]              i_neg_large_fp32,
   output logic                     o_busy,
@@ -124,14 +125,38 @@ module fa_attention_core_bf16fp32 #(
   logic [31:0] q_cur_fp32_1;
   logic [31:0] q_cur_fp32_2;
   logic [31:0] q_cur_fp32_3;
+  logic [31:0] q_cur_fp32_bf16_0;
+  logic [31:0] q_cur_fp32_bf16_1;
+  logic [31:0] q_cur_fp32_bf16_2;
+  logic [31:0] q_cur_fp32_bf16_3;
+  logic [31:0] q_cur_fp32_fp16_0;
+  logic [31:0] q_cur_fp32_fp16_1;
+  logic [31:0] q_cur_fp32_fp16_2;
+  logic [31:0] q_cur_fp32_fp16_3;
   logic [31:0] k_cur_fp32_0;
   logic [31:0] k_cur_fp32_1;
   logic [31:0] k_cur_fp32_2;
   logic [31:0] k_cur_fp32_3;
+  logic [31:0] k_cur_fp32_bf16_0;
+  logic [31:0] k_cur_fp32_bf16_1;
+  logic [31:0] k_cur_fp32_bf16_2;
+  logic [31:0] k_cur_fp32_bf16_3;
+  logic [31:0] k_cur_fp32_fp16_0;
+  logic [31:0] k_cur_fp32_fp16_1;
+  logic [31:0] k_cur_fp32_fp16_2;
+  logic [31:0] k_cur_fp32_fp16_3;
   logic [31:0] v_cur_fp32_0;
   logic [31:0] v_cur_fp32_1;
   logic [31:0] v_cur_fp32_2;
   logic [31:0] v_cur_fp32_3;
+  logic [31:0] v_cur_fp32_bf16_0;
+  logic [31:0] v_cur_fp32_bf16_1;
+  logic [31:0] v_cur_fp32_bf16_2;
+  logic [31:0] v_cur_fp32_bf16_3;
+  logic [31:0] v_cur_fp32_fp16_0;
+  logic [31:0] v_cur_fp32_fp16_1;
+  logic [31:0] v_cur_fp32_fp16_2;
+  logic [31:0] v_cur_fp32_fp16_3;
   logic [31:0] prod_fp32_0;
   logic [31:0] prod_fp32_1;
   logic [31:0] prod_fp32_2;
@@ -163,6 +188,8 @@ module fa_attention_core_bf16fp32 #(
   logic [31:0] acc_next_fp32_3;
   logic [31:0] norm_out_fp32;
   logic [15:0] norm_out_bf16;
+  logic [15:0] norm_out_fp16;
+  logic [15:0] norm_out_f16x;
   logic [BUS_W-1:0] wr_pack;
 
   always_comb begin
@@ -203,18 +230,44 @@ module fa_attention_core_bf16fp32 #(
     end
   end
 
-  fa_bf16_to_fp32 u_q_widen_0 (.i_x_bf16(q_cur_bf16_0), .o_y_fp32(q_cur_fp32_0));
-  fa_bf16_to_fp32 u_q_widen_1 (.i_x_bf16(q_cur_bf16_1), .o_y_fp32(q_cur_fp32_1));
-  fa_bf16_to_fp32 u_q_widen_2 (.i_x_bf16(q_cur_bf16_2), .o_y_fp32(q_cur_fp32_2));
-  fa_bf16_to_fp32 u_q_widen_3 (.i_x_bf16(q_cur_bf16_3), .o_y_fp32(q_cur_fp32_3));
-  fa_bf16_to_fp32 u_k_widen_0 (.i_x_bf16(k_cur_bf16_0), .o_y_fp32(k_cur_fp32_0));
-  fa_bf16_to_fp32 u_k_widen_1 (.i_x_bf16(k_cur_bf16_1), .o_y_fp32(k_cur_fp32_1));
-  fa_bf16_to_fp32 u_k_widen_2 (.i_x_bf16(k_cur_bf16_2), .o_y_fp32(k_cur_fp32_2));
-  fa_bf16_to_fp32 u_k_widen_3 (.i_x_bf16(k_cur_bf16_3), .o_y_fp32(k_cur_fp32_3));
-  fa_bf16_to_fp32 u_v_widen_0 (.i_x_bf16(v_cur_bf16_0), .o_y_fp32(v_cur_fp32_0));
-  fa_bf16_to_fp32 u_v_widen_1 (.i_x_bf16(v_cur_bf16_1), .o_y_fp32(v_cur_fp32_1));
-  fa_bf16_to_fp32 u_v_widen_2 (.i_x_bf16(v_cur_bf16_2), .o_y_fp32(v_cur_fp32_2));
-  fa_bf16_to_fp32 u_v_widen_3 (.i_x_bf16(v_cur_bf16_3), .o_y_fp32(v_cur_fp32_3));
+  fa_bf16_to_fp32 u_q_widen_bf16_0 (.i_x_bf16(q_cur_bf16_0), .o_y_fp32(q_cur_fp32_bf16_0));
+  fa_bf16_to_fp32 u_q_widen_bf16_1 (.i_x_bf16(q_cur_bf16_1), .o_y_fp32(q_cur_fp32_bf16_1));
+  fa_bf16_to_fp32 u_q_widen_bf16_2 (.i_x_bf16(q_cur_bf16_2), .o_y_fp32(q_cur_fp32_bf16_2));
+  fa_bf16_to_fp32 u_q_widen_bf16_3 (.i_x_bf16(q_cur_bf16_3), .o_y_fp32(q_cur_fp32_bf16_3));
+  fa_bf16_to_fp32 u_k_widen_bf16_0 (.i_x_bf16(k_cur_bf16_0), .o_y_fp32(k_cur_fp32_bf16_0));
+  fa_bf16_to_fp32 u_k_widen_bf16_1 (.i_x_bf16(k_cur_bf16_1), .o_y_fp32(k_cur_fp32_bf16_1));
+  fa_bf16_to_fp32 u_k_widen_bf16_2 (.i_x_bf16(k_cur_bf16_2), .o_y_fp32(k_cur_fp32_bf16_2));
+  fa_bf16_to_fp32 u_k_widen_bf16_3 (.i_x_bf16(k_cur_bf16_3), .o_y_fp32(k_cur_fp32_bf16_3));
+  fa_bf16_to_fp32 u_v_widen_bf16_0 (.i_x_bf16(v_cur_bf16_0), .o_y_fp32(v_cur_fp32_bf16_0));
+  fa_bf16_to_fp32 u_v_widen_bf16_1 (.i_x_bf16(v_cur_bf16_1), .o_y_fp32(v_cur_fp32_bf16_1));
+  fa_bf16_to_fp32 u_v_widen_bf16_2 (.i_x_bf16(v_cur_bf16_2), .o_y_fp32(v_cur_fp32_bf16_2));
+  fa_bf16_to_fp32 u_v_widen_bf16_3 (.i_x_bf16(v_cur_bf16_3), .o_y_fp32(v_cur_fp32_bf16_3));
+
+  fa_fp16_to_fp32 u_q_widen_fp16_0 (.i_x_fp16(q_cur_bf16_0), .o_y_fp32(q_cur_fp32_fp16_0));
+  fa_fp16_to_fp32 u_q_widen_fp16_1 (.i_x_fp16(q_cur_bf16_1), .o_y_fp32(q_cur_fp32_fp16_1));
+  fa_fp16_to_fp32 u_q_widen_fp16_2 (.i_x_fp16(q_cur_bf16_2), .o_y_fp32(q_cur_fp32_fp16_2));
+  fa_fp16_to_fp32 u_q_widen_fp16_3 (.i_x_fp16(q_cur_bf16_3), .o_y_fp32(q_cur_fp32_fp16_3));
+  fa_fp16_to_fp32 u_k_widen_fp16_0 (.i_x_fp16(k_cur_bf16_0), .o_y_fp32(k_cur_fp32_fp16_0));
+  fa_fp16_to_fp32 u_k_widen_fp16_1 (.i_x_fp16(k_cur_bf16_1), .o_y_fp32(k_cur_fp32_fp16_1));
+  fa_fp16_to_fp32 u_k_widen_fp16_2 (.i_x_fp16(k_cur_bf16_2), .o_y_fp32(k_cur_fp32_fp16_2));
+  fa_fp16_to_fp32 u_k_widen_fp16_3 (.i_x_fp16(k_cur_bf16_3), .o_y_fp32(k_cur_fp32_fp16_3));
+  fa_fp16_to_fp32 u_v_widen_fp16_0 (.i_x_fp16(v_cur_bf16_0), .o_y_fp32(v_cur_fp32_fp16_0));
+  fa_fp16_to_fp32 u_v_widen_fp16_1 (.i_x_fp16(v_cur_bf16_1), .o_y_fp32(v_cur_fp32_fp16_1));
+  fa_fp16_to_fp32 u_v_widen_fp16_2 (.i_x_fp16(v_cur_bf16_2), .o_y_fp32(v_cur_fp32_fp16_2));
+  fa_fp16_to_fp32 u_v_widen_fp16_3 (.i_x_fp16(v_cur_bf16_3), .o_y_fp32(v_cur_fp32_fp16_3));
+
+  assign q_cur_fp32_0 = i_precision_mode ? q_cur_fp32_fp16_0 : q_cur_fp32_bf16_0;
+  assign q_cur_fp32_1 = i_precision_mode ? q_cur_fp32_fp16_1 : q_cur_fp32_bf16_1;
+  assign q_cur_fp32_2 = i_precision_mode ? q_cur_fp32_fp16_2 : q_cur_fp32_bf16_2;
+  assign q_cur_fp32_3 = i_precision_mode ? q_cur_fp32_fp16_3 : q_cur_fp32_bf16_3;
+  assign k_cur_fp32_0 = i_precision_mode ? k_cur_fp32_fp16_0 : k_cur_fp32_bf16_0;
+  assign k_cur_fp32_1 = i_precision_mode ? k_cur_fp32_fp16_1 : k_cur_fp32_bf16_1;
+  assign k_cur_fp32_2 = i_precision_mode ? k_cur_fp32_fp16_2 : k_cur_fp32_bf16_2;
+  assign k_cur_fp32_3 = i_precision_mode ? k_cur_fp32_fp16_3 : k_cur_fp32_bf16_3;
+  assign v_cur_fp32_0 = i_precision_mode ? v_cur_fp32_fp16_0 : v_cur_fp32_bf16_0;
+  assign v_cur_fp32_1 = i_precision_mode ? v_cur_fp32_fp16_1 : v_cur_fp32_bf16_1;
+  assign v_cur_fp32_2 = i_precision_mode ? v_cur_fp32_fp16_2 : v_cur_fp32_bf16_2;
+  assign v_cur_fp32_3 = i_precision_mode ? v_cur_fp32_fp16_3 : v_cur_fp32_bf16_3;
 
   fa_fp32_mul_q16 u_dot_mul_0 (.i_a_fp32(q_cur_fp32_0), .i_b_fp32(k_cur_fp32_0), .o_y_fp32(prod_fp32_0));
   fa_fp32_mul_q16 u_dot_mul_1 (.i_a_fp32(q_cur_fp32_1), .i_b_fp32(k_cur_fp32_1), .o_y_fp32(prod_fp32_1));
@@ -290,6 +343,8 @@ module fa_attention_core_bf16fp32 #(
   );
   fa_fp32_mul_q16 u_norm_mul (.i_a_fp32(row_acc[norm_qi][norm_d]), .i_b_fp32(row_inv[norm_qi]), .o_y_fp32(norm_out_fp32));
   fa_fp32_to_bf16 u_norm_downcast (.i_x_fp32(norm_out_fp32), .o_y_bf16(norm_out_bf16));
+  fa_fp32_to_fp16 u_norm_downcast_fp16 (.i_x_fp32(norm_out_fp32), .o_y_fp16(norm_out_fp16));
+  assign norm_out_f16x = i_precision_mode ? norm_out_fp16 : norm_out_bf16;
 
   assign dma_rd_data_ready = 1'b1;
   assign o_cycles = cycle_counter;
@@ -567,7 +622,7 @@ module fa_attention_core_bf16fp32 #(
             end
           end
           S_NORMALIZE: begin
-            o_buf[norm_qi][norm_d] <= norm_out_bf16;
+            o_buf[norm_qi][norm_d] <= norm_out_f16x;
             if (norm_d == D - 1) begin
               norm_d <= '0;
               if (norm_qi == TQ - 1) begin

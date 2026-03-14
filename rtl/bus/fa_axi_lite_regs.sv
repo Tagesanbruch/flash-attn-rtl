@@ -55,6 +55,7 @@ module fa_axi_lite_regs #(
   output logic                 o_soft_reset,
   output logic                 o_irq_en,
   output logic                 o_causal_en,
+  output logic                 o_precision_mode,
   output logic [63:0]          o_q_base,
   output logic [63:0]          o_k_base,
   output logic [63:0]          o_v_base,
@@ -271,6 +272,7 @@ module fa_axi_lite_regs #(
   assign o_soft_reset = reg_ctrl[1];
   assign o_irq_en = reg_ctrl[2];
   assign o_causal_en = reg_cfg[0];
+  assign o_precision_mode = reg_cfg[1];
 
   assign o_q_base = {reg_q_base_h, reg_q_base_l};
   assign o_k_base = {reg_k_base_h, reg_k_base_l};

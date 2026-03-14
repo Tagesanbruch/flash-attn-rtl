@@ -30,6 +30,11 @@ def bf16_to_fp32_bits(x: int) -> int:
     return (x & 0xFFFF) << 16
 
 
+def fp16_to_fp32_bits(x: int) -> int:
+    half = struct.pack('>H', x & 0xFFFF)
+    return f32_to_bits(struct.unpack('>e', half)[0])
+
+
 def fp32_to_bf16_bits(x: int) -> int:
     sign = (x >> 31) & 0x1
     exp = (x >> 23) & 0xFF
@@ -41,6 +46,32 @@ def fp32_to_bf16_bits(x: int) -> int:
         return (sign << 15) | (0xFF << 7) | payload
     rounded = (x + 0x7FFF + ((x >> 16) & 1)) & 0xFFFFFFFF
     return (rounded >> 16) & 0xFFFF
+
+
+def fp32_to_fp16_bits(x: int) -> int:
+    f = bits_to_f32(x)
+    try:
+        half = struct.pack('>e', f)
+        return struct.unpack('>H', half)[0]
+    except OverflowError:
+        sign = (x >> 31) & 0x1
+        return (sign << 15) | 0x7C00
+
+
+def f16x_to_fp32_bits(x: int, fmt: str) -> int:
+    if fmt == "bf16":
+        return bf16_to_fp32_bits(x)
+    if fmt == "fp16":
+        return fp16_to_fp32_bits(x)
+    raise ValueError(f"unsupported 16-bit float format: {fmt}")
+
+
+def fp32_to_f16x_bits(x: int, fmt: str) -> int:
+    if fmt == "bf16":
+        return fp32_to_bf16_bits(x)
+    if fmt == "fp16":
+        return fp32_to_fp16_bits(x)
+    raise ValueError(f"unsupported 16-bit float format: {fmt}")
 
 
 def bf16_roundtrip_fp32_bits(x: int) -> int:
@@ -304,6 +335,8 @@ def attention_bf16_fp32_reference(
     neg_large_bits: int,
     causal: bool = False,
     bitaccurate: bool = False,
+    input_fmt: str = "bf16",
+    output_fmt: str = "bf16",
 ) -> dict[str, list[list[int]]]:
     seq_len = len(q_mat_bf16)
     d = len(q_mat_bf16[0]) if seq_len > 0 else 0
@@ -322,8 +355,8 @@ def attention_bf16_fp32_reference(
             score_bits = zero_bits
             for kk in range(d):
                 prod_bits = _fp32_mul_model(
-                    bf16_to_fp32_bits(q_mat_bf16[i][kk]),
-                    bf16_to_fp32_bits(k_mat_bf16[j][kk]),
+                    f16x_to_fp32_bits(q_mat_bf16[i][kk], input_fmt),
+                    f16x_to_fp32_bits(k_mat_bf16[j][kk], input_fmt),
                     bitaccurate,
                 )
                 score_bits = _fp32_add_model(score_bits, prod_bits, bitaccurate)
@@ -350,13 +383,13 @@ def attention_bf16_fp32_reference(
 
             for kk in range(d):
                 acc_scaled = zero_bits if j == 0 else _fp32_mul_model(acc_bits[kk], exp_old_bits, bitaccurate)
-                v_term = _fp32_mul_model(bf16_to_fp32_bits(v_mat_bf16[j][kk]), exp_new_bits, bitaccurate)
+                v_term = _fp32_mul_model(f16x_to_fp32_bits(v_mat_bf16[j][kk], input_fmt), exp_new_bits, bitaccurate)
                 acc_bits[kk] = _fp32_add_model(acc_scaled, v_term, bitaccurate)
 
         for kk in range(d):
             out_bits = _fp32_mul_model(acc_bits[kk], inv_l_bits, bitaccurate)
             out_fp32_bits[i][kk] = out_bits
-            out_bf16[i][kk] = fp32_to_bf16_bits(out_bits)
+            out_bf16[i][kk] = fp32_to_f16x_bits(out_bits, output_fmt)
 
     return {
         "o_fp32_bits": out_fp32_bits,

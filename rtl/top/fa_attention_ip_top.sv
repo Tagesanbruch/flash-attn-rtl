@@ -75,6 +75,7 @@ module fa_attention_ip_top #(
   logic        soft_reset;
   logic        irq_en;
   logic        causal_en;
+  logic        precision_mode;
   logic [63:0] q_base, k_base, v_base, o_base;
   logic [31:0] stride_bytes;
   logic [15:0] neg_large_q8_8;
@@ -162,7 +163,7 @@ module fa_attention_ip_top #(
     .i_perf_ms_normalize_cycles(perf_ms_normalize_cycles), .i_perf_ms_write_o_cycles(perf_ms_write_o_cycles),
     .i_perf_ms_next_q_cycles(perf_ms_next_q_cycles), .i_perf_cs_dp_run_cycles(perf_cs_dp_run_cycles),
     .i_perf_cs_score_done_cycles(perf_cs_score_done_cycles), .i_perf_cs_softmax_prep_cycles(perf_cs_softmax_prep_cycles),
-    .o_start_pulse(start_pulse), .o_soft_reset(soft_reset), .o_irq_en(irq_en), .o_causal_en(causal_en),
+    .o_start_pulse(start_pulse), .o_soft_reset(soft_reset), .o_irq_en(irq_en), .o_causal_en(causal_en), .o_precision_mode(precision_mode),
     .o_q_base(q_base), .o_k_base(k_base), .o_v_base(v_base), .o_o_base(o_base),
     .o_stride_bytes(stride_bytes), .o_neg_large_q8_8(neg_large_q8_8), .o_scale_q8_8(scale_q8_8)
   );
@@ -179,6 +180,7 @@ module fa_attention_ip_top #(
   assign soft_reset = 1'b0;
   assign irq_en = 1'b0;
   assign causal_en = 1'b0;
+  assign precision_mode = 1'b0;
   assign q_base = 64'd0;
   assign k_base = 64'd0;
   assign v_base = 64'd0;
