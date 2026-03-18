@@ -1,4 +1,5 @@
 import random
+from pathlib import Path
 
 import cocotb
 from cocotb.clock import Clock
@@ -175,6 +176,33 @@ def ref_row_state(q, k, v, gi, s, d, scale, round_mode, sat):
     return m, l, acc
 
 
+def ref_fp32_from_fp8(q, k, v, s, d):
+    def decf(x):
+        return fp8_e4m3_to_q4_11(x) / 2048.0
+
+    qf = [[decf(x) for x in row] for row in q]
+    kf = [[decf(x) for x in row] for row in k]
+    vf = [[decf(x) for x in row] for row in v]
+
+    out = [[0.0 for _ in range(d)] for _ in range(s)]
+    for i in range(s):
+        scores = []
+        for j in range(s):
+            dot = 0.0
+            for dd in range(d):
+                dot += qf[i][dd] * kf[j][dd]
+            scores.append(dot)
+        m = max(scores)
+        exps = [pow(2.718281828459045, x - m) for x in scores]
+        den = sum(exps)
+        for dd in range(d):
+            acc = 0.0
+            for j in range(s):
+                acc += (exps[j] / den) * vf[j][dd]
+            out[i][dd] = acc
+    return out
+
+
 async def dma_driver(dut, mem: DmaMem):
     dut.dma_rd_cmd_ready.value = 1
     dut.dma_wr_cmd_ready.value = 1
@@ -241,9 +269,9 @@ async def test_fp8_attention_core_full_dma_end2end(dut):
 
     dut.i_rst_n.value = 0
     dut.i_start.value = 0
-    dut.i_seq_len.value = 64
-    dut.i_head_dim.value = 32
-    dut.i_stride_bytes.value = 32
+    dut.i_seq_len.value = 256
+    dut.i_head_dim.value = 64
+    dut.i_stride_bytes.value = 64
     dut.i_q_base.value = 0
     dut.i_k_base.value = 0x10000
     dut.i_v_base.value = 0x20000
@@ -256,8 +284,8 @@ async def test_fp8_attention_core_full_dma_end2end(dut):
         await RisingEdge(dut.i_clk)
     dut.i_rst_n.value = 1
 
-    s = 64
-    d = 32
+    s = 256
+    d = 64
     tq = 32
     tk = 64
     stride = d
@@ -337,11 +365,7 @@ async def test_fp8_attention_core_full_dma_end2end(dut):
             assert qlast_hw == snap["q_last"], (
                 f"q_last mismatch cyc={snap['cycle']} st={st_hw} qt={qt_hw} kt={kt_hw} "
                 f"hd={int(dut.i_head_dim.value)} hw={qlast_hw} cm={snap['q_last']} "
-                f"q31_15={int(dut.o_dbg_q31_15.value)} q31_31={int(dut.o_dbg_q31_31.value)} "
-                f"qsum_hw={int(dut.o_dbg_q_sum.value)} qsum_cm={snap['q_sum']} "
-                f"last_qbeat_idx={int(dut.o_dbg_q_load_idx.value)} "
-                f"last_qbeat_b0={int(dut.o_dbg_q_load_b0.value)} "
-                f"last_qbeat_b15={int(dut.o_dbg_q_load_b15.value)}"
+                f"qsum_hw={int(dut.o_dbg_q_sum.value)} qsum_cm={snap['q_sum']}"
             )
 
         if STRICT_LOCKSTEP and snap["state"] in (ST_COMPUTE, ST_NORMALIZE):
@@ -405,6 +429,7 @@ async def test_fp8_attention_core_full_dma_end2end(dut):
     neg_match_cnt = 0
     got_zero_cnt = 0
     ref_zero_cnt = 0
+    sum_abs_err = 0
     for i in range(s):
         for j in range(d):
             if got[i][j] == 0:
@@ -416,12 +441,17 @@ async def test_fp8_attention_core_full_dma_end2end(dut):
                 if got[i][j] == -ref[i][j]:
                     neg_match_cnt += 1
             err = abs(got[i][j] - ref[i][j])
+            sum_abs_err += err
             if err > max_err:
                 max_err = err
                 max_i = i
                 max_j = j
                 max_got = got[i][j]
                 max_ref = ref[i][j]
+
+    mae = sum_abs_err / float(s * d)
+    mae_q = mae / 2048.0
+    maxae_q = max_err / 2048.0
 
     cmodel_vs_rtl_max = 0
     cmodel_worst = None
@@ -431,6 +461,18 @@ async def test_fp8_attention_core_full_dma_end2end(dut):
             if err > cmodel_vs_rtl_max:
                 cmodel_vs_rtl_max = err
                 cmodel_worst = (i, j, got[i][j], cmodel_out[i][j])
+
+    ref_fp32 = ref_fp32_from_fp8(q, k, v, s, d)
+    sum_abs_fp32 = 0.0
+    maxae_fp32 = 0.0
+    for i in range(s):
+        for j in range(d):
+            got_f = got[i][j] / 2048.0
+            ae = abs(got_f - ref_fp32[i][j])
+            sum_abs_fp32 += ae
+            if ae > maxae_fp32:
+                maxae_fp32 = ae
+    mae_fp32 = sum_abs_fp32 / float(s * d)
 
     rd_cmd = int(dut.o_perf_rd_cmd.value)
     rd_beat = int(dut.o_perf_rd_beat.value)
@@ -470,6 +512,18 @@ async def test_fp8_attention_core_full_dma_end2end(dut):
         max_ref,
     )
     dut._log.info(
+        "fp8_dma_e2e_error_stats: mae=%.6f maxae=%d mae_q=%.6f maxae_q=%.6f",
+        mae,
+        max_err,
+        mae_q,
+        maxae_q,
+    )
+    dut._log.info(
+        "fp8_dma_vs_fp32: mae=%.6f maxae=%.6f",
+        mae_fp32,
+        maxae_fp32,
+    )
+    dut._log.info(
         "fp8_dma_e2e_mismatch: total=%d neg_equal=%d",
         mismatch_cnt,
         neg_match_cnt,
@@ -495,6 +549,15 @@ async def test_fp8_attention_core_full_dma_end2end(dut):
         cmodel_worst,
     )
     dut._log.info(
+        "fp8_dma_perf_regs: rd_cmd=%d rd_beat=%d wr_cmd=%d wr_beat=%d compute=%d softmax=%d",
+        rd_cmd,
+        rd_beat,
+        wr_cmd,
+        wr_beat,
+        comp,
+        soft,
+    )
+    dut._log.info(
         "fp8_dma_internal_row0_dbg: m=%d l=%d ref_m=%d ref_l=%d acc00=%d ref_acc00=%d",
         s32(int(dut.o_dbg_m0.value)),
         int(dut.o_dbg_l0.value),
@@ -503,6 +566,44 @@ async def test_fp8_attention_core_full_dma_end2end(dut):
         s64(int(dut.o_dbg_acc00.value)),
         ref_acc0[0],
     )
+
+    repo_root = Path(__file__).resolve().parents[4]
+    auto_report = repo_root / "docs" / "20260316_fp8_dma_verif_latest.md"
+    auto_report.write_text(
+        "\n".join(
+            [
+                "# FP8 DMA Verif Latest",
+                "",
+                f"- max_err: {max_err}",
+                f"- mae: {mae:.6f}",
+                f"- maxae: {max_err}",
+                f"- mae_q: {mae_q:.6f}",
+                f"- maxae_q: {maxae_q:.6f}",
+                f"- rtl_vs_cmodel_max: {cmodel_vs_rtl_max}",
+                f"- mae_fp32: {mae_fp32:.6f}",
+                f"- maxae_fp32: {maxae_fp32:.6f}",
+                "",
+                "## Perf Registers",
+                f"- rd_cmd: {rd_cmd}",
+                f"- rd_beat: {rd_beat}",
+                f"- wr_cmd: {wr_cmd}",
+                f"- wr_beat: {wr_beat}",
+                f"- compute_cycles: {comp}",
+                f"- softmax_updates: {soft}",
+                "",
+                "## Expectations",
+                f"- exp_rd_cmd: {exp_rd_cmd}",
+                f"- exp_rd_beat: {exp_rd_beat}",
+                f"- exp_wr_cmd: {exp_wr_cmd}",
+                f"- exp_wr_beat: {exp_wr_beat}",
+                f"- exp_comp: {exp_comp}",
+                f"- exp_soft: {exp_soft}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dut._log.info("fp8_dma_auto_report: wrote=%s", str(auto_report))
 
     assert max_err == 0
     assert rd_cmd == exp_rd_cmd

@@ -61,16 +61,11 @@ module fa_fp8_attention_core_full_dma #(
   output logic [7:0]         o_dbg_k00,
   output logic [7:0]         o_dbg_v00,
   output logic [7:0]         o_dbg_q_last,
-  output logic [7:0]         o_dbg_q31_15,
-  output logic [7:0]         o_dbg_q31_31,
   output logic [7:0]         o_dbg_k_last,
   output logic [7:0]         o_dbg_v_last,
   output logic [31:0]        o_dbg_q_sum,
   output logic [31:0]        o_dbg_k_sum,
   output logic [31:0]        o_dbg_v_sum,
-  output logic [15:0]        o_dbg_q_load_idx,
-  output logic [7:0]         o_dbg_q_load_b0,
-  output logic [7:0]         o_dbg_q_load_b15,
   output logic signed [31:0] o_dbg_m0,
   output logic [31:0]        o_dbg_l0,
   output logic signed [63:0] o_dbg_acc00,
@@ -136,9 +131,6 @@ module fa_fp8_attention_core_full_dma #(
   logic [31:0] dbg_q_sum_r;
   logic [31:0] dbg_k_sum_r;
   logic [31:0] dbg_v_sum_r;
-  logic [15:0] dbg_q_load_idx_r;
-  logic [7:0]  dbg_q_load_b0_r;
-  logic [7:0]  dbg_q_load_b15_r;
 
   integer qi;
   integer kj;
@@ -321,9 +313,6 @@ module fa_fp8_attention_core_full_dma #(
       dbg_q_sum_r <= 0;
       dbg_k_sum_r <= 0;
       dbg_v_sum_r <= 0;
-      dbg_q_load_idx_r <= 0;
-      dbg_q_load_b0_r <= 0;
-      dbg_q_load_b15_r <= 0;
       dma_rd_cmd_valid <= 0;
       dma_rd_cmd_addr <= 0;
       dma_rd_cmd_len <= 0;
@@ -418,9 +407,6 @@ module fa_fp8_attention_core_full_dma #(
                 end
             end
             dbg_q_sum_r <= dbg_q_sum_r + beat_sum;
-            dbg_q_load_idx_r <= rd_beat_idx_r;
-            dbg_q_load_b0_r <= dma_rd_data[7:0];
-            dbg_q_load_b15_r <= dma_rd_data[127:120];
             rd_beat_idx_r <= rd_beat_idx_r + 1;
             perf_rd_beat_r <= perf_rd_beat_r + 1;
             if (rd_beat_idx_r + 1 >= q_beats_r || dma_rd_data_last) begin
@@ -704,17 +690,12 @@ module fa_fp8_attention_core_full_dma #(
   assign o_dbg_q00 = q_tile[0][0];
   assign o_dbg_k00 = k_tile[0][0];
   assign o_dbg_v00 = v_tile[0][0];
-  assign o_dbg_q_last = q_tile[TQ-1][31];
-  assign o_dbg_q31_15 = q_tile[TQ-1][15];
-  assign o_dbg_q31_31 = q_tile[TQ-1][31];
-  assign o_dbg_k_last = k_tile[TK-1][31];
-  assign o_dbg_v_last = v_tile[TK-1][31];
+  assign o_dbg_q_last = q_tile[TQ-1][i_head_dim-1];
+  assign o_dbg_k_last = k_tile[TK-1][i_head_dim-1];
+  assign o_dbg_v_last = v_tile[TK-1][i_head_dim-1];
   assign o_dbg_q_sum = dbg_q_sum_r;
   assign o_dbg_k_sum = dbg_k_sum_r;
   assign o_dbg_v_sum = dbg_v_sum_r;
-  assign o_dbg_q_load_idx = dbg_q_load_idx_r;
-  assign o_dbg_q_load_b0 = dbg_q_load_b0_r;
-  assign o_dbg_q_load_b15 = dbg_q_load_b15_r;
   assign o_dbg_m0 = row_m[0];
   assign o_dbg_l0 = row_l[0];
   assign o_dbg_acc00 = row_acc[0][0];

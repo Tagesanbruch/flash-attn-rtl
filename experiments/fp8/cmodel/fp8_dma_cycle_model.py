@@ -31,6 +31,7 @@ class Cfg:
     saturate_en: int
     tq: int = 32
     tk: int = 64
+    norm_round: int = 0
 
 
 def s32(v: int) -> int:
@@ -205,7 +206,15 @@ class Fp8DmaCycleModel:
             den = self.row_l[qi]
             for d in range(hd):
                 num = self.row_acc[qi][d]
-                self.o_tile[qi][d] = 0 if den == 0 else int(num / den)
+                if den == 0:
+                    self.o_tile[qi][d] = 0
+                elif self.cfg.norm_round:
+                    adj = den >> 1
+                    if num < 0:
+                        adj = -adj
+                    self.o_tile[qi][d] = int((num + adj) / den)
+                else:
+                    self.o_tile[qi][d] = int(num / den)
 
     def step(
         self,
