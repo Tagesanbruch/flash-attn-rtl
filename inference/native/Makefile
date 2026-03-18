@@ -45,6 +45,11 @@ run_fa: run_fa.c flash_attn.c
 	mkdir -p build
 	$(CC) -Ofast -fopenmp -march=native -DNORMAL -DQWEN_BIN_MODEL_PATH='"${QWEN_BIN_MODEL_PATH}"' -DQWEN_BIN_TOKEN_PATH='"${QWEN_BIN_TOKEN_PATH}"' run_fa.c flash_attn.c -lm -o build/run_fa
 
+run_fa_dpi: run_fa.c flash_attn.c
+	$(MAKE) -C ../dpi build
+	mkdir -p build
+	$(CC) -Ofast -fopenmp -march=native -DFLASH_ATTN_ENABLE_DPI -DNORMAL -I../dpi/include -DQWEN_BIN_MODEL_PATH='"${QWEN_BIN_MODEL_PATH}"' -DQWEN_BIN_TOKEN_PATH='"${QWEN_BIN_TOKEN_PATH}"' run_fa.c flash_attn.c ../dpi/build/libfa_dpi_backend.a ../dpi/build/verilated/libVfa_attention_ip_top.a ../dpi/build/verilated/libverilated.a -lc++ -lm -o build/run_fa_dpi
+
 ########## FP8 run ###########
 run_fp8: run-fp8.c ${QWEN3_FP8_BIN_PATH} ${QWEN_BIN_TOKEN_PATH}
 	mkdir -p build

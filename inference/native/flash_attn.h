@@ -7,6 +7,11 @@
 typedef int16_t q8_8_t;  // [-128.0, 127.996]
 typedef int32_t acc32_t; // 累加器
 
+typedef enum {
+  FA_BACKEND_SW = 0,
+  FA_BACKEND_DPI = 1,
+} fa_backend_t;
+
 // Q8.8 格式互相转换的宏和辅助函数
 static inline q8_8_t float_to_q8_8(float val) {
   float scaled = val * 256.0f;
@@ -38,5 +43,9 @@ void flash_attention_forward(
     int seq_len, int n_heads, int head_size, int kv_mul, int kv_dim,
     float scale // 1 / sqrt(head_size)
 );
+
+int flash_attention_set_backend(fa_backend_t backend);
+fa_backend_t flash_attention_get_backend(void);
+int flash_attention_sigint_requested(void);
 
 #endif // FLASH_ATTN_H

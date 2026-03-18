@@ -1112,10 +1112,22 @@ void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
   int token =
       prompt_tokens[0]; // stores the current token to feed into the transformer
   char *decoded_string = (char *)malloc(32768 * sizeof(char));
+  bool sigint_notified = false;
 
   int pos = 0; // position in the sequence
   int promot_idx = 0;
   while (pos < steps) {
+
+    if (flash_attention_sigint_requested()) {
+      if (!sigint_notified) {
+        printf("\n[run_fa] SIGINT requested, terminating generation loop gracefully.\n");
+        sigint_notified = true;
+      }
+      if (start != 0) {
+        prefill = prefill == 0 ? time_in_ms() - start : prefill;
+      }
+      break;
+    }
 
     if (start == 0) {
       start = time_in_ms();
@@ -1157,6 +1169,17 @@ void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
 
     float *logits = forward(transformer, token, pos, true);
 
+    if (flash_attention_sigint_requested()) {
+      if (!sigint_notified) {
+        printf("\n[run_fa] SIGINT requested, terminating generation loop gracefully.\n");
+        sigint_notified = true;
+      }
+      if (start != 0) {
+        prefill = prefill == 0 ? time_in_ms() - start : prefill;
+      }
+      break;
+    }
+
     if (pos < prompt_token_num - 1) {
       next = prompt_tokens[pos + 1];
     } else {
@@ -1191,20 +1214,28 @@ void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
     token = next;
   }
 
-  if (pos > 1) {
+  if (pos > 1 || flash_attention_sigint_requested()) {
     long end = time_in_ms();
+    if (prefill <= 0) {
+      prefill = 1;
+    }
     // if decode hasn't started or we just prefilled
     long dec_time = (end - start);
-    if (start == 0)
+    if (start == 0 || dec_time <= 0)
       dec_time = 1; // prevent div-by-zero if broken early
 
+    long long decode_token_count = pos - prompt_token_num;
+    if (decode_token_count < 0) {
+      decode_token_count = 0;
+    }
+
     *prefill_throughput = prompt_token_num / (double)(prefill) * 1000;
-    *decode_throughput = (pos - prompt_token_num) / (double)(dec_time) * 1000;
+    *decode_throughput = decode_token_count / (double)(dec_time) * 1000;
     fprintf(stderr, "\nachieved prefill tok/s: %f\n", *prefill_throughput);
     fprintf(stderr, "achieved decode tok/s: %f\n", *decode_throughput);
 
     prefill_tokens = prompt_token_num;
-    decode_tokens = pos - prompt_token_num;
+    decode_tokens = decode_token_count;
 
     printf("\n\n=========================================\n");
     printf("         PROFILING RESULTS\n");
@@ -1237,6 +1268,9 @@ void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
     printf("Attn AV Sums : %lld vectors\n", count_attn_v);
 
     long long total_tokens = prefill_tokens + decode_tokens;
+    if (total_tokens <= 0) {
+      total_tokens = 1;
+    }
     printf("\nPer-Token Average:\n");
     printf("Matmuls      : %.1f\n", (float)count_matmul / total_tokens);
     printf("RMSNorms     : %.1f\n", (float)count_rmsnorm / total_tokens);
@@ -1300,6 +1334,12 @@ int main(int argc, char *argv[]) {
   chat(&transformer, &tokenizer, &sampler, prompt, system_prompt,
        &prefill_throughput, &decode_throughput, steps);
 
+  if (flash_attention_sigint_requested()) {
+    fflush(stdout);
+    fflush(stderr);
+    _Exit(130);
+  }
+
   // memory and file handles cleanup
   free_sampler(&sampler);
   free_tokenizer(&tokenizer);
@@ -1327,6 +1367,14 @@ void chat_without_encode_decode(Transformer *transformer, Sampler *sampler,
   int pos = 0; // position in the sequence
   int promot_idx = 0;
   while (pos < steps) {
+    if (flash_attention_sigint_requested()) {
+      printf("\n[run_fa] SIGINT requested, terminating generation loop gracefully.\n");
+      if (start != 0) {
+        prefill = prefill == 0 ? time_in_ms() - start : prefill;
+      }
+      break;
+    }
+
     if (start == 0) {
       start = time_in_ms();
     }
