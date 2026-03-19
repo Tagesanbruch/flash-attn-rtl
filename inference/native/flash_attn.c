@@ -10,6 +10,9 @@
 #ifdef FLASH_ATTN_ENABLE_DPI
 #include "fa_dpi_backend.h"
 #endif
+#ifdef FLASH_ATTN_ENABLE_CMODEL
+#include "fa_cmodel_bridge.h"
+#endif
 
 static fa_backend_t g_backend = FA_BACKEND_SW;
 
@@ -146,10 +149,15 @@ static void fa_diff_trace_dump_summary(const char *reason) {
 }
 
 int flash_attention_set_backend(fa_backend_t backend) {
-  if (backend != FA_BACKEND_SW && backend != FA_BACKEND_DPI)
+  if (backend != FA_BACKEND_SW && backend != FA_BACKEND_DPI &&
+      backend != FA_BACKEND_CMODEL)
     return -1;
 #ifndef FLASH_ATTN_ENABLE_DPI
   if (backend == FA_BACKEND_DPI)
+    return -1;
+#endif
+#ifndef FLASH_ATTN_ENABLE_CMODEL
+  if (backend == FA_BACKEND_CMODEL)
     return -1;
 #endif
   g_backend = backend;
@@ -173,6 +181,12 @@ static void flash_attention_backend_env_once(void) {
   if (strcmp(env_backend, "dpi") == 0 || strcmp(env_backend, "DPI") == 0) {
 #ifdef FLASH_ATTN_ENABLE_DPI
     g_backend = FA_BACKEND_DPI;
+#else
+    g_backend = FA_BACKEND_SW;
+#endif
+  } else if (strcmp(env_backend, "cmodel") == 0 || strcmp(env_backend, "CMODEL") == 0) {
+#ifdef FLASH_ATTN_ENABLE_CMODEL
+    g_backend = FA_BACKEND_CMODEL;
 #else
     g_backend = FA_BACKEND_SW;
 #endif
@@ -251,8 +265,9 @@ void fa_core_q8_8(q8_8_t *q, q8_8_t *k_cache, q8_8_t *v_cache, q8_8_t *att_out,
 
 void flash_attention_forward(float *q_f32, float *k_cache_f32,
                              float *v_cache_f32, float *att_out_f32,
-                             int seq_len, int n_heads, int head_size,
-                             int kv_mul, int kv_dim, float scale) {
+                             int layer_idx, int seq_len, int n_heads,
+                             int head_size, int kv_mul, int kv_dim,
+                             float scale) {
   // 1. Allocate Q8.8 Buffers (These represent the SRAMs or exact DMA
   // transaction boundaries) S_max = seq_len + 1 for online softmax up to
   // current prompt token
@@ -294,6 +309,14 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
     static FILE *head_summary_fp = NULL;
     static int dpi_out_gain_cfg_inited = 0;
     static float dpi_out_gain = 1.0f;
+    static int dpi_neg_large_cfg_inited = 0;
+    static int16_t dpi_neg_large_q8_8 = (int16_t)-8192;
+    static int dpi_hotfix_cfg_inited = 0;
+    static int dpi_hotfix_enable = 0;
+    static int dpi_hotfix_layer_begin = 22;
+    static int dpi_hotfix_pos_begin = 1;
+    static FILE *dpi_hotfix_fp = NULL;
+    static int hotfix_mask[14] = {0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1};
     int enable_difftest = 1;
     int difftest_sample_every = 1;
     int diff_print_enable = 0;
@@ -364,6 +387,78 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
       }
     }
 
+    if (!dpi_neg_large_cfg_inited) {
+      dpi_neg_large_cfg_inited = 1;
+      const char *neg_large_env = getenv("FLASH_ATTN_DPI_NEG_LARGE_Q88");
+      if (neg_large_env && neg_large_env[0] != '\0') {
+        long parsed = strtol(neg_large_env, NULL, 10);
+        if (parsed > 32767)
+          parsed = 32767;
+        if (parsed < -32768)
+          parsed = -32768;
+        dpi_neg_large_q8_8 = (int16_t)parsed;
+      }
+    }
+
+    if (!dpi_hotfix_cfg_inited) {
+      dpi_hotfix_cfg_inited = 1;
+      const char *hotfix_env = getenv("FLASH_ATTN_DPI_HOTFIX_ENABLE");
+      if (hotfix_env &&
+          (strcmp(hotfix_env, "1") == 0 || strcmp(hotfix_env, "true") == 0 ||
+           strcmp(hotfix_env, "TRUE") == 0)) {
+        dpi_hotfix_enable = 1;
+      }
+
+      const char *layer_begin_env = getenv("FLASH_ATTN_DPI_HOTFIX_LAYER_BEGIN");
+      if (layer_begin_env && layer_begin_env[0] != '\0') {
+        int parsed = atoi(layer_begin_env);
+        if (parsed >= 0) {
+          dpi_hotfix_layer_begin = parsed;
+        }
+      }
+
+      const char *pos_begin_env = getenv("FLASH_ATTN_DPI_HOTFIX_POS_BEGIN");
+      if (pos_begin_env && pos_begin_env[0] != '\0') {
+        int parsed = atoi(pos_begin_env);
+        if (parsed >= 0) {
+          dpi_hotfix_pos_begin = parsed;
+        }
+      }
+
+      const char *heads_env = getenv("FLASH_ATTN_DPI_HOTFIX_HEADS");
+      if (heads_env && heads_env[0] != '\0') {
+        if (strcmp(heads_env, "all") == 0 || strcmp(heads_env, "ALL") == 0) {
+          for (int i = 0; i < 14; i++) {
+            hotfix_mask[i] = 1;
+          }
+        } else {
+          for (int i = 0; i < 14; i++) {
+            hotfix_mask[i] = 0;
+          }
+          char buf[128];
+          strncpy(buf, heads_env, sizeof(buf) - 1);
+          buf[sizeof(buf) - 1] = '\0';
+          char *tok = strtok(buf, ",");
+          while (tok) {
+            int idx = atoi(tok);
+            if (idx >= 0 && idx < 14) {
+              hotfix_mask[idx] = 1;
+            }
+            tok = strtok(NULL, ",");
+          }
+        }
+      }
+
+      if (dpi_hotfix_enable) {
+        const char *hotfix_file_env = getenv("FLASH_ATTN_DPI_HOTFIX_FILE");
+        const char *hotfix_path =
+            (hotfix_file_env && hotfix_file_env[0] != '\0')
+                ? hotfix_file_env
+                : "logs/dpi_hotfix.log";
+        dpi_hotfix_fp = fopen(hotfix_path, "a");
+      }
+    }
+
     if (!dpi_ready && !dpi_failed) {
       fa_dpi_init_cfg_t cfg = {0};
       cfg.memory_bytes = 16 * 1024 * 1024;
@@ -409,8 +504,11 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
 
         int run_difftest_this_head =
             enable_difftest && ((h % difftest_sample_every) == 0);
+        int run_hotfix_this_head =
+          dpi_hotfix_enable && layer_idx >= dpi_hotfix_layer_begin &&
+          seq_len >= dpi_hotfix_pos_begin && h < 14 && hotfix_mask[h] != 0;
 
-        if (run_difftest_this_head) {
+        if (run_difftest_this_head || run_hotfix_this_head) {
           fa_core_q8_8(q_hw + h * head_size, k_hw, v_hw, o_ref,
                        seq_len, head_size, h, kv_mul, kv_dim);
         }
@@ -461,7 +559,7 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
         desc.v_base = v_base;
         desc.o_base = o_base;
         desc.stride_bytes = stride_bytes;
-        desc.neg_large_q8_8 = (int16_t)-8192;
+        desc.neg_large_q8_8 = dpi_neg_large_q8_8;
         desc.scale_q8_8 = scale_q8_8;
         desc.causal_en = true;
         desc.op_type = FA_OP_ATTN;
@@ -475,6 +573,27 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
 
         if (dpi_ok) {
           memcpy(o_hw + h * head_size, o_head, tensor_bytes);
+
+          if (run_hotfix_this_head) {
+            memcpy(o_hw + h * head_size, o_ref, tensor_bytes);
+            if (dpi_hotfix_fp) {
+              int idx = 0;
+              int max_abs_lsb = 0;
+              for (int i = 0; i < head_size; i++) {
+                int diff = (int)o_head[i] - (int)o_ref[i];
+                int ad = diff < 0 ? -diff : diff;
+                if (ad > max_abs_lsb) {
+                  max_abs_lsb = ad;
+                  idx = i;
+                }
+              }
+              fprintf(dpi_hotfix_fp,
+                      "hotfix layer=%d pos=%d head=%d max_abs_lsb=%d idx=%d rtl=%d ref=%d\n",
+                      layer_idx, seq_len, h, max_abs_lsb, idx,
+                      (int)o_head[idx], (int)o_ref[idx]);
+              fflush(dpi_hotfix_fp);
+            }
+          }
 
           if (dpi_out_gain != 1.0f) {
             for (int i = 0; i < head_size; i++) {
@@ -612,6 +731,206 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
         g_backend = FA_BACKEND_SW;
       }
     } else {
+      g_backend = FA_BACKEND_SW;
+    }
+  }
+#endif
+
+#ifdef FLASH_ATTN_ENABLE_CMODEL
+  if (g_backend == FA_BACKEND_CMODEL) {
+    static int cmodel_real_diff_cfg_inited = 0;
+    static int cmodel_real_diff_enable = 0;
+    static FILE *cmodel_real_diff_fp = NULL;
+    static int cmodel_mode15_hotfix_cfg_inited = 0;
+    static int cmodel_mode15_hotfix_enable = 0;
+    static int cmodel_mode15_hotfix_pos_begin = 24;
+    static int cmodel_mode15_hotfix_layers[64] = {0};
+    static FILE *cmodel_mode15_hotfix_fp = NULL;
+    int neg_large_q8_8 = -8192;
+    int hard_mask = 0;
+    int cmodel_mode_id = 14;
+
+    if (!cmodel_real_diff_cfg_inited) {
+      cmodel_real_diff_cfg_inited = 1;
+      const char *diff_env = getenv("FLASH_ATTN_CMODEL_REAL_DIFF");
+      if (diff_env &&
+          (strcmp(diff_env, "1") == 0 || strcmp(diff_env, "true") == 0 ||
+           strcmp(diff_env, "TRUE") == 0)) {
+        cmodel_real_diff_enable = 1;
+        const char *file_env = getenv("FLASH_ATTN_CMODEL_REAL_DIFF_FILE");
+        const char *path = (file_env && file_env[0] != '\0')
+                               ? file_env
+                               : "logs/cmodel_real_diff.log";
+        cmodel_real_diff_fp = fopen(path, "a");
+      }
+    }
+
+    if (!cmodel_mode15_hotfix_cfg_inited) {
+      cmodel_mode15_hotfix_cfg_inited = 1;
+      const char *hotfix_env = getenv("FLASH_ATTN_CMODEL_MODE15_HOTFIX");
+      if (hotfix_env &&
+          (strcmp(hotfix_env, "1") == 0 || strcmp(hotfix_env, "true") == 0 ||
+           strcmp(hotfix_env, "TRUE") == 0)) {
+        cmodel_mode15_hotfix_enable = 1;
+      }
+
+      const char *pos_env = getenv("FLASH_ATTN_CMODEL_MODE15_HOTFIX_POS_BEGIN");
+      if (pos_env && pos_env[0] != '\0') {
+        int parsed = atoi(pos_env);
+        if (parsed >= 0) {
+          cmodel_mode15_hotfix_pos_begin = parsed;
+        }
+      }
+
+      cmodel_mode15_hotfix_layers[2] = 1;
+      cmodel_mode15_hotfix_layers[3] = 1;
+      cmodel_mode15_hotfix_layers[9] = 1;
+      cmodel_mode15_hotfix_layers[11] = 1;
+      const char *layers_env = getenv("FLASH_ATTN_CMODEL_MODE15_HOTFIX_LAYERS");
+      if (layers_env && layers_env[0] != '\0') {
+        for (int i = 0; i < 64; i++) cmodel_mode15_hotfix_layers[i] = 0;
+        char buf[256];
+        strncpy(buf, layers_env, sizeof(buf) - 1);
+        buf[sizeof(buf) - 1] = '\0';
+        char *tok = strtok(buf, ",");
+        while (tok) {
+          int idx = atoi(tok);
+          if (idx >= 0 && idx < 64) {
+            cmodel_mode15_hotfix_layers[idx] = 1;
+          }
+          tok = strtok(NULL, ",");
+        }
+      }
+
+      if (cmodel_mode15_hotfix_enable) {
+        const char *file_env = getenv("FLASH_ATTN_CMODEL_MODE15_HOTFIX_FILE");
+        const char *path = (file_env && file_env[0] != '\0')
+                               ? file_env
+                               : "logs/cmodel_mode15_hotfix.log";
+        cmodel_mode15_hotfix_fp = fopen(path, "a");
+      }
+    }
+
+    const char *neg_large_env = getenv("FLASH_ATTN_CMODEL_NEG_LARGE_Q88");
+    if (neg_large_env && neg_large_env[0] != '\0') {
+      int parsed = atoi(neg_large_env);
+      if (parsed > 32767)
+        parsed = 32767;
+      if (parsed < -32768)
+        parsed = -32768;
+      neg_large_q8_8 = parsed;
+    }
+
+    const char *hard_mask_env = getenv("FLASH_ATTN_CMODEL_HARD_MASK");
+    if (hard_mask_env &&
+        (strcmp(hard_mask_env, "1") == 0 || strcmp(hard_mask_env, "true") == 0 ||
+         strcmp(hard_mask_env, "TRUE") == 0)) {
+      hard_mask = 1;
+    }
+
+    const char *mode_env = getenv("FLASH_ATTN_CMODEL_MODE");
+    if (mode_env && mode_env[0] != '\0') {
+      cmodel_mode_id = atoi(mode_env);
+    }
+
+    int cmodel_ok = 1;
+    int kv_steps = seq_len + 1;
+    q8_8_t *k_head =
+        (q8_8_t *)malloc((size_t)kv_steps * (size_t)head_size * sizeof(q8_8_t));
+    q8_8_t *v_head =
+        (q8_8_t *)malloc((size_t)kv_steps * (size_t)head_size * sizeof(q8_8_t));
+    q8_8_t *o_head = (q8_8_t *)malloc((size_t)head_size * sizeof(q8_8_t));
+    q8_8_t *o_mode14 = (q8_8_t *)malloc((size_t)head_size * sizeof(q8_8_t));
+
+    if (!k_head || !v_head || !o_head || !o_mode14) {
+      cmodel_ok = 0;
+    }
+
+    for (int h = 0; h < n_heads && cmodel_ok; h++) {
+      int kv_head_idx = h / kv_mul;
+      for (int t = 0; t < kv_steps; t++) {
+        q8_8_t *k_src = k_hw + t * kv_dim + kv_head_idx * head_size;
+        q8_8_t *v_src = v_hw + t * kv_dim + kv_head_idx * head_size;
+        memcpy(k_head + (size_t)t * head_size, k_src,
+               (size_t)head_size * sizeof(q8_8_t));
+        memcpy(v_head + (size_t)t * head_size, v_src,
+               (size_t)head_size * sizeof(q8_8_t));
+      }
+
+      int effective_mode_id = cmodel_mode_id;
+      if (cmodel_mode15_hotfix_enable && cmodel_mode_id == 15 &&
+          layer_idx >= 0 && layer_idx < 64 &&
+          cmodel_mode15_hotfix_layers[layer_idx] &&
+          seq_len >= cmodel_mode15_hotfix_pos_begin) {
+        effective_mode_id = 13;
+        if (cmodel_mode15_hotfix_fp) {
+          fprintf(cmodel_mode15_hotfix_fp,
+                  "mode15_hotfix layer=%d pos=%d head=%d mode=%d->%d\n",
+                  layer_idx, seq_len, h, cmodel_mode_id, effective_mode_id);
+          fflush(cmodel_mode15_hotfix_fp);
+        }
+      }
+
+      int rc = fa_cmodel_attention_head(q_hw + h * head_size, k_head, v_head,
+                                        seq_len, head_size, o_head,
+                                        neg_large_q8_8, hard_mask,
+                                        effective_mode_id);
+      if (rc != 0) {
+        cmodel_ok = 0;
+        break;
+      }
+
+      if (cmodel_real_diff_enable && cmodel_real_diff_fp && cmodel_mode_id == 15) {
+        int rc14 = fa_cmodel_attention_head(q_hw + h * head_size, k_head, v_head,
+                                            seq_len, head_size, o_mode14,
+                                            neg_large_q8_8, hard_mask, 14);
+        if (rc14 == 0) {
+          int max_abs = 0;
+          int max_idx = 0;
+          for (int i = 0; i < head_size; i++) {
+            int diff = (int)o_head[i] - (int)o_mode14[i];
+            int ad = diff < 0 ? -diff : diff;
+            if (ad > max_abs) {
+              max_abs = ad;
+              max_idx = i;
+            }
+          }
+
+          int qmax = 0;
+          int kmax = 0;
+          int vmax = 0;
+          for (int i = 0; i < head_size; i++) {
+            int aq = (int)q_hw[h * head_size + i];
+            if (aq < 0) aq = -aq;
+            if (aq > qmax) qmax = aq;
+          }
+          for (int i = 0; i < kv_steps * head_size; i++) {
+            int ak = (int)k_head[i];
+            int av = (int)v_head[i];
+            if (ak < 0) ak = -ak;
+            if (av < 0) av = -av;
+            if (ak > kmax) kmax = ak;
+            if (av > vmax) vmax = av;
+          }
+
+          fprintf(cmodel_real_diff_fp,
+                  "real_diff layer=%d pos=%d head=%d max_abs_lsb=%d idx=%d m15=%d m14=%d qmax=%d kmax=%d vmax=%d\n",
+                  layer_idx, seq_len, h, max_abs, max_idx,
+                  (int)o_head[max_idx], (int)o_mode14[max_idx],
+                  qmax, kmax, vmax);
+          fflush(cmodel_real_diff_fp);
+        }
+      }
+
+      memcpy(o_hw + h * head_size, o_head, (size_t)head_size * sizeof(q8_8_t));
+    }
+
+    free(k_head);
+    free(v_head);
+    free(o_head);
+    free(o_mode14);
+
+    if (!cmodel_ok) {
       g_backend = FA_BACKEND_SW;
     }
   }

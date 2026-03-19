@@ -58,6 +58,100 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
     const int S = static_cast<int>(Q.size());
     const int D = static_cast<int>(Q[0].size());
     MatrixI16 O(S, std::vector<int16_t>(D, 0));
+
+    if (mode == Mode::FA_CORE_COMPAT) {
+        const float scale_f = 1.0f / std::sqrt(static_cast<float>(D));
+        for (int qi = 0; qi < S; ++qi) {
+            float m_prev = -1e20f;
+            float l_prev = 0.0f;
+            std::vector<float> acc(D, 0.0f);
+
+            for (int kj = 0; kj < S; ++kj) {
+                if (causal && kj > qi) {
+                    if (hard_mask) {
+                        continue;
+                    }
+                }
+
+                int32_t score_acc = 0;
+                for (int d = 0; d < D; ++d) {
+                    score_acc += static_cast<int32_t>(Q[qi][d]) * static_cast<int32_t>(K[kj][d]);
+                }
+
+                float score_f = (static_cast<float>(score_acc) / 65536.0f) * scale_f;
+                if (causal && kj > qi && !hard_mask) {
+                    score_f = static_cast<float>(neg_large) / 256.0f;
+                }
+
+                float m_curr = (score_f > m_prev) ? score_f : m_prev;
+                float exp_val = std::exp(score_f - m_curr);
+                float exp_factor = std::exp(m_prev - m_curr);
+
+                l_prev = l_prev * exp_factor + exp_val;
+                for (int d = 0; d < D; ++d) {
+                    acc[d] = acc[d] * exp_factor + exp_val * q8_8_to_float(V[kj][d]);
+                }
+                m_prev = m_curr;
+            }
+
+            float inv_l = 1.0f / (l_prev + 1e-6f);
+            for (int d = 0; d < D; ++d) {
+                O[qi][d] = float_to_q8_8(acc[d] * inv_l);
+            }
+        }
+        return O;
+    }
+
+    if (mode == Mode::FIXED_Q8_IMPROVED) {
+        const int16_t scale_q8_8 = static_cast<int16_t>(std::lround((1.0 / std::sqrt(static_cast<double>(D))) * 256.0));
+        for (int qi = 0; qi < S; ++qi) {
+            int16_t m_prev = static_cast<int16_t>(-32768);
+            uint32_t l_prev = 0;
+            std::vector<int64_t> acc(D, 0);
+
+            for (int kj = 0; kj < S; ++kj) {
+                if (causal && kj > qi) {
+                    if (hard_mask) {
+                        continue;
+                    }
+                }
+
+                int64_t dp = 0;
+                for (int d = 0; d < D; ++d) {
+                    dp += static_cast<int32_t>(Q[qi][d]) * static_cast<int32_t>(K[kj][d]);
+                }
+                int16_t dp_q8_8 = static_cast<int16_t>((dp >> 8) & 0xFFFF);
+                int16_t score = q8_8_mul_sat(dp_q8_8, scale_q8_8);
+                if (causal && kj > qi && !hard_mask) {
+                    score = neg_large;
+                }
+
+                int16_t m_new = (score > m_prev) ? score : m_prev;
+                int16_t diff_old = static_cast<int16_t>(m_prev - m_new);
+                int16_t diff_new = static_cast<int16_t>(score - m_new);
+
+                uint16_t exp_old = exp_real_q1_15(diff_old);
+                uint16_t exp_new = exp_real_q1_15(diff_new);
+
+                uint32_t l_scaled = static_cast<uint32_t>((static_cast<uint64_t>(l_prev) * exp_old) >> 15);
+                uint32_t l_term = static_cast<uint32_t>(exp_new) << 1;
+                l_prev = to_u32(static_cast<uint64_t>(l_scaled) + l_term);
+
+                for (int d = 0; d < D; ++d) {
+                    int64_t acc_old = (acc[d] * static_cast<int64_t>(exp_old)) >> 15;
+                    int64_t pv_term = (static_cast<int64_t>(exp_new) * static_cast<int64_t>(static_cast<int32_t>(V[kj][d]))) << 1;
+                    acc[d] = acc_old + pv_term;
+                }
+                m_prev = m_new;
+            }
+
+            for (int d = 0; d < D; ++d) {
+                O[qi][d] = div_round_sat_s16(acc[d], l_prev);
+            }
+        }
+        return O;
+    }
+
     const int16_t scale_q8_8 = static_cast<int16_t>(std::lround((1.0 / std::sqrt(static_cast<double>(D))) * 256.0));
     const bool strict_rtl_mode = (mode == Mode::RTL_STRICT);
     const bool ctx_step_mode = (mode == Mode::RTL_CTX_STEP);

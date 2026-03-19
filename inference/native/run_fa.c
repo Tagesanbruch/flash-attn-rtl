@@ -539,7 +539,7 @@ float *forward(Transformer *transformer, int token, int pos, bool need_bias) {
     // flash_attention_forward encapsulates the Q*K, Softmax, P*V for all heads
     // and inherently forces the data to be quantized to Q8.8 and back.
     flash_attention_forward(s->q, s->key_cache + loff, s->value_cache + loff,
-                            s->xb, pos, p->n_heads, head_size, kv_mul, kv_dim,
+                s->xb, (int)l, pos, p->n_heads, head_size, kv_mul, kv_dim,
                             1.0f / sqrtf(head_size));
 
     t1 = get_time_sec();

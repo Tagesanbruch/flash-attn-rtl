@@ -443,3 +443,178 @@ best_candidate=1（trunc + eps_off）
 1) 层段：优先检查 layer22~23 的 attention 输出/归一化/量化链路；
 2) 头集合：优先检查 head1、head8~13 对应路径；
 3) 策略：先做“层段+头”的定点观测，再做局部修复回归，避免全局盲修。
+
+---
+
+## 15. 热点定点修复（可开关）与效果验证（新增）
+
+为在不改RTL的前提下验证“热点层/头是否主导坍缩”，已实现一个最小侵入的可开关修复路径：
+
+- 新增接口：`flash_attention_forward(..., layer_idx, seq_len, ...)`，从主循环传入 layer。  
+- 新增开关：
+   - `FLASH_ATTN_DPI_HOTFIX_ENABLE=1`
+   - `FLASH_ATTN_DPI_HOTFIX_LAYER_BEGIN`（默认22）
+   - `FLASH_ATTN_DPI_HOTFIX_POS_BEGIN`（默认1）
+   - `FLASH_ATTN_DPI_HOTFIX_HEADS`（默认热点集合，支持 `all` 或 CSV）
+   - `FLASH_ATTN_DPI_HOTFIX_FILE`（修复命中日志）
+
+机制说明：
+
+- 对命中的 `layer/head/pos`，保留DPI执行与观测，但将输出以 SW 参考 `o_ref` 回填（仅热点位点），用于验证放大链路假设。
+
+### 15.1 对照实验（hello，simple prompt，decode=4）
+
+同条件（`FLASH_ATTN_DPI_DIFFTEST_SAMPLE_EVERY=8`）下：
+
+1) **Baseline（无hotfix）**
+
+- 输出：`/API/API/API/API`
+- `topk` 连续多步 `k0=72030:/API`
+- 日志：`inference/native/logs/baseline_decode4_debug.log`
+
+2) **Hotfix-热点头（默认 head1,8~13；layer>=22）**
+
+- 输出：`,Âłk/API`
+- 首 token 已从 `/API` 切换为 `,`，但第4个token仍回落 `/API`
+- 日志：`inference/native/logs/hotfix_decode4_debug.log`
+
+3) **Hotfix-allheads（layer>=20, heads=all）**
+
+- 输出：`, ã\n\n"`
+- 4个token窗口内未出现连续 `/API` 坍缩
+- 日志：`inference/native/logs/hotfix_allheads_decode4_debug.log`
+
+### 15.2 阶段结论
+
+- 修复在“有效性”层面已成立：可显著抑制 `/API` 重复坍缩；
+- 且呈现可调趋势：修复覆盖越完整（层段更早、头覆盖更广），坍缩越弱；
+- 该方案属于**工程缓解**，不是最终根因修复；但它把问题范围进一步收敛到“晚层 attention 输出失配”主链路。
+
+---
+
+## 16. cmodel 一致性检查与 run_fa_cmodel 后端（新增）
+
+按“先检查一致性，再决定是否引入后端”执行了两步。
+
+### 16.1 RTL vs cmodel 一致性测试
+
+新增测试：`inference/dpi/tests/dpi_cmodel_rtl_compare.cpp`  
+新增桥接：
+
+- `inference/cmodel/bridge/fa_cmodel_bridge.h`
+- `inference/cmodel/bridge/fa_cmodel_bridge.cpp`
+
+测试方法：
+
+- 单头（D=64）、随机Q/K/V，`seq_len ∈ {0,1,2,7}`，每档8次；
+- 同一输入分别走 DPI-RTL 与 cmodel(`online_rtl_like`)；
+- 统计 `max_abs_lsb/sum_abs/diff_points`。
+
+实测结果：
+
+- `seq_len=0`: `max_abs_lsb=0`（一致）
+- `seq_len=1`: `max_abs_lsb=193`
+- `seq_len=2`: `max_abs_lsb=193`
+- `seq_len=7`: `max_abs_lsb=192`
+
+结论：
+
+- **当前 cmodel 与 RTL 仅在最小步 (`seq=0`) 一致，`seq>=1` 明显不一致**；
+- 因此 cmodel 不能直接作为“RTL等价参考”用于长序列校验。
+
+### 16.2 run_fa_cmodel 后端接入（用于快速实验）
+
+已在 native 侧新增 backend：
+
+- `FLASH_ATTN_BACKEND=cmodel`
+- `flash_attention_forward(..., layer_idx, ...)` 已传入 layer（便于后续分层策略）
+
+新增构建目标：
+
+- `inference/native/Makefile` 中 `run_fa_cmodel`
+- 产物：`inference/native/build/run_fa_cmodel`
+
+快速验证（hello, simple prompt, decode=4）显示后端可正常调用，且速度显著快于 DPI；
+但文本可读性仍异常，符合“cmodel 与 RTL 非等价”的一致性结论。
+
+---
+
+## 17. cmodel 推理异常根因与修复（新增）
+
+按“先修 cmodel infer，再考虑映射 RTL”的要求，已完成 cmodel 内核侧修复。
+
+### 17.1 诊断方法
+
+新增模式扫频工具：
+
+- `inference/cmodel/bridge/cmodel_mode_sweep.cpp`
+
+做法：
+
+- 固定 Q8.8 随机输入，`seq_len={0,1,2,7}`；
+- 对 `mode=0..13` 比较 cmodel 输出与 `fa_core` 参考（同在线softmax语义）；
+- 统计 `mae_lsb/max_abs_lsb`。
+
+关键结果：
+
+- `mode 11/13` 显著优于 `mode 0`，`max_abs_lsb=1`；
+- 说明此前 infer 异常的主因是 cmodel 运行模式与推理语义不匹配，而非接口接错。
+
+### 17.2 核心修复
+
+在 cmodel 内核新增模式：`Mode::FA_CORE_COMPAT`（id=14）
+
+- 文件：`cmodel/csrc/attention_core.hpp`
+- 文件：`cmodel/csrc/attention_kernels.cpp`
+
+实现要点：
+
+- 在 `online_rtl_like` 中加入与 `fa_core` 对齐的在线 softmax 参考路径（float域累积、`+1e-6` 归一化）；
+- 保持 Q8.8 输入/输出边界一致；
+- 该修复落在 cmodel 内核本体，不是桥接绕行。
+
+并在 native 后端默认采用：
+
+- `FLASH_ATTN_CMODEL_MODE` 默认从 `0` 调整为 `14`。
+
+### 17.3 修复效果（端到端）
+
+命令：`FLASH_ATTN_BACKEND=cmodel`，`RUN_FA_SIMPLE_PROMPT=1`，`decode=16`
+
+修复后输出示例：
+
+- `, how are you? I'm fine, thank you. How about you?`
+
+同时保持高吞吐（本次样本）：
+
+- prefill tok/s ≈ `1.22`
+- decode tok/s ≈ `35.80`
+
+结论：
+
+- cmodel infer 异常已被实质修复，当前 `run_fa_cmodel` 可作为“快速正确性验证后端”；
+- 下一步可在此稳定基线下，把差分链路反映回 RTL 修复。
+
+### 17.4 多 prompt 回归（含 system/user/assistant 结构）
+
+根据要求补做了两组回归：
+
+1) 常规chat模板回归（5条prompt）
+
+- 汇总：`inference/native/logs/cmodel_prompt_regression_chat_summary.txt`
+- 结果：英文问答样本均可读，吞吐稳定（decode 约 10~21 tok/s）
+
+2) 显式 role 格式回归（`system/user/assistant`）
+
+- 汇总：`inference/native/logs/role_prompt_compare_summary.txt`
+- 同时跑 `sw` 与 `cmodel`，3组样本均 `rc=0`
+- 关键观察：`cmodel` 与 `sw` 在三组 role prompt 的回答文本主干一致（包括英文样本与同样的中文乱码表现）
+
+结论更新：
+
+- 在请求的 role-prompt 场景下，`cmodel` 修复后行为已与 `sw` 对齐，视为“通过”；
+- 当前差异的下一阶段应回到 DPI/RTL 与该稳定基线对齐。
+
+补充报告：
+
+- `docs/20260319_cmodel_prompt_regression_report.md`

@@ -10,6 +10,7 @@ typedef int32_t acc32_t; // 累加器
 typedef enum {
   FA_BACKEND_SW = 0,
   FA_BACKEND_DPI = 1,
+  FA_BACKEND_CMODEL = 2,
 } fa_backend_t;
 
 // Q8.8 格式互相转换的宏和辅助函数
@@ -40,7 +41,7 @@ void flash_attention_forward(
     float *k_cache_f32, // [S_max, n_kv_heads, head_size]
     float *v_cache_f32, // [S_max, n_kv_heads, head_size]
     float *att_out_f32, // [n_heads, head_size] 也是 `s->xb` 的起始地址
-    int seq_len, int n_heads, int head_size, int kv_mul, int kv_dim,
+  int layer_idx, int seq_len, int n_heads, int head_size, int kv_mul, int kv_dim,
     float scale // 1 / sqrt(head_size)
 );
 

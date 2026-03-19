@@ -50,6 +50,15 @@ run_fa_dpi: run_fa.c flash_attn.c
 	mkdir -p build
 	$(CC) -Ofast -fopenmp -march=native -DFLASH_ATTN_ENABLE_DPI -DNORMAL -I../dpi/include -DQWEN_BIN_MODEL_PATH='"${QWEN_BIN_MODEL_PATH}"' -DQWEN_BIN_TOKEN_PATH='"${QWEN_BIN_TOKEN_PATH}"' run_fa.c flash_attn.c ../dpi/build/libfa_dpi_backend.a ../dpi/build/verilated/libVfa_attention_ip_top.a ../dpi/build/verilated/libverilated.a -lc++ -lm -o build/run_fa_dpi
 
+run_fa_cmodel: run_fa.c flash_attn.c ../cmodel/bridge/fa_cmodel_bridge.cpp
+	mkdir -p build
+	$(CC) -Ofast -fopenmp -march=native -DNORMAL -DFLASH_ATTN_ENABLE_CMODEL -I../cmodel/bridge -I../../cmodel/csrc -DQWEN_BIN_MODEL_PATH='"${QWEN_BIN_MODEL_PATH}"' -DQWEN_BIN_TOKEN_PATH='"${QWEN_BIN_TOKEN_PATH}"' -c run_fa.c -o build/run_fa.o
+	$(CC) -Ofast -fopenmp -march=native -DNORMAL -DFLASH_ATTN_ENABLE_CMODEL -I../cmodel/bridge -I../../cmodel/csrc -DQWEN_BIN_MODEL_PATH='"${QWEN_BIN_MODEL_PATH}"' -DQWEN_BIN_TOKEN_PATH='"${QWEN_BIN_TOKEN_PATH}"' -c flash_attn.c -o build/flash_attn.o
+	$(CXX) -Ofast -std=c++17 -march=native -I../../cmodel/csrc -I../cmodel/bridge -c ../cmodel/bridge/fa_cmodel_bridge.cpp -o build/fa_cmodel_bridge.o
+	$(CXX) -Ofast -std=c++17 -march=native -I../../cmodel/csrc -c ../../cmodel/csrc/attention_math.cpp -o build/attention_math.o
+	$(CXX) -Ofast -std=c++17 -march=native -I../../cmodel/csrc -c ../../cmodel/csrc/attention_kernels.cpp -o build/attention_kernels.o
+	$(CXX) -fopenmp build/run_fa.o build/flash_attn.o build/fa_cmodel_bridge.o build/attention_math.o build/attention_kernels.o -lm -o build/run_fa_cmodel
+
 ########## FP8 run ###########
 run_fp8: run-fp8.c ${QWEN3_FP8_BIN_PATH} ${QWEN_BIN_TOKEN_PATH}
 	mkdir -p build

@@ -110,4 +110,17 @@ if(FA_DPI_BUILD_TESTS)
   add_executable(dpi_lsb_stage_compare tests/dpi_lsb_stage_compare.cpp)
   target_link_libraries(dpi_lsb_stage_compare PRIVATE fa_dpi_backend)
   target_include_directories(dpi_lsb_stage_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+  add_executable(dpi_cmodel_rtl_compare
+    tests/dpi_cmodel_rtl_compare.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cmodel/bridge/fa_cmodel_bridge.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../cmodel/csrc/attention_math.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../cmodel/csrc/attention_kernels.cpp
+  )
+  target_link_libraries(dpi_cmodel_rtl_compare PRIVATE fa_dpi_backend)
+  target_include_directories(dpi_cmodel_rtl_compare PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cmodel/bridge
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../cmodel/csrc
+  )
 endif()
