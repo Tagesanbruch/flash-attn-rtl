@@ -36,6 +36,68 @@ double time_attn = 0;
 double time_o = 0;
 double time_ffn = 0;
 
+static int g_attn_norm_cfg_inited = 0;
+static int g_attn_norm_enable = 0;
+static int g_attn_norm_pos = -1;
+static FILE *g_attn_norm_fp = NULL;
+
+static int g_final_act_cfg_inited = 0;
+static int g_final_act_enable = 0;
+static int g_final_act_pos = -1;
+static FILE *g_final_act_fp = NULL;
+
+static void init_attn_norm_cfg_once() {
+  if (g_attn_norm_cfg_inited)
+    return;
+  g_attn_norm_cfg_inited = 1;
+
+  const char *enable_env = getenv("RUN_FA_DEBUG_ATTN_NORM");
+  if (!(enable_env &&
+        (strcmp(enable_env, "1") == 0 || strcmp(enable_env, "true") == 0 ||
+         strcmp(enable_env, "TRUE") == 0))) {
+    return;
+  }
+
+  g_attn_norm_enable = 1;
+
+  const char *pos_env = getenv("RUN_FA_DEBUG_ATTN_NORM_POS");
+  if (pos_env && pos_env[0] != '\0') {
+    g_attn_norm_pos = atoi(pos_env);
+  }
+
+  const char *file_env = getenv("RUN_FA_DEBUG_ATTN_NORM_FILE");
+  const char *path = (file_env && file_env[0] != '\0')
+                         ? file_env
+                         : "logs/attn_norm_debug.log";
+  g_attn_norm_fp = fopen(path, "w");
+}
+
+static void init_final_act_cfg_once() {
+  if (g_final_act_cfg_inited)
+    return;
+  g_final_act_cfg_inited = 1;
+
+  const char *enable_env = getenv("RUN_FA_DEBUG_FINAL_ACT");
+  if (!(enable_env &&
+        (strcmp(enable_env, "1") == 0 || strcmp(enable_env, "true") == 0 ||
+         strcmp(enable_env, "TRUE") == 0))) {
+    return;
+  }
+
+  g_final_act_enable = 1;
+
+  const char *pos_env = getenv("RUN_FA_DEBUG_FINAL_ACT_POS");
+  if (pos_env && pos_env[0] != '\0') {
+    g_final_act_pos = atoi(pos_env);
+  }
+
+  const char *file_env = getenv("RUN_FA_DEBUG_FINAL_ACT_FILE");
+  const char *path = (file_env && file_env[0] != '\0')
+                         ? file_env
+                         : "logs/final_act_debug.log";
+  g_final_act_fp = fopen(path, "w");
+}
+
 static double get_time_sec() {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -44,6 +106,28 @@ static double get_time_sec() {
 // -----------------------
 
 // ----------------------------------------------------------------------------
+
+typedef struct {
+  int idx;
+  float val;
+} TopKItem;
+
+static void topk_insert(TopKItem *topk, int k, int idx, float val) {
+  int pos = -1;
+  for (int i = 0; i < k; i++) {
+    if (val > topk[i].val) {
+      pos = i;
+      break;
+    }
+  }
+  if (pos < 0)
+    return;
+  for (int i = k - 1; i > pos; i--) {
+    topk[i] = topk[i - 1];
+  }
+  topk[pos].idx = idx;
+  topk[pos].val = val;
+}
 // Transformer model
 
 typedef struct {
@@ -337,6 +421,9 @@ void matmul(float *xout, float *x, float *w, int n, int d) {
 }
 
 float *forward(Transformer *transformer, int token, int pos, bool need_bias) {
+  init_attn_norm_cfg_once();
+  init_final_act_cfg_once();
+
   double t0, t1;
   int head_size_prof = transformer->config.dim / transformer->config.n_heads;
   int kv_dim_prof = (transformer->config.dim * transformer->config.n_kv_heads) /
@@ -460,6 +547,25 @@ float *forward(Transformer *transformer, int token, int pos, bool need_bias) {
     total_macs_attn += (long long)(2 * p->n_heads * (pos + 1) *
                                    head_size); // QK dot and AV dot
 
+    if (g_attn_norm_enable && g_attn_norm_fp &&
+        (g_attn_norm_pos < 0 || g_attn_norm_pos == pos)) {
+      double sum2 = 0.0;
+      float maxabs = 0.0f;
+      for (int i = 0; i < dim; i++) {
+        float v = s->xb[i];
+        sum2 += (double)v * (double)v;
+        float av = fabsf(v);
+        if (av > maxabs)
+          maxabs = av;
+      }
+      double l2 = sqrt(sum2);
+      double rms = sqrt(sum2 / (double)dim);
+      fprintf(g_attn_norm_fp,
+              "attn_norm backend=%d pos=%d layer=%llu l2=%f rms=%f maxabs=%f\n",
+              (int)flash_attention_get_backend(), pos, l, l2, rms, maxabs);
+      fflush(g_attn_norm_fp);
+    }
+
     if (do_trace && trace_fp != NULL) {
       fprintf(trace_fp, "   Internal Ops (per head):\n");
       fprintf(trace_fp, "     - QK^T Dot Products: %d times ([%d] dot [%d])\n",
@@ -536,6 +642,30 @@ float *forward(Transformer *transformer, int token, int pos, bool need_bias) {
 
   // final rmsnorm
   rmsnorm(x, x, w->rms_final_weight, dim);
+
+  if (g_final_act_enable && g_final_act_fp &&
+      (g_final_act_pos < 0 || g_final_act_pos == pos)) {
+    double sum = 0.0;
+    double sum2 = 0.0;
+    float maxabs = 0.0f;
+    for (int i = 0; i < dim; i++) {
+      float v = x[i];
+      sum += (double)v;
+      sum2 += (double)v * (double)v;
+      float av = fabsf(v);
+      if (av > maxabs)
+        maxabs = av;
+    }
+    double mean = sum / (double)dim;
+    double var = (sum2 / (double)dim) - mean * mean;
+    if (var < 0.0)
+      var = 0.0;
+    double std = sqrt(var);
+    fprintf(g_final_act_fp,
+            "final_act backend=%d pos=%d mean=%f std=%f maxabs=%f\n",
+            (int)flash_attention_get_backend(), pos, mean, std, maxabs);
+    fflush(g_final_act_fp);
+  }
 
   // classifier into logits
   matmul(s->logits, x, w->wcls, p->dim, p->vocab_size);
@@ -1027,6 +1157,16 @@ void replace_spaces_with_G(char *system_prompt_ori,
 int promote_to_token(Tokenizer *tokenizer, char *user_prompt,
                      char *system_prompt, int *prompt_tokens) {
 
+  const char *simple_prompt_env = getenv("RUN_FA_SIMPLE_PROMPT");
+  if (simple_prompt_env &&
+      (strcmp(simple_prompt_env, "1") == 0 ||
+       strcmp(simple_prompt_env, "true") == 0 ||
+       strcmp(simple_prompt_env, "TRUE") == 0)) {
+    int n_simple_tokens = 0;
+    encode(tokenizer, user_prompt, 1, 0, prompt_tokens, &n_simple_tokens);
+    return n_simple_tokens;
+  }
+
   // buffers for reading the system prompt and user prompt from stdin
   int num_prompt_tokens = 0;
   int *system_prompt_tokens = (int *)malloc(32768 * sizeof(int));
@@ -1093,6 +1233,47 @@ int promote_to_token(Tokenizer *tokenizer, char *user_prompt,
 void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
           char *user_prompt, char *system_prompt, float *prefill_throughput,
           float *decode_throughput, int steps) {
+  int debug_decode_tokens = 0;
+  int debug_topk_k = 0;
+  int stop_after_decode_tokens = 0;
+  int decode_generated = 0;
+  long debug_lines = 0;
+  FILE *decode_debug_fp = NULL;
+  const char *decode_debug_path = "logs/decode_debug.log";
+
+  const char *debug_decode_env = getenv("RUN_FA_DEBUG_DECODE_TOKENS");
+  if (debug_decode_env &&
+      (strcmp(debug_decode_env, "1") == 0 ||
+       strcmp(debug_decode_env, "true") == 0 ||
+       strcmp(debug_decode_env, "TRUE") == 0)) {
+    debug_decode_tokens = 1;
+  }
+
+  const char *debug_topk_env = getenv("RUN_FA_DEBUG_TOPK");
+  if (debug_topk_env && debug_topk_env[0] != '\0') {
+    int parsed = atoi(debug_topk_env);
+    if (parsed > 0) {
+      debug_topk_k = parsed;
+      if (debug_topk_k > 20)
+        debug_topk_k = 20;
+    }
+  }
+
+  const char *stop_after_decode_env = getenv("RUN_FA_STOP_AFTER_DECODE_TOKENS");
+  if (stop_after_decode_env && stop_after_decode_env[0] != '\0') {
+    int parsed = atoi(stop_after_decode_env);
+    if (parsed > 0)
+      stop_after_decode_tokens = parsed;
+  }
+
+  const char *debug_file_env = getenv("RUN_FA_DEBUG_FILE");
+  if (debug_file_env && debug_file_env[0] != '\0') {
+    decode_debug_path = debug_file_env;
+  }
+  if (debug_decode_tokens || debug_topk_k > 0) {
+    decode_debug_fp = fopen(decode_debug_path, "w");
+  }
+
   printf("\nUser prompt: \n%s\n", user_prompt);
   printf("\nAnswer: \n");
 
@@ -1103,6 +1284,7 @@ void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
       promote_to_token(tokenizer, user_prompt, system_prompt, prompt_tokens);
 
   // Time
+  long run_start_ms = time_in_ms();
   long start = 0;
   long end = 0;
   long prefill = 0;
@@ -1169,6 +1351,23 @@ void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
 
     float *logits = forward(transformer, token, pos, true);
 
+    if (decode_debug_fp && debug_topk_k > 0 && pos >= (prompt_token_num - 1)) {
+      TopKItem topk[20];
+      for (int i = 0; i < debug_topk_k; i++) {
+        topk[i].idx = -1;
+        topk[i].val = -1e30f;
+      }
+      for (int i = 0; i < transformer->config.vocab_size; i++) {
+        topk_insert(topk, debug_topk_k, i, logits[i]);
+      }
+      fprintf(decode_debug_fp, "topk pos=%d", pos);
+      for (int i = 0; i < debug_topk_k; i++) {
+        fprintf(decode_debug_fp, " k%d=%d:%.6f", i, topk[i].idx, topk[i].val);
+      }
+      fprintf(decode_debug_fp, "\n");
+      debug_lines++;
+    }
+
     if (flash_attention_sigint_requested()) {
       if (!sigint_notified) {
         printf("\n[run_fa] SIGINT requested, terminating generation loop gracefully.\n");
@@ -1201,8 +1400,21 @@ void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
     // Show decoded string
     if (pos >= prompt_token_num) {
       decode(tokenizer, next, decoded_string);
+      if (decode_debug_fp && debug_decode_tokens) {
+        fprintf(decode_debug_fp, "decode pos=%d token=%d piece='%s'\n",
+                pos, next, decoded_string);
+        debug_lines++;
+      }
       safe_printf(decoded_string);
       fflush(stdout);
+      decode_generated++;
+      if (stop_after_decode_tokens > 0 &&
+          decode_generated >= stop_after_decode_tokens) {
+        if (start != 0) {
+          prefill = prefill == 0 ? time_in_ms() - start : prefill;
+        }
+        break;
+      }
     }
 
     if (pos == prompt_token_num) {
@@ -1240,6 +1452,7 @@ void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
     printf("\n\n=========================================\n");
     printf("         PROFILING RESULTS\n");
     printf("=========================================\n");
+    printf("Run Elapsed(s): %8.3f\n", (time_in_ms() - run_start_ms) / 1000.0);
     printf("Tokens      : prefill=%lld, decode=%lld\n", prefill_tokens,
            decode_tokens);
     printf("Total MACs(G): QKV=%8.3f, ATTN=%8.3f, O=%8.3f, FFN=%8.3f\n",
@@ -1282,6 +1495,13 @@ void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
 
   free(prompt_tokens);
   free(decoded_string);
+
+  if (decode_debug_fp) {
+    fclose(decode_debug_fp);
+    fprintf(stderr,
+            "[decode-debug] file=%s lines=%ld decode_generated=%d topk_k=%d\n",
+            decode_debug_path, debug_lines, decode_generated, debug_topk_k);
+  }
 }
 
 #ifdef NORMAL
@@ -1303,6 +1523,19 @@ int main(int argc, char *argv[]) {
   char *system_prompt =
       "You are Qwen, created by Alibaba Cloud. You are a helpful "
       "assistant."; // the (optional) system prompt to use in chat mode
+
+  const char *system_prompt_env = getenv("RUN_FA_SYSTEM_PROMPT");
+  if (system_prompt_env) {
+    system_prompt = (char *)system_prompt_env;
+  }
+
+  const char *steps_env = getenv("RUN_FA_STEPS");
+  if (steps_env && steps_env[0] != '\0') {
+    int env_steps = atoi(steps_env);
+    if (env_steps > 0) {
+      steps = env_steps;
+    }
+  }
 
   // parameter validation/overrides
   if (rng_seed <= 0)
@@ -1338,6 +1571,12 @@ int main(int argc, char *argv[]) {
     fflush(stdout);
     fflush(stderr);
     _Exit(130);
+  }
+
+  if (flash_attention_get_backend() == FA_BACKEND_DPI) {
+    fflush(stdout);
+    fflush(stderr);
+    _Exit(0);
   }
 
   // memory and file handles cleanup

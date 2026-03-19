@@ -38,6 +38,8 @@ static int g_diff_trace_enable = 0;
 static int g_diff_assert_on_diff = 0;
 static int g_diff_summary_limit = 4;
 static int g_sigint_summary_dumped = 0;
+static int g_diff_trace_flush_every = 64;
+static int g_diff_trace_since_flush = 0;
 static FILE *g_diff_trace_fp = NULL;
 static int g_diff_cfg_inited = 0;
 static volatile sig_atomic_t g_sigint_requested = 0;
@@ -74,6 +76,14 @@ static void fa_diff_trace_init_once(void) {
     }
   }
 
+  const char *flush_every_env = getenv("FLASH_ATTN_DPI_DIFF_FLUSH_EVERY");
+  if (flush_every_env && flush_every_env[0] != '\0') {
+    int flush_every = atoi(flush_every_env);
+    if (flush_every > 0) {
+      g_diff_trace_flush_every = flush_every;
+    }
+  }
+
   if (g_diff_trace_enable) {
     const char *file_env = getenv("FLASH_ATTN_DPI_DIFF_TRACE_FILE");
     const char *path = (file_env && file_env[0] != '\0') ? file_env : "flash_attn_dpi_diff_trace.log";
@@ -99,11 +109,20 @@ static void fa_diff_trace_record(const fa_diff_trace_entry_t *entry) {
             entry->queue_count, entry->queue_free, entry->queue_busy,
             entry->queue_last_err, entry->cycles, entry->run_count,
             entry->task_accept, entry->task_done);
-    fflush(g_diff_trace_fp);
+    g_diff_trace_since_flush++;
+    if (g_diff_trace_since_flush >= g_diff_trace_flush_every) {
+      fflush(g_diff_trace_fp);
+      g_diff_trace_since_flush = 0;
+    }
   }
 }
 
 static void fa_diff_trace_dump_summary(const char *reason) {
+  if (g_diff_trace_fp) {
+    fflush(g_diff_trace_fp);
+    g_diff_trace_since_flush = 0;
+  }
+
   fprintf(stderr, "[flash_attn][diff-trace] summary reason=%s total_mismatch=%d ring_size=%d show_last=%d\n",
           reason ? reason : "unknown", g_diff_total_count, FA_DIFF_TRACE_RING_SIZE,
           g_diff_summary_limit);
@@ -218,7 +237,10 @@ void fa_core_q8_8(q8_8_t *q, q8_8_t *k_cache, q8_8_t *v_cache, q8_8_t *att_out,
   }
 
   // Final Normalize: O = O / l_prev; and Quantize back to Q8.8
-  float inv_l = 1.0f / (l_prev + 1e-6f); // protection
+  float inv_l = 0.0f;
+  if (l_prev != 0.0f) {
+    inv_l = 1.0f / l_prev;
+  }
   for (int i = 0; i < head_size; i++) {
     O_float[i] *= inv_l;
     att_out[i] = float_to_q8_8(O_float[i]);
@@ -264,22 +286,89 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
 
     static int dpi_ready = 0;
     static int dpi_failed = 0;
+    static int stage_debug_cfg_inited = 0;
+    static int stage_debug_enable = 0;
+    static FILE *stage_debug_fp = NULL;
+    static int head_summary_cfg_inited = 0;
+    static int head_summary_enable = 0;
+    static FILE *head_summary_fp = NULL;
+    static int dpi_out_gain_cfg_inited = 0;
+    static float dpi_out_gain = 1.0f;
     int enable_difftest = 1;
+    int difftest_sample_every = 1;
     int diff_print_enable = 0;
+    int poll_step_cycles = 64;
     const char *difftest_env = getenv("FLASH_ATTN_DPI_DIFFTEST");
     if (difftest_env && (strcmp(difftest_env, "0") == 0 || strcmp(difftest_env, "false") == 0 || strcmp(difftest_env, "FALSE") == 0)) {
       enable_difftest = 0;
     }
+    const char *difftest_sample_env = getenv("FLASH_ATTN_DPI_DIFFTEST_SAMPLE_EVERY");
+    if (difftest_sample_env && difftest_sample_env[0] != '\0') {
+      int sample_every = atoi(difftest_sample_env);
+      if (sample_every > 0) {
+        difftest_sample_every = sample_every;
+      }
+    }
     const char *diff_print_env = getenv("FLASH_ATTN_DPI_DIFF_PRINT");
     if (diff_print_env && (strcmp(diff_print_env, "1") == 0 || strcmp(diff_print_env, "true") == 0 || strcmp(diff_print_env, "TRUE") == 0)) {
       diff_print_enable = 1;
+    }
+    const char *poll_step_env = getenv("FLASH_ATTN_DPI_POLL_STEP_CYCLES");
+    if (poll_step_env && poll_step_env[0] != '\0') {
+      int parsed = atoi(poll_step_env);
+      if (parsed > 0) {
+        poll_step_cycles = parsed;
+      }
+    }
+
+    if (!stage_debug_cfg_inited) {
+      stage_debug_cfg_inited = 1;
+      const char *stage_debug_env = getenv("FLASH_ATTN_DPI_STAGE_DEBUG");
+      if (stage_debug_env &&
+          (strcmp(stage_debug_env, "1") == 0 ||
+           strcmp(stage_debug_env, "true") == 0 ||
+           strcmp(stage_debug_env, "TRUE") == 0)) {
+        stage_debug_enable = 1;
+        const char *stage_file_env = getenv("FLASH_ATTN_DPI_STAGE_DEBUG_FILE");
+        const char *stage_path = (stage_file_env && stage_file_env[0] != '\0')
+                                     ? stage_file_env
+                                     : "logs/dpi_stage_debug.log";
+        stage_debug_fp = fopen(stage_path, "a");
+      }
+    }
+
+    if (!head_summary_cfg_inited) {
+      head_summary_cfg_inited = 1;
+      const char *head_summary_env = getenv("FLASH_ATTN_DPI_HEAD_SUMMARY");
+      if (head_summary_env &&
+          (strcmp(head_summary_env, "1") == 0 ||
+           strcmp(head_summary_env, "true") == 0 ||
+           strcmp(head_summary_env, "TRUE") == 0)) {
+        head_summary_enable = 1;
+        const char *head_file_env = getenv("FLASH_ATTN_DPI_HEAD_SUMMARY_FILE");
+        const char *head_path = (head_file_env && head_file_env[0] != '\0')
+                                    ? head_file_env
+                                    : "logs/dpi_head_summary.log";
+        head_summary_fp = fopen(head_path, "a");
+      }
+    }
+
+    if (!dpi_out_gain_cfg_inited) {
+      dpi_out_gain_cfg_inited = 1;
+      const char *gain_env = getenv("FLASH_ATTN_DPI_OUT_GAIN");
+      if (gain_env && gain_env[0] != '\0') {
+        dpi_out_gain = strtof(gain_env, NULL);
+        if (!(dpi_out_gain > 0.0f)) {
+          dpi_out_gain = 1.0f;
+        }
+      }
     }
 
     if (!dpi_ready && !dpi_failed) {
       fa_dpi_init_cfg_t cfg = {0};
       cfg.memory_bytes = 16 * 1024 * 1024;
       cfg.fifo_depth = 4;
-      cfg.wait_poll_interval_cycles = 64;
+      cfg.wait_poll_interval_cycles = (uint32_t)poll_step_cycles;
       cfg.verbose = false;
       cfg.enable_verilator = false;
       if (fa_dpi_init(&cfg) == FA_DPI_OK) {
@@ -318,7 +407,10 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
           break;
         }
 
-        if (enable_difftest) {
+        int run_difftest_this_head =
+            enable_difftest && ((h % difftest_sample_every) == 0);
+
+        if (run_difftest_this_head) {
           fa_core_q8_8(q_hw + h * head_size, k_hw, v_hw, o_ref,
                        seq_len, head_size, h, kv_mul, kv_dim);
         }
@@ -329,6 +421,31 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
           q8_8_t *v_src = v_hw + t * kv_dim + kv_head_idx * head_size;
           memcpy(k_head + (size_t)t * head_size, k_src, (size_t)head_size * sizeof(q8_8_t));
           memcpy(v_head + (size_t)t * head_size, v_src, (size_t)head_size * sizeof(q8_8_t));
+        }
+
+        if (stage_debug_enable && stage_debug_fp && seq_len == 0 && h == 0) {
+          int32_t score_acc = 0;
+          for (int i = 0; i < head_size; i++) {
+            score_acc += (int32_t)(q_hw[h * head_size + i]) *
+                         (int32_t)(k_head[i]);
+          }
+          float score_f32 = ((float)score_acc / 65536.0f) * scale;
+          fprintf(stage_debug_fp,
+                  "[stage-debug] pos=%d head=%d first_step score_acc=%d score_f32=%f scale=%f\n",
+                  seq_len, h, (int)score_acc, score_f32, scale);
+          fprintf(stage_debug_fp, "[stage-debug] q0..7=");
+          for (int i = 0; i < 8 && i < head_size; i++) {
+            fprintf(stage_debug_fp, " %d", (int)q_hw[h * head_size + i]);
+          }
+          fprintf(stage_debug_fp, "\n[stage-debug] k0..7=");
+          for (int i = 0; i < 8 && i < head_size; i++) {
+            fprintf(stage_debug_fp, " %d", (int)k_head[i]);
+          }
+          fprintf(stage_debug_fp, "\n[stage-debug] v0..7=");
+          for (int i = 0; i < 8 && i < head_size; i++) {
+            fprintf(stage_debug_fp, " %d", (int)v_head[i]);
+          }
+          fprintf(stage_debug_fp, "\n");
         }
 
         if (fa_dpi_mem_write(q_base, q_hw + h * head_size, tensor_bytes) != FA_DPI_OK)
@@ -359,16 +476,51 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
         if (dpi_ok) {
           memcpy(o_hw + h * head_size, o_head, tensor_bytes);
 
-          if (enable_difftest) {
+          if (dpi_out_gain != 1.0f) {
+            for (int i = 0; i < head_size; i++) {
+              float scaled = (float)o_hw[h * head_size + i] * dpi_out_gain;
+              if (scaled > 32767.0f)
+                scaled = 32767.0f;
+              if (scaled < -32768.0f)
+                scaled = -32768.0f;
+              o_hw[h * head_size + i] = (q8_8_t)scaled;
+            }
+          }
+
+          if (stage_debug_enable && stage_debug_fp && seq_len == 0 && h == 0) {
+            fprintf(stage_debug_fp, "[stage-debug] o_rtl0..7=");
+            for (int i = 0; i < 8 && i < head_size; i++) {
+              fprintf(stage_debug_fp, " %d", (int)o_head[i]);
+            }
+            fprintf(stage_debug_fp, "\n");
+          }
+
+          if (run_difftest_this_head) {
             int max_abs_lsb = 0;
             int max_idx = 0;
+            int rtl_maxabs = 0;
+            int ref_maxabs = 0;
             for (int i = 0; i < head_size; i++) {
               int diff = (int)o_head[i] - (int)o_ref[i];
               int abs_diff = diff < 0 ? -diff : diff;
+              int abs_rtl = (int)o_head[i] < 0 ? -(int)o_head[i] : (int)o_head[i];
+              int abs_ref = (int)o_ref[i] < 0 ? -(int)o_ref[i] : (int)o_ref[i];
+              if (abs_rtl > rtl_maxabs)
+                rtl_maxabs = abs_rtl;
+              if (abs_ref > ref_maxabs)
+                ref_maxabs = abs_ref;
               if (abs_diff > max_abs_lsb) {
                 max_abs_lsb = abs_diff;
                 max_idx = i;
               }
+            }
+
+            if (head_summary_enable && head_summary_fp && seq_len == 1) {
+              fprintf(head_summary_fp,
+                      "head_summary pos=%d head=%d rtl_maxabs=%d ref_maxabs=%d max_abs_lsb=%d max_idx=%d rtl=%d ref=%d\n",
+                      seq_len, h, rtl_maxabs, ref_maxabs, max_abs_lsb, max_idx,
+                      (int)o_head[max_idx], (int)o_ref[max_idx]);
+              fflush(head_summary_fp);
             }
 
             if (max_abs_lsb != 0) {
@@ -394,6 +546,19 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
               entry.task_accept = (unsigned)perf.task_accept_count;
               entry.task_done = (unsigned)perf.task_done_count;
               fa_diff_trace_record(&entry);
+
+              if (stage_debug_enable && stage_debug_fp && seq_len == 0 && h == 0) {
+                fprintf(stage_debug_fp,
+                        "[stage-debug] o_ref0..7=");
+                for (int i = 0; i < 8 && i < head_size; i++) {
+                  fprintf(stage_debug_fp, " %d", (int)o_ref[i]);
+                }
+                fprintf(stage_debug_fp,
+                        "\n[stage-debug] max_abs_lsb=%d max_idx=%d rtl=%d ref=%d\n",
+                        max_abs_lsb, max_idx, (int)o_head[max_idx],
+                        (int)o_ref[max_idx]);
+                fflush(stage_debug_fp);
+              }
 
                     if (g_diff_assert_on_diff || diff_print_enable) {
                 fprintf(stderr,

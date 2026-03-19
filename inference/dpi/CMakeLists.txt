@@ -106,4 +106,8 @@ if(FA_DPI_BUILD_TESTS)
   add_executable(dpi_minvec_compare tests/dpi_minvec_compare.cpp)
   target_link_libraries(dpi_minvec_compare PRIVATE fa_dpi_backend)
   target_include_directories(dpi_minvec_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+  add_executable(dpi_lsb_stage_compare tests/dpi_lsb_stage_compare.cpp)
+  target_link_libraries(dpi_lsb_stage_compare PRIVATE fa_dpi_backend)
+  target_include_directories(dpi_lsb_stage_compare PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 endif()
