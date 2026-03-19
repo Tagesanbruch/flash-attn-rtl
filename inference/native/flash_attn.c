@@ -874,7 +874,9 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
       int rc = fa_cmodel_attention_head(q_hw + h * head_size, k_head, v_head,
                                         seq_len, head_size, o_head,
                                         neg_large_q8_8, hard_mask,
-                                        effective_mode_id);
+                                        effective_mode_id,
+                                        layer_idx,
+                                        h);
       if (rc != 0) {
         cmodel_ok = 0;
         break;
@@ -883,7 +885,8 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
       if (cmodel_real_diff_enable && cmodel_real_diff_fp && cmodel_mode_id == 15) {
         int rc14 = fa_cmodel_attention_head(q_hw + h * head_size, k_head, v_head,
                                             seq_len, head_size, o_mode14,
-                                            neg_large_q8_8, hard_mask, 14);
+                                            neg_large_q8_8, hard_mask, 14,
+                                            layer_idx, h);
         if (rc14 == 0) {
           int max_abs = 0;
           int max_idx = 0;

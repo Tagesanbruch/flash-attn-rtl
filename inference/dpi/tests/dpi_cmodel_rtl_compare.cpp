@@ -72,7 +72,8 @@ static int run_one_case(int seq_len,
   }
 
   int rc = fa_cmodel_attention_head(q.data(), k.data(), v.data(), seq_len, head_size,
-                                    o_cmodel.data(), neg_large_q8_8, 0, cmodel_mode);
+                                    o_cmodel.data(), neg_large_q8_8, 0, cmodel_mode,
+                                    -1, 0);
   if (rc != 0) {
     return 17;
   }

@@ -44,7 +44,8 @@ enum class Mode {
     FIXED_HIACC_QOUT,
     FIXED_HIACC_REAL_EXP_QOUT,
     FA_CORE_COMPAT,
-    FIXED_Q8_IMPROVED
+    FIXED_Q8_IMPROVED,
+    FIXED_Q8_DUALBUF
 };
 
 struct Metrics {

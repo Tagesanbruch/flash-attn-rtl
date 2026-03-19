@@ -15,7 +15,9 @@ int fa_cmodel_attention_head(const int16_t *q_head,
                              int16_t *out_head,
                              int neg_large_q8_8,
                              int hard_mask,
-                             int mode_id);
+                             int mode_id,
+                             int layer_idx,
+                             int head_idx);
 
 #ifdef __cplusplus
 }

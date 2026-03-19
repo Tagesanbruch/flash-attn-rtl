@@ -152,6 +152,95 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
         return O;
     }
 
+    if (mode == Mode::FIXED_Q8_DUALBUF) {
+        const int16_t scale_q8_8 = static_cast<int16_t>(std::lround((1.0 / std::sqrt(static_cast<double>(D))) * 256.0));
+        constexpr int kChunk = 16;
+
+        for (int qi = 0; qi < S; ++qi) {
+            int16_t m_global = static_cast<int16_t>(-32768);
+            uint32_t l_global = 0;
+            std::vector<int64_t> acc_global(D, 0);
+
+            for (int chunk_start = 0; chunk_start < S; chunk_start += kChunk) {
+                const int chunk_end = std::min(S, chunk_start + kChunk);
+                int16_t m_local = static_cast<int16_t>(-32768);
+                uint32_t l_local = 0;
+                std::vector<int64_t> acc_local(D, 0);
+
+                for (int kj = chunk_start; kj < chunk_end; ++kj) {
+                    if (causal && kj > qi) {
+                        if (hard_mask) {
+                            continue;
+                        }
+                    }
+
+                    int64_t dp = 0;
+                    for (int d = 0; d < D; ++d) {
+                        dp += static_cast<int32_t>(Q[qi][d]) * static_cast<int32_t>(K[kj][d]);
+                    }
+                    int16_t dp_q8_8 = static_cast<int16_t>((dp >> 8) & 0xFFFF);
+                    int16_t score = q8_8_mul_sat(dp_q8_8, scale_q8_8);
+                    if (causal && kj > qi && !hard_mask) {
+                        score = neg_large;
+                    }
+
+                    int16_t m_new = (score > m_local) ? score : m_local;
+                    int16_t diff_old = static_cast<int16_t>(m_local - m_new);
+                    int16_t diff_new = static_cast<int16_t>(score - m_new);
+
+                    uint16_t exp_old = exp_real_q1_15(diff_old);
+                    uint16_t exp_new = exp_real_q1_15(diff_new);
+
+                    uint32_t l_scaled = static_cast<uint32_t>((static_cast<uint64_t>(l_local) * exp_old) >> 15);
+                    uint32_t l_term = static_cast<uint32_t>(exp_new) << 1;
+                    l_local = to_u32(static_cast<uint64_t>(l_scaled) + l_term);
+
+                    for (int d = 0; d < D; ++d) {
+                        int64_t acc_old = (acc_local[d] * static_cast<int64_t>(exp_old)) >> 15;
+                        int64_t pv_term = (static_cast<int64_t>(exp_new) * static_cast<int64_t>(static_cast<int32_t>(V[kj][d]))) << 1;
+                        acc_local[d] = acc_old + pv_term;
+                    }
+                    m_local = m_new;
+                }
+
+                if (l_local == 0) {
+                    continue;
+                }
+
+                if (l_global == 0) {
+                    m_global = m_local;
+                    l_global = l_local;
+                    for (int d = 0; d < D; ++d) {
+                        acc_global[d] = acc_local[d];
+                    }
+                    continue;
+                }
+
+                int16_t m_new = (m_local > m_global) ? m_local : m_global;
+                int16_t diff_global = static_cast<int16_t>(m_global - m_new);
+                int16_t diff_local = static_cast<int16_t>(m_local - m_new);
+                uint16_t exp_global = exp_real_q1_15(diff_global);
+                uint16_t exp_local = exp_real_q1_15(diff_local);
+
+                uint32_t l_g_scaled = static_cast<uint32_t>((static_cast<uint64_t>(l_global) * exp_global) >> 15);
+                uint32_t l_l_scaled = static_cast<uint32_t>((static_cast<uint64_t>(l_local) * exp_local) >> 15);
+                l_global = to_u32(static_cast<uint64_t>(l_g_scaled) + l_l_scaled);
+
+                for (int d = 0; d < D; ++d) {
+                    int64_t g_scaled = (acc_global[d] * static_cast<int64_t>(exp_global)) >> 15;
+                    int64_t l_scaled = (acc_local[d] * static_cast<int64_t>(exp_local)) >> 15;
+                    acc_global[d] = g_scaled + l_scaled;
+                }
+                m_global = m_new;
+            }
+
+            for (int d = 0; d < D; ++d) {
+                O[qi][d] = div_round_sat_s16(acc_global[d], l_global);
+            }
+        }
+        return O;
+    }
+
     const int16_t scale_q8_8 = static_cast<int16_t>(std::lround((1.0 / std::sqrt(static_cast<double>(D))) * 256.0));
     const bool strict_rtl_mode = (mode == Mode::RTL_STRICT);
     const bool ctx_step_mode = (mode == Mode::RTL_CTX_STEP);

@@ -60,7 +60,7 @@ int main() {
   const int head_size = 64;
   const int neg_large = -8192;
   const int repeats = 64;
-  const int modes[] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+  const int modes[] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
   const int seq_cases[] = {0,1,2,7,31,63};
 
   std::mt19937 rng(20260319u);
@@ -89,7 +89,8 @@ int main() {
 
         fa_core_ref(q.data(), k.data(), v.data(), o_ref.data(), seq_len, head_size);
         int rc = fa_cmodel_attention_head(q.data(), k.data(), v.data(), seq_len,
-                                          head_size, o_cm.data(), neg_large, 0, mode);
+                                          head_size, o_cm.data(), neg_large, 0, mode,
+                                          -1, 0);
         if (rc != 0) {
           std::cerr << "mode=" << mode << " rc=" << rc << "\n";
           return 1;
