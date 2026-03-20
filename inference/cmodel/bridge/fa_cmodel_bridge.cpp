@@ -158,6 +158,8 @@ int fa_cmodel_attention_head(const int16_t *q_head,
     case 14: mode = attn::Mode::FA_CORE_COMPAT; break;
     case 15: mode = attn::Mode::FIXED_Q8_IMPROVED; break;
     case 16: mode = attn::Mode::FIXED_Q8_DUALBUF; break;
+    case 17: mode = attn::Mode::FIXED_Q8_DUALBUF_C8; break;
+    case 18: mode = attn::Mode::FIXED_Q8_DUALBUF_C32; break;
     default: mode = attn::Mode::RTL_STRICT; break;
   }
 

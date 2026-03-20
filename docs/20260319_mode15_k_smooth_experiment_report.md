@@ -255,3 +255,117 @@ P2：
 1. 主流误差分布虽下降，但仍有少量极端离群；
 2. role 格式稳定性不足，提示离群传播仍会触发分布坍缩；
 3. dual-buffer 当前实现还未压住“末段 m 跃迁导致的归一化尺度突变”。
+
+---
+
+## 11. dual-buffer 合并优化（本轮完成）
+
+已对 `mode16` 的 chunk merge 路径做一轮数值改进：
+
+- 在 `Q1.15` 乘法缩放处，从直接右移截断改为**四舍五入**；
+- 覆盖位置：`l_local`、`acc_local`、`l_global merge`、`acc_global merge`。
+
+实现文件：`cmodel/csrc/attention_kernels.cpp`
+
+回归结果（`mode16 + K-smooth + round-merge`，5 prompt）：
+
+- 英文短问答仍可读；
+- `1+1` 仍未恢复到正确答案（仍有语义漂移）；
+- 中文样本有改善但仍不稳定；
+- 整体相比优化前未出现“决定性跃迁”。
+
+当前判断：
+
+- dual-buffer merge 的 rounding 优化是正确方向，但单轮改造不足以达到“稳定替换 mode14”；
+- 下一步应叠加“按层/头的 merge 参数扫描（chunk + rounding策略 + 局部位宽）”与阶段日志联动，继续压离群传播。
+
+---
+
+## 12. dual-buffer 参数扫描（chunk=8/16/32）
+
+为继续深挖，新增了可扫描 dual-buffer 模式：
+
+- `mode16`：chunk=16（默认）
+- `mode17`：chunk=8
+- `mode18`：chunk=32
+
+实现位置：
+
+- `cmodel/csrc/attention_core.hpp`
+- `cmodel/csrc/attention_kernels.cpp`
+- `inference/cmodel/bridge/fa_cmodel_bridge.cpp`
+
+### 5-prompt 扫描结果（K-smooth=1）
+
+- mode16：英文可读，但 `1+1` 仍偏离；中文不稳。
+- mode18：与 mode16 相近，`1+1` 仍偏离。
+- mode17：`1+1` 出现接近正确表达（含“2”），整体相对更优；中文仍不稳。
+
+日志：
+
+- `inference/native/logs/cmodel_prompt_regression_chat_summary_mode16_ksmooth_scan.txt`
+- `inference/native/logs/cmodel_prompt_regression_chat_summary_mode17_ksmooth_scan.txt`
+- `inference/native/logs/cmodel_prompt_regression_chat_summary_mode18_ksmooth_scan.txt`
+
+### role 格式补测（mode17）
+
+- role 输入下仍存在明显结构化异常（模板重复/乱码），尚未达到替换标准。
+- 日志：`inference/native/logs/role_prompt_compare_summary_mode17_ksmooth_scan.txt`
+
+### 阶段结论更新
+
+- 在 dual-buffer 系列中，`chunk=8`（mode17）当前表现最好；
+- 但“chat 英文可读 ≠ role 稳定可替换”，当前仍需继续优化。
+
+---
+
+## 13. mode17 深挖：热点保护（guard）
+
+在 `mode17 + K-smooth` 基础上增加了热点保护开关：
+
+- 开关：`FLASH_ATTN_CMODEL_MODE17_GUARD=1`
+- 参数：
+   - `FLASH_ATTN_CMODEL_MODE17_GUARD_LAYER`（默认 23）
+   - `FLASH_ATTN_CMODEL_MODE17_GUARD_HEAD`（默认 1）
+   - `FLASH_ATTN_CMODEL_MODE17_GUARD_POS_BEGIN`（默认 24）
+- 策略：命中条件时该位点回退到 `mode14`。
+
+实现位置：`inference/native/flash_attn.c`
+
+日志验证：
+
+- `inference/native/logs/cmodel_mode17_guard.log` 显示在 `layer23/head1/pos>=24` 已持续命中。
+
+效果：
+
+- 对 role 回归的文本稳定性改善不明显；
+- 说明当前问题不是单热点位点可独立修复，仍是多位点/全链路耦合。
+
+结论：
+
+- mode17 是当前 dual-buffer 扫描中的最优候选；
+- 但 guard 仅局部回退不足以达成最终替换，后续应继续做“多热点组合 + merge策略联合优化”。
+
+---
+
+## 14. mode17 深挖：多热点组合保护
+
+在单点 guard 无明显收益后，扩展为多热点组合保护：
+
+- `FLASH_ATTN_CMODEL_MODE17_GUARD_LAYERS=2,3,9,11,23`
+- `FLASH_ATTN_CMODEL_MODE17_GUARD_HEADS=1,8,9,10,11,12,13`
+- `FLASH_ATTN_CMODEL_MODE17_GUARD_POS_BEGIN=24`
+
+结果（role 回归）：
+
+- 保护命中正常，但 role 文本稳定性仍未显著改善；
+- 表明问题不只是“少量热点位点切换”可解决，仍涉及更全局的分布偏移。
+
+日志：
+
+- `inference/native/logs/role_prompt_compare_summary_mode17_ksmooth_multiguard.txt`
+
+结论：
+
+- mode17 多热点 guard 不是最终解；
+- 下一步建议转向“merge 参数系统扫描 + logits 级对照”联合优化。

@@ -746,6 +746,12 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
     static int cmodel_mode15_hotfix_pos_begin = 24;
     static int cmodel_mode15_hotfix_layers[64] = {0};
     static FILE *cmodel_mode15_hotfix_fp = NULL;
+    static int cmodel_mode17_guard_cfg_inited = 0;
+    static int cmodel_mode17_guard_enable = 0;
+    static int cmodel_mode17_guard_layer_mask[64] = {0};
+    static int cmodel_mode17_guard_head_mask[64] = {0};
+    static int cmodel_mode17_guard_pos_begin = 24;
+    static FILE *cmodel_mode17_guard_fp = NULL;
     int neg_large_q8_8 = -8192;
     int hard_mask = 0;
     int cmodel_mode_id = 14;
@@ -811,6 +817,89 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
       }
     }
 
+    if (!cmodel_mode17_guard_cfg_inited) {
+      cmodel_mode17_guard_cfg_inited = 1;
+      const char *guard_env = getenv("FLASH_ATTN_CMODEL_MODE17_GUARD");
+      if (guard_env &&
+          (strcmp(guard_env, "1") == 0 || strcmp(guard_env, "true") == 0 ||
+           strcmp(guard_env, "TRUE") == 0)) {
+        cmodel_mode17_guard_enable = 1;
+      }
+
+      const char *layer_env = getenv("FLASH_ATTN_CMODEL_MODE17_GUARD_LAYER");
+      for (int i = 0; i < 64; i++) {
+        cmodel_mode17_guard_layer_mask[i] = 0;
+        cmodel_mode17_guard_head_mask[i] = 0;
+      }
+      cmodel_mode17_guard_layer_mask[23] = 1;
+      cmodel_mode17_guard_head_mask[1] = 1;
+
+      if (layer_env && layer_env[0] != '\0') {
+        for (int i = 0; i < 64; i++) cmodel_mode17_guard_layer_mask[i] = 0;
+        int idx = atoi(layer_env);
+        if (idx >= 0 && idx < 64) {
+          cmodel_mode17_guard_layer_mask[idx] = 1;
+        }
+      }
+
+      const char *layers_env = getenv("FLASH_ATTN_CMODEL_MODE17_GUARD_LAYERS");
+      if (layers_env && layers_env[0] != '\0') {
+        for (int i = 0; i < 64; i++) cmodel_mode17_guard_layer_mask[i] = 0;
+        if (strcmp(layers_env, "all") == 0 || strcmp(layers_env, "ALL") == 0) {
+          for (int i = 0; i < 64; i++) cmodel_mode17_guard_layer_mask[i] = 1;
+        } else {
+          char buf[256];
+          strncpy(buf, layers_env, sizeof(buf) - 1);
+          buf[sizeof(buf) - 1] = '\0';
+          char *tok = strtok(buf, ",");
+          while (tok) {
+            int idx = atoi(tok);
+            if (idx >= 0 && idx < 64) cmodel_mode17_guard_layer_mask[idx] = 1;
+            tok = strtok(NULL, ",");
+          }
+        }
+      }
+
+      const char *head_env = getenv("FLASH_ATTN_CMODEL_MODE17_GUARD_HEAD");
+      if (head_env && head_env[0] != '\0') {
+        for (int i = 0; i < 64; i++) cmodel_mode17_guard_head_mask[i] = 0;
+        int idx = atoi(head_env);
+        if (idx >= 0 && idx < 64) {
+          cmodel_mode17_guard_head_mask[idx] = 1;
+        }
+      }
+
+      const char *heads_env = getenv("FLASH_ATTN_CMODEL_MODE17_GUARD_HEADS");
+      if (heads_env && heads_env[0] != '\0') {
+        for (int i = 0; i < 64; i++) cmodel_mode17_guard_head_mask[i] = 0;
+        if (strcmp(heads_env, "all") == 0 || strcmp(heads_env, "ALL") == 0) {
+          for (int i = 0; i < 64; i++) cmodel_mode17_guard_head_mask[i] = 1;
+        } else {
+          char buf[256];
+          strncpy(buf, heads_env, sizeof(buf) - 1);
+          buf[sizeof(buf) - 1] = '\0';
+          char *tok = strtok(buf, ",");
+          while (tok) {
+            int idx = atoi(tok);
+            if (idx >= 0 && idx < 64) cmodel_mode17_guard_head_mask[idx] = 1;
+            tok = strtok(NULL, ",");
+          }
+        }
+      }
+      const char *pos_env = getenv("FLASH_ATTN_CMODEL_MODE17_GUARD_POS_BEGIN");
+      if (pos_env && pos_env[0] != '\0') {
+        cmodel_mode17_guard_pos_begin = atoi(pos_env);
+      }
+
+      if (cmodel_mode17_guard_enable) {
+        const char *file_env = getenv("FLASH_ATTN_CMODEL_MODE17_GUARD_FILE");
+        const char *path = (file_env && file_env[0] != '\0')
+                               ? file_env
+                               : "logs/cmodel_mode17_guard.log";
+        cmodel_mode17_guard_fp = fopen(path, "a");
+      }
+    }
+
     const char *neg_large_env = getenv("FLASH_ATTN_CMODEL_NEG_LARGE_Q88");
     if (neg_large_env && neg_large_env[0] != '\0') {
       int parsed = atoi(neg_large_env);
@@ -868,6 +957,19 @@ void flash_attention_forward(float *q_f32, float *k_cache_f32,
                   "mode15_hotfix layer=%d pos=%d head=%d mode=%d->%d\n",
                   layer_idx, seq_len, h, cmodel_mode_id, effective_mode_id);
           fflush(cmodel_mode15_hotfix_fp);
+        }
+      }
+
+      if (cmodel_mode17_guard_enable && cmodel_mode_id == 17 &&
+          layer_idx >= 0 && layer_idx < 64 && cmodel_mode17_guard_layer_mask[layer_idx] &&
+          h >= 0 && h < 64 && cmodel_mode17_guard_head_mask[h] &&
+          seq_len >= cmodel_mode17_guard_pos_begin) {
+        effective_mode_id = 14;
+        if (cmodel_mode17_guard_fp) {
+          fprintf(cmodel_mode17_guard_fp,
+                  "mode17_guard layer=%d pos=%d head=%d mode=%d->%d\n",
+                  layer_idx, seq_len, h, cmodel_mode_id, effective_mode_id);
+          fflush(cmodel_mode17_guard_fp);
         }
       }
 

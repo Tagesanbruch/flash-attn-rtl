@@ -19,6 +19,19 @@ int16_t div_round_sat_s16(int64_t num, uint32_t den) {
     return static_cast<int16_t>(q);
 }
 
+int64_t mul_q1_15_round_s64(int64_t value, uint16_t scale_q1_15) {
+    int64_t prod = value * static_cast<int64_t>(scale_q1_15);
+    if (prod >= 0) {
+        return (prod + (1LL << 14)) >> 15;
+    }
+    return (prod - (1LL << 14)) >> 15;
+}
+
+uint32_t mul_q1_15_round_u32(uint32_t value, uint16_t scale_q1_15) {
+    uint64_t prod = static_cast<uint64_t>(value) * static_cast<uint64_t>(scale_q1_15);
+    return static_cast<uint32_t>((prod + (1ULL << 14)) >> 15);
+}
+
 } // namespace
 
 MatrixF direct_sdpa_fp32(const MatrixF& q, const MatrixF& k, const MatrixF& v, bool causal) {
@@ -152,9 +165,16 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
         return O;
     }
 
-    if (mode == Mode::FIXED_Q8_DUALBUF) {
+    if (mode == Mode::FIXED_Q8_DUALBUF ||
+        mode == Mode::FIXED_Q8_DUALBUF_C8 ||
+        mode == Mode::FIXED_Q8_DUALBUF_C32) {
         const int16_t scale_q8_8 = static_cast<int16_t>(std::lround((1.0 / std::sqrt(static_cast<double>(D))) * 256.0));
-        constexpr int kChunk = 16;
+        int kChunk = 16;
+        if (mode == Mode::FIXED_Q8_DUALBUF_C8) {
+            kChunk = 8;
+        } else if (mode == Mode::FIXED_Q8_DUALBUF_C32) {
+            kChunk = 32;
+        }
 
         for (int qi = 0; qi < S; ++qi) {
             int16_t m_global = static_cast<int16_t>(-32768);
@@ -191,12 +211,12 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
                     uint16_t exp_old = exp_real_q1_15(diff_old);
                     uint16_t exp_new = exp_real_q1_15(diff_new);
 
-                    uint32_t l_scaled = static_cast<uint32_t>((static_cast<uint64_t>(l_local) * exp_old) >> 15);
+                    uint32_t l_scaled = mul_q1_15_round_u32(l_local, exp_old);
                     uint32_t l_term = static_cast<uint32_t>(exp_new) << 1;
                     l_local = to_u32(static_cast<uint64_t>(l_scaled) + l_term);
 
                     for (int d = 0; d < D; ++d) {
-                        int64_t acc_old = (acc_local[d] * static_cast<int64_t>(exp_old)) >> 15;
+                        int64_t acc_old = mul_q1_15_round_s64(acc_local[d], exp_old);
                         int64_t pv_term = (static_cast<int64_t>(exp_new) * static_cast<int64_t>(static_cast<int32_t>(V[kj][d]))) << 1;
                         acc_local[d] = acc_old + pv_term;
                     }
@@ -222,13 +242,13 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
                 uint16_t exp_global = exp_real_q1_15(diff_global);
                 uint16_t exp_local = exp_real_q1_15(diff_local);
 
-                uint32_t l_g_scaled = static_cast<uint32_t>((static_cast<uint64_t>(l_global) * exp_global) >> 15);
-                uint32_t l_l_scaled = static_cast<uint32_t>((static_cast<uint64_t>(l_local) * exp_local) >> 15);
+                uint32_t l_g_scaled = mul_q1_15_round_u32(l_global, exp_global);
+                uint32_t l_l_scaled = mul_q1_15_round_u32(l_local, exp_local);
                 l_global = to_u32(static_cast<uint64_t>(l_g_scaled) + l_l_scaled);
 
                 for (int d = 0; d < D; ++d) {
-                    int64_t g_scaled = (acc_global[d] * static_cast<int64_t>(exp_global)) >> 15;
-                    int64_t l_scaled = (acc_local[d] * static_cast<int64_t>(exp_local)) >> 15;
+                    int64_t g_scaled = mul_q1_15_round_s64(acc_global[d], exp_global);
+                    int64_t l_scaled = mul_q1_15_round_s64(acc_local[d], exp_local);
                     acc_global[d] = g_scaled + l_scaled;
                 }
                 m_global = m_new;

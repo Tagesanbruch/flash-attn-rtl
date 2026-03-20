@@ -60,7 +60,7 @@ int main() {
   const int head_size = 64;
   const int neg_large = -8192;
   const int repeats = 64;
-  const int modes[] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+  const int modes[] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18};
   const int seq_cases[] = {0,1,2,7,31,63};
 
   std::mt19937 rng(20260319u);
