@@ -1,6 +1,8 @@
 #include "attention_core.hpp"
 
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 
 namespace attn {
 
@@ -19,8 +21,51 @@ int16_t div_round_sat_s16(int64_t num, uint32_t den) {
     return static_cast<int16_t>(q);
 }
 
+int get_cmodel_pv_shift() {
+    static int inited = 0;
+    static int shift = 1; // Default to << 1
+    if (!inited) {
+        inited = 1;
+        const char* env = std::getenv("FLASH_ATTN_CMODEL_PV_SHIFT");
+        if (env) {
+            shift = std::atoi(env);
+        }
+    }
+    return shift;
+}
+
+int get_cmodel_chunk_size() {
+    static int inited = 0;
+    static int chunk_size = 0; // Default off
+    if (!inited) {
+        inited = 1;
+        const char* env = std::getenv("FLASH_ATTN_CMODEL_CHUNK_SIZE");
+        if (env) {
+            chunk_size = std::atoi(env);
+        }
+    }
+    return chunk_size;
+}
+
+int get_cmodel_round_bias() {
+    static int inited = 0;
+    static int bias = 1; // Default to symmetric rounding
+    if (!inited) {
+        inited = 1;
+        const char* env = std::getenv("FLASH_ATTN_CMODEL_ROUND_BIAS");
+        if (env) {
+            bias = std::atoi(env);
+        }
+    }
+    return bias;
+}
+
 int64_t mul_q1_15_round_s64(int64_t value, uint16_t scale_q1_15) {
     int64_t prod = value * static_cast<int64_t>(scale_q1_15);
+    int bias = get_cmodel_round_bias();
+    if (bias == 0) {
+        return prod >> 15; // Floor/Truncate
+    }
     if (prod >= 0) {
         return (prod + (1LL << 14)) >> 15;
     }
@@ -29,6 +74,10 @@ int64_t mul_q1_15_round_s64(int64_t value, uint16_t scale_q1_15) {
 
 uint32_t mul_q1_15_round_u32(uint32_t value, uint16_t scale_q1_15) {
     uint64_t prod = static_cast<uint64_t>(value) * static_cast<uint64_t>(scale_q1_15);
+    int bias = get_cmodel_round_bias();
+    if (bias == 0) {
+        return static_cast<uint32_t>(prod >> 15);
+    }
     return static_cast<uint32_t>((prod + (1ULL << 14)) >> 15);
 }
 
@@ -175,6 +224,11 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
         } else if (mode == Mode::FIXED_Q8_DUALBUF_C32) {
             kChunk = 32;
         }
+        int override_chunk = get_cmodel_chunk_size();
+        if (override_chunk > 0) {
+            kChunk = override_chunk;
+        }
+        int pv_shift = get_cmodel_pv_shift();
 
         for (int qi = 0; qi < S; ++qi) {
             int16_t m_global = static_cast<int16_t>(-32768);
@@ -212,12 +266,12 @@ MatrixI16 online_rtl_like(const MatrixI16& Q, const MatrixI16& K, const MatrixI1
                     uint16_t exp_new = exp_real_q1_15(diff_new);
 
                     uint32_t l_scaled = mul_q1_15_round_u32(l_local, exp_old);
-                    uint32_t l_term = static_cast<uint32_t>(exp_new) << 1;
+                    uint32_t l_term = static_cast<uint32_t>(exp_new) << pv_shift;
                     l_local = to_u32(static_cast<uint64_t>(l_scaled) + l_term);
 
                     for (int d = 0; d < D; ++d) {
                         int64_t acc_old = mul_q1_15_round_s64(acc_local[d], exp_old);
-                        int64_t pv_term = (static_cast<int64_t>(exp_new) * static_cast<int64_t>(static_cast<int32_t>(V[kj][d]))) << 1;
+                        int64_t pv_term = (static_cast<int64_t>(exp_new) * static_cast<int64_t>(static_cast<int32_t>(V[kj][d]))) << pv_shift;
                         acc_local[d] = acc_old + pv_term;
                     }
                     m_local = m_new;
