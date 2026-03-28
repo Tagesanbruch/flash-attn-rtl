@@ -1,2829 +1,1443 @@
-module fa_perf_counters (
-  input  logic        clk,
-  input  logic        rst_n,
-  input  logic        i_run_start,
-  input  logic        i_soft_reset,
-
-  input  logic        i_ms_load_q,
-  input  logic        i_ms_init_context,
-  input  logic        i_ms_load_k,
-  input  logic        i_ms_load_v,
-  input  logic        i_ms_compute,
-  input  logic        i_ms_normalize,
-  input  logic        i_ms_write_o,
-  input  logic        i_ms_next_q,
-
-  input  logic        i_cs_dp_run,
-  input  logic        i_cs_score_done,
-  input  logic        i_cs_softmax_prep,
-  input  logic        i_comp_launch,
-  input  logic [1:0]  i_active_rows,
-
-  input  logic        i_norm_recip_req,
-  input  logic        i_norm_recip_rsp,
-
-  input  logic        i_dma_rd_cmd_fire,
-  input  logic        i_dma_rd_beat_fire,
-  input  logic        i_dma_wr_cmd_fire,
-  input  logic        i_dma_wr_beat_fire,
-
-  output logic [31:0] o_run_count,
-  output logic [31:0] o_busy_cycles,
-  output logic [31:0] o_dma_rd_cmd_count,
-  output logic [31:0] o_dma_rd_beat_count,
-  output logic [31:0] o_dma_wr_cmd_count,
-  output logic [31:0] o_dma_wr_beat_count,
-  output logic [31:0] o_comp_launch_count,
-  output logic [31:0] o_exp_eval_count,
-  output logic [31:0] o_mul_eval_count,
-  output logic [31:0] o_recip_req_count,
-  output logic [31:0] o_recip_rsp_count,
-  output logic [31:0] o_ms_load_q_cycles,
-  output logic [31:0] o_ms_init_context_cycles,
-  output logic [31:0] o_ms_load_k_cycles,
-  output logic [31:0] o_ms_load_v_cycles,
-  output logic [31:0] o_ms_compute_cycles,
-  output logic [31:0] o_ms_normalize_cycles,
-  output logic [31:0] o_ms_write_o_cycles,
-  output logic [31:0] o_ms_next_q_cycles,
-  output logic [31:0] o_cs_dp_run_cycles,
-  output logic [31:0] o_cs_score_done_cycles,
-  output logic [31:0] o_cs_softmax_prep_cycles
-);
-  logic perf_active;
-  logic [31:0] exp_inc;
-  logic [31:0] mul_inc;
-
-  always_comb begin
-    perf_active = i_ms_load_q || i_ms_init_context || i_ms_load_k || i_ms_load_v ||
-                  i_ms_compute || i_ms_normalize || i_ms_write_o || i_ms_next_q;
-
-    unique case (i_active_rows)
-      2'd2: begin
-        exp_inc = 32'd4;
-        mul_inc = 32'd2;
-      end
-      2'd1: begin
-        exp_inc = 32'd2;
-        mul_inc = 32'd1;
-      end
-      default: begin
-        exp_inc = 32'd0;
-        mul_inc = 32'd0;
-      end
-    endcase
-  end
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      o_run_count <= 32'd0;
-      o_busy_cycles <= 32'd0;
-      o_dma_rd_cmd_count <= 32'd0;
-      o_dma_rd_beat_count <= 32'd0;
-      o_dma_wr_cmd_count <= 32'd0;
-      o_dma_wr_beat_count <= 32'd0;
-      o_comp_launch_count <= 32'd0;
-      o_exp_eval_count <= 32'd0;
-      o_mul_eval_count <= 32'd0;
-      o_recip_req_count <= 32'd0;
-      o_recip_rsp_count <= 32'd0;
-      o_ms_load_q_cycles <= 32'd0;
-      o_ms_init_context_cycles <= 32'd0;
-      o_ms_load_k_cycles <= 32'd0;
-      o_ms_load_v_cycles <= 32'd0;
-      o_ms_compute_cycles <= 32'd0;
-      o_ms_normalize_cycles <= 32'd0;
-      o_ms_write_o_cycles <= 32'd0;
-      o_ms_next_q_cycles <= 32'd0;
-      o_cs_dp_run_cycles <= 32'd0;
-      o_cs_score_done_cycles <= 32'd0;
-      o_cs_softmax_prep_cycles <= 32'd0;
-    end else if (i_soft_reset) begin
-      o_busy_cycles <= 32'd0;
-      o_dma_rd_cmd_count <= 32'd0;
-      o_dma_rd_beat_count <= 32'd0;
-      o_dma_wr_cmd_count <= 32'd0;
-      o_dma_wr_beat_count <= 32'd0;
-      o_comp_launch_count <= 32'd0;
-      o_exp_eval_count <= 32'd0;
-      o_mul_eval_count <= 32'd0;
-      o_recip_req_count <= 32'd0;
-      o_recip_rsp_count <= 32'd0;
-      o_ms_load_q_cycles <= 32'd0;
-      o_ms_init_context_cycles <= 32'd0;
-      o_ms_load_k_cycles <= 32'd0;
-      o_ms_load_v_cycles <= 32'd0;
-      o_ms_compute_cycles <= 32'd0;
-      o_ms_normalize_cycles <= 32'd0;
-      o_ms_write_o_cycles <= 32'd0;
-      o_ms_next_q_cycles <= 32'd0;
-      o_cs_dp_run_cycles <= 32'd0;
-      o_cs_score_done_cycles <= 32'd0;
-      o_cs_softmax_prep_cycles <= 32'd0;
-    end else begin
-      if (i_run_start) begin
-        o_run_count <= o_run_count + 32'd1;
-        o_busy_cycles <= 32'd0;
-        o_dma_rd_cmd_count <= 32'd0;
-        o_dma_rd_beat_count <= 32'd0;
-        o_dma_wr_cmd_count <= 32'd0;
-        o_dma_wr_beat_count <= 32'd0;
-        o_comp_launch_count <= 32'd0;
-        o_exp_eval_count <= 32'd0;
-        o_mul_eval_count <= 32'd0;
-        o_recip_req_count <= 32'd0;
-        o_recip_rsp_count <= 32'd0;
-        o_ms_load_q_cycles <= 32'd0;
-        o_ms_init_context_cycles <= 32'd0;
-        o_ms_load_k_cycles <= 32'd0;
-        o_ms_load_v_cycles <= 32'd0;
-        o_ms_compute_cycles <= 32'd0;
-        o_ms_normalize_cycles <= 32'd0;
-        o_ms_write_o_cycles <= 32'd0;
-        o_ms_next_q_cycles <= 32'd0;
-        o_cs_dp_run_cycles <= 32'd0;
-        o_cs_score_done_cycles <= 32'd0;
-        o_cs_softmax_prep_cycles <= 32'd0;
-      end else begin
-        if (perf_active) begin
-          o_busy_cycles <= o_busy_cycles + 32'd1;
-        end
-        if (i_ms_load_q) begin
-          o_ms_load_q_cycles <= o_ms_load_q_cycles + 32'd1;
-        end
-        if (i_ms_init_context) begin
-          o_ms_init_context_cycles <= o_ms_init_context_cycles + 32'd1;
-        end
-        if (i_ms_load_k) begin
-          o_ms_load_k_cycles <= o_ms_load_k_cycles + 32'd1;
-        end
-        if (i_ms_load_v) begin
-          o_ms_load_v_cycles <= o_ms_load_v_cycles + 32'd1;
-        end
-        if (i_ms_compute) begin
-          o_ms_compute_cycles <= o_ms_compute_cycles + 32'd1;
-        end
-        if (i_ms_normalize) begin
-          o_ms_normalize_cycles <= o_ms_normalize_cycles + 32'd1;
-        end
-        if (i_ms_write_o) begin
-          o_ms_write_o_cycles <= o_ms_write_o_cycles + 32'd1;
-        end
-        if (i_ms_next_q) begin
-          o_ms_next_q_cycles <= o_ms_next_q_cycles + 32'd1;
-        end
-        if (i_cs_dp_run) begin
-          o_cs_dp_run_cycles <= o_cs_dp_run_cycles + 32'd1;
-        end
-        if (i_cs_score_done) begin
-          o_cs_score_done_cycles <= o_cs_score_done_cycles + 32'd1;
-          o_mul_eval_count <= o_mul_eval_count + mul_inc;
-        end
-        if (i_cs_softmax_prep) begin
-          o_cs_softmax_prep_cycles <= o_cs_softmax_prep_cycles + 32'd1;
-          o_exp_eval_count <= o_exp_eval_count + exp_inc;
-        end
-        if (i_comp_launch) begin
-          o_comp_launch_count <= o_comp_launch_count + 32'd1;
-        end
-        if (i_norm_recip_req) begin
-          o_recip_req_count <= o_recip_req_count + 32'd1;
-        end
-        if (i_norm_recip_rsp) begin
-          o_recip_rsp_count <= o_recip_rsp_count + 32'd1;
-        end
-        if (i_dma_rd_cmd_fire) begin
-          o_dma_rd_cmd_count <= o_dma_rd_cmd_count + 32'd1;
-        end
-        if (i_dma_rd_beat_fire) begin
-          o_dma_rd_beat_count <= o_dma_rd_beat_count + 32'd1;
-        end
-        if (i_dma_wr_cmd_fire) begin
-          o_dma_wr_cmd_count <= o_dma_wr_cmd_count + 32'd1;
-        end
-        if (i_dma_wr_beat_fire) begin
-          o_dma_wr_beat_count <= o_dma_wr_beat_count + 32'd1;
-        end
-      end
-    end
-  end
-endmodule
-module fa_attention_ip_top #(
-  parameter int AXIL_ADDR_W = 32,
-  parameter int AXIL_DATA_W = 32,
-  parameter int AXI_DATA_W  = 128,
-  parameter int AXI_ADDR_W  = 32,
-  parameter int AXI_ID_W    = 4
-) (
-  input  logic                        clk,
-  input  logic                        rst_n,
-
-  // ==== AXI4-Lite slave (control) ====
-  input  logic [AXIL_ADDR_W-1:0]      s_axil_awaddr,
-  input  logic                        s_axil_awvalid,
-  output logic                        s_axil_awready,
-  input  logic [AXIL_DATA_W-1:0]      s_axil_wdata,
-  input  logic [AXIL_DATA_W/8-1:0]    s_axil_wstrb,
-  input  logic                        s_axil_wvalid,
-  output logic                        s_axil_wready,
-  output logic [1:0]                  s_axil_bresp,
-  output logic                        s_axil_bvalid,
-  input  logic                        s_axil_bready,
-
-  input  logic [AXIL_ADDR_W-1:0]      s_axil_araddr,
-  input  logic                        s_axil_arvalid,
-  output logic                        s_axil_arready,
-  output logic [AXIL_DATA_W-1:0]      s_axil_rdata,
-  output logic [1:0]                  s_axil_rresp,
-  output logic                        s_axil_rvalid,
-  input  logic                        s_axil_rready,
-
-  // ==== AXI4 Master (data DMA) ====
-  // -- AR --
-  output logic [AXI_ID_W-1:0]        m_axi_arid,
-  output logic [AXI_ADDR_W-1:0]      m_axi_araddr,
-  output logic [7:0]                  m_axi_arlen,
-  output logic [2:0]                  m_axi_arsize,
-  output logic [1:0]                  m_axi_arburst,
-  output logic                        m_axi_arvalid,
-  input  logic                        m_axi_arready,
-  // -- R --
-  input  logic [AXI_ID_W-1:0]        m_axi_rid,
-  input  logic [AXI_DATA_W-1:0]      m_axi_rdata,
-  input  logic [1:0]                  m_axi_rresp,
-  input  logic                        m_axi_rlast,
-  input  logic                        m_axi_rvalid,
-  output logic                        m_axi_rready,
-  // -- AW --
-  output logic [AXI_ID_W-1:0]        m_axi_awid,
-  output logic [AXI_ADDR_W-1:0]      m_axi_awaddr,
-  output logic [7:0]                  m_axi_awlen,
-  output logic [2:0]                  m_axi_awsize,
-  output logic [1:0]                  m_axi_awburst,
-  output logic                        m_axi_awvalid,
-  input  logic                        m_axi_awready,
-  // -- W --
-  output logic [AXI_DATA_W-1:0]      m_axi_wdata,
-  output logic [AXI_DATA_W/8-1:0]    m_axi_wstrb,
-  output logic                        m_axi_wlast,
-  output logic                        m_axi_wvalid,
-  input  logic                        m_axi_wready,
-  // -- B --
-  input  logic [AXI_ID_W-1:0]        m_axi_bid,
-  input  logic [1:0]                  m_axi_bresp,
-  input  logic                        m_axi_bvalid,
-  output logic                        m_axi_bready
-);
-
-  // ---- Internal wires ----
-  logic        start_pulse;
-  logic        soft_reset;
-  logic        irq_en;
-  logic        causal_en;
-  logic [63:0] q_base, k_base, v_base, o_base;
-  logic [31:0] stride_bytes;
-  logic [15:0] neg_large_q8_8;
-  logic [15:0] scale_q8_8;
-  logic        core_busy, core_done, core_error;
-  logic [31:0] core_cycles;
-
-  logic        perf_ms_load_q;
-  logic        perf_ms_init_context;
-  logic        perf_ms_load_k;
-  logic        perf_ms_load_v;
-  logic        perf_ms_compute;
-  logic        perf_ms_normalize;
-  logic        perf_ms_write_o;
-  logic        perf_ms_next_q;
-  logic        perf_cs_dp_run;
-  logic        perf_cs_score_done;
-  logic        perf_cs_softmax_prep;
-  logic        perf_comp_launch;
-  logic [1:0]  perf_active_rows;
-  logic        perf_norm_recip_req;
-  logic        perf_norm_recip_rsp;
-
-  logic [31:0] perf_run_count;
-  logic [31:0] perf_busy_cycles;
-  logic [31:0] perf_dma_rd_cmd_count;
-  logic [31:0] perf_dma_rd_beat_count;
-  logic [31:0] perf_dma_wr_cmd_count;
-  logic [31:0] perf_dma_wr_beat_count;
-  logic [31:0] perf_comp_launch_count;
-  logic [31:0] perf_exp_eval_count;
-  logic [31:0] perf_mul_eval_count;
-  logic [31:0] perf_recip_req_count;
-  logic [31:0] perf_recip_rsp_count;
-  logic [31:0] perf_ms_load_q_cycles;
-  logic [31:0] perf_ms_init_context_cycles;
-  logic [31:0] perf_ms_load_k_cycles;
-  logic [31:0] perf_ms_load_v_cycles;
-  logic [31:0] perf_ms_compute_cycles;
-  logic [31:0] perf_ms_normalize_cycles;
-  logic [31:0] perf_ms_write_o_cycles;
-  logic [31:0] perf_ms_next_q_cycles;
-  logic [31:0] perf_cs_dp_run_cycles;
-  logic [31:0] perf_cs_score_done_cycles;
-  logic [31:0] perf_cs_softmax_prep_cycles;
-
-  // DMA reader <-> core
-  logic        dma_rd_cmd_valid, dma_rd_cmd_ready;
-  logic [31:0] dma_rd_cmd_addr;
-  logic [15:0] dma_rd_cmd_len;
-  logic        dma_rd_out_valid, dma_rd_out_ready;
-  logic [AXI_DATA_W-1:0] dma_rd_out_data;
-  logic        dma_rd_out_last;
-  logic        dma_rd_error;
-  logic [31:0] rd_bytes;
-
-  // DMA writer <-> core
-  logic        dma_wr_cmd_valid, dma_wr_cmd_ready;
-  logic [31:0] dma_wr_cmd_addr;
-  logic [15:0] dma_wr_cmd_len;
-  logic        dma_wr_in_valid, dma_wr_in_ready;
-  logic [AXI_DATA_W-1:0] dma_wr_in_data;
-  logic        dma_wr_in_last;
-  logic        dma_wr_error;
-  logic [31:0] wr_bytes;
-
-  // ==== Register file ====
-  fa_axi_lite_regs u_regs (
-    .clk(clk), .rst_n(rst_n),
-    .s_axil_awaddr(s_axil_awaddr), .s_axil_awvalid(s_axil_awvalid), .s_axil_awready(s_axil_awready),
-    .s_axil_wdata(s_axil_wdata), .s_axil_wstrb(s_axil_wstrb), .s_axil_wvalid(s_axil_wvalid), .s_axil_wready(s_axil_wready),
-    .s_axil_bresp(s_axil_bresp), .s_axil_bvalid(s_axil_bvalid), .s_axil_bready(s_axil_bready),
-    .s_axil_araddr(s_axil_araddr), .s_axil_arvalid(s_axil_arvalid), .s_axil_arready(s_axil_arready),
-    .s_axil_rdata(s_axil_rdata), .s_axil_rresp(s_axil_rresp), .s_axil_rvalid(s_axil_rvalid), .s_axil_rready(s_axil_rready),
-    .i_busy(core_busy), .i_done(core_done), .i_error(core_error), .i_cycles(core_cycles),
-    .i_perf_run_count(perf_run_count), .i_perf_busy_cycles(perf_busy_cycles),
-    .i_perf_dma_rd_cmd_count(perf_dma_rd_cmd_count), .i_perf_dma_rd_beat_count(perf_dma_rd_beat_count),
-    .i_perf_dma_wr_cmd_count(perf_dma_wr_cmd_count), .i_perf_dma_wr_beat_count(perf_dma_wr_beat_count),
-    .i_perf_comp_launch_count(perf_comp_launch_count), .i_perf_exp_eval_count(perf_exp_eval_count),
-    .i_perf_mul_eval_count(perf_mul_eval_count), .i_perf_recip_req_count(perf_recip_req_count),
-    .i_perf_recip_rsp_count(perf_recip_rsp_count), .i_perf_ms_load_q_cycles(perf_ms_load_q_cycles),
-    .i_perf_ms_init_context_cycles(perf_ms_init_context_cycles), .i_perf_ms_load_k_cycles(perf_ms_load_k_cycles),
-    .i_perf_ms_load_v_cycles(perf_ms_load_v_cycles), .i_perf_ms_compute_cycles(perf_ms_compute_cycles),
-    .i_perf_ms_normalize_cycles(perf_ms_normalize_cycles), .i_perf_ms_write_o_cycles(perf_ms_write_o_cycles),
-    .i_perf_ms_next_q_cycles(perf_ms_next_q_cycles), .i_perf_cs_dp_run_cycles(perf_cs_dp_run_cycles),
-    .i_perf_cs_score_done_cycles(perf_cs_score_done_cycles), .i_perf_cs_softmax_prep_cycles(perf_cs_softmax_prep_cycles),
-    .o_start_pulse(start_pulse), .o_soft_reset(soft_reset), .o_irq_en(irq_en), .o_causal_en(causal_en),
-    .o_q_base(q_base), .o_k_base(k_base), .o_v_base(v_base), .o_o_base(o_base),
-    .o_stride_bytes(stride_bytes), .o_neg_large_q8_8(neg_large_q8_8), .o_scale_q8_8(scale_q8_8)
-  );
-
-  fa_perf_counters u_perf (
-    .clk(clk),
-    .rst_n(rst_n),
-    .i_run_start(start_pulse),
-    .i_soft_reset(soft_reset),
-    .i_ms_load_q(perf_ms_load_q),
-    .i_ms_init_context(perf_ms_init_context),
-    .i_ms_load_k(perf_ms_load_k),
-    .i_ms_load_v(perf_ms_load_v),
-    .i_ms_compute(perf_ms_compute),
-    .i_ms_normalize(perf_ms_normalize),
-    .i_ms_write_o(perf_ms_write_o),
-    .i_ms_next_q(perf_ms_next_q),
-    .i_cs_dp_run(perf_cs_dp_run),
-    .i_cs_score_done(perf_cs_score_done),
-    .i_cs_softmax_prep(perf_cs_softmax_prep),
-    .i_comp_launch(perf_comp_launch),
-    .i_active_rows(perf_active_rows),
-    .i_norm_recip_req(perf_norm_recip_req),
-    .i_norm_recip_rsp(perf_norm_recip_rsp),
-    .i_dma_rd_cmd_fire(m_axi_arvalid && m_axi_arready),
-    .i_dma_rd_beat_fire(dma_rd_out_valid && dma_rd_out_ready),
-    .i_dma_wr_cmd_fire(m_axi_awvalid && m_axi_awready),
-    .i_dma_wr_beat_fire(dma_wr_in_valid && dma_wr_in_ready),
-    .o_run_count(perf_run_count),
-    .o_busy_cycles(perf_busy_cycles),
-    .o_dma_rd_cmd_count(perf_dma_rd_cmd_count),
-    .o_dma_rd_beat_count(perf_dma_rd_beat_count),
-    .o_dma_wr_cmd_count(perf_dma_wr_cmd_count),
-    .o_dma_wr_beat_count(perf_dma_wr_beat_count),
-    .o_comp_launch_count(perf_comp_launch_count),
-    .o_exp_eval_count(perf_exp_eval_count),
-    .o_mul_eval_count(perf_mul_eval_count),
-    .o_recip_req_count(perf_recip_req_count),
-    .o_recip_rsp_count(perf_recip_rsp_count),
-    .o_ms_load_q_cycles(perf_ms_load_q_cycles),
-    .o_ms_init_context_cycles(perf_ms_init_context_cycles),
-    .o_ms_load_k_cycles(perf_ms_load_k_cycles),
-    .o_ms_load_v_cycles(perf_ms_load_v_cycles),
-    .o_ms_compute_cycles(perf_ms_compute_cycles),
-    .o_ms_normalize_cycles(perf_ms_normalize_cycles),
-    .o_ms_write_o_cycles(perf_ms_write_o_cycles),
-    .o_ms_next_q_cycles(perf_ms_next_q_cycles),
-    .o_cs_dp_run_cycles(perf_cs_dp_run_cycles),
-    .o_cs_score_done_cycles(perf_cs_score_done_cycles),
-    .o_cs_softmax_prep_cycles(perf_cs_softmax_prep_cycles)
-  );
-
-  // ==== DMA Reader ====
-  fa_dma_reader #(
-    .AXI_ADDR_W(AXI_ADDR_W), .AXI_DATA_W(AXI_DATA_W), .AXI_ID_W(AXI_ID_W)
-  ) u_dma_rd (
-    .clk(clk), .rst_n(rst_n),
-    .cmd_valid(dma_rd_cmd_valid), .cmd_ready(dma_rd_cmd_ready),
-    .cmd_addr(dma_rd_cmd_addr), .cmd_len(dma_rd_cmd_len),
-    .m_axi_arid(m_axi_arid), .m_axi_araddr(m_axi_araddr), .m_axi_arlen(m_axi_arlen),
-    .m_axi_arsize(m_axi_arsize), .m_axi_arburst(m_axi_arburst),
-    .m_axi_arvalid(m_axi_arvalid), .m_axi_arready(m_axi_arready),
-    .m_axi_rid(m_axi_rid), .m_axi_rdata(m_axi_rdata), .m_axi_rresp(m_axi_rresp),
-    .m_axi_rlast(m_axi_rlast), .m_axi_rvalid(m_axi_rvalid), .m_axi_rready(m_axi_rready),
-    .out_valid(dma_rd_out_valid), .out_data(dma_rd_out_data),
-    .out_last(dma_rd_out_last), .out_ready(dma_rd_out_ready),
-    .error(dma_rd_error), .rd_bytes(rd_bytes)
-  );
-
-  // ==== DMA Writer ====
-  fa_dma_writer #(
-    .AXI_ADDR_W(AXI_ADDR_W), .AXI_DATA_W(AXI_DATA_W), .AXI_ID_W(AXI_ID_W)
-  ) u_dma_wr (
-    .clk(clk), .rst_n(rst_n),
-    .cmd_valid(dma_wr_cmd_valid), .cmd_ready(dma_wr_cmd_ready),
-    .cmd_addr(dma_wr_cmd_addr), .cmd_len(dma_wr_cmd_len),
-    .in_valid(dma_wr_in_valid), .in_ready(dma_wr_in_ready),
-    .in_data(dma_wr_in_data), .in_last(dma_wr_in_last),
-    .m_axi_awid(m_axi_awid), .m_axi_awaddr(m_axi_awaddr), .m_axi_awlen(m_axi_awlen),
-    .m_axi_awsize(m_axi_awsize), .m_axi_awburst(m_axi_awburst),
-    .m_axi_awvalid(m_axi_awvalid), .m_axi_awready(m_axi_awready),
-    .m_axi_wdata(m_axi_wdata), .m_axi_wstrb(m_axi_wstrb), .m_axi_wlast(m_axi_wlast),
-    .m_axi_wvalid(m_axi_wvalid), .m_axi_wready(m_axi_wready),
-    .m_axi_bid(m_axi_bid), .m_axi_bresp(m_axi_bresp),
-    .m_axi_bvalid(m_axi_bvalid), .m_axi_bready(m_axi_bready),
-    .error(dma_wr_error), .wr_bytes(wr_bytes)
-  );
-
-  // ==== Attention Core ====
-  fa_attention_core u_core (
-    .clk(clk), .rst_n(rst_n),
-    .i_start(start_pulse), .i_soft_reset(soft_reset),
-    .i_causal_en(causal_en), .i_scale_q8_8(scale_q8_8),
-    .i_neg_large_q8_8(neg_large_q8_8),
-    .o_busy(core_busy), .o_done(core_done), .o_error(core_error), .o_cycles(core_cycles),
-    .i_q_base(q_base), .i_k_base(k_base), .i_v_base(v_base), .i_o_base(o_base),
-    .i_stride_bytes(stride_bytes),
-    .dma_rd_cmd_valid(dma_rd_cmd_valid), .dma_rd_cmd_ready(dma_rd_cmd_ready),
-    .dma_rd_cmd_addr(dma_rd_cmd_addr), .dma_rd_cmd_len(dma_rd_cmd_len),
-    .dma_rd_data_valid(dma_rd_out_valid), .dma_rd_data_ready(dma_rd_out_ready),
-    .dma_rd_data(dma_rd_out_data), .dma_rd_data_last(dma_rd_out_last),
-    .dma_wr_cmd_valid(dma_wr_cmd_valid), .dma_wr_cmd_ready(dma_wr_cmd_ready),
-    .dma_wr_cmd_addr(dma_wr_cmd_addr), .dma_wr_cmd_len(dma_wr_cmd_len),
-    .dma_wr_data_valid(dma_wr_in_valid), .dma_wr_data_ready(dma_wr_in_ready),
-    .dma_wr_data(dma_wr_in_data), .dma_wr_data_last(dma_wr_in_last),
-    .o_perf_ms_load_q(perf_ms_load_q),
-    .o_perf_ms_init_context(perf_ms_init_context),
-    .o_perf_ms_load_k(perf_ms_load_k),
-    .o_perf_ms_load_v(perf_ms_load_v),
-    .o_perf_ms_compute(perf_ms_compute),
-    .o_perf_ms_normalize(perf_ms_normalize),
-    .o_perf_ms_write_o(perf_ms_write_o),
-    .o_perf_ms_next_q(perf_ms_next_q),
-    .o_perf_cs_dp_run(perf_cs_dp_run),
-    .o_perf_cs_score_done(perf_cs_score_done),
-    .o_perf_cs_softmax_prep(perf_cs_softmax_prep),
-    .o_perf_comp_launch(perf_comp_launch),
-    .o_perf_active_rows(perf_active_rows),
-    .o_perf_norm_recip_req(perf_norm_recip_req),
-    .o_perf_norm_recip_rsp(perf_norm_recip_rsp)
-  );
-
-  // Error aggregation
-  logic unused_irq;
-  assign unused_irq = irq_en;
-endmodule
-module fa_qk_dotprod_slice #(
-  parameter int D        = 64,
-  parameter int DP_LANES = 32
-) (
-  input  logic signed [15:0] i_q_row0 [D],
-  input  logic signed [15:0] i_q_row1 [D],
-  input  logic               i_row1_valid,
-  input  logic signed [15:0] i_k_row  [D],
-  input  logic [$clog2(D)-1:0] i_chunk_idx,
-  output logic signed [39:0] o_partial_sum0,
-  output logic signed [39:0] o_partial_sum1
-);
-
-  always_comb begin
-    int d_idx;
-    o_partial_sum0 = '0;
-    o_partial_sum1 = '0;
-    for (int lane = 0; lane < DP_LANES; lane++) begin
-      d_idx = i_chunk_idx * DP_LANES + lane;
-      o_partial_sum0 = o_partial_sum0 + 40'(i_q_row0[d_idx]) * 40'(i_k_row[d_idx]);
-      if (i_row1_valid)
-        o_partial_sum1 = o_partial_sum1 + 40'(i_q_row1[d_idx]) * 40'(i_k_row[d_idx]);
-    end
-  end
-endmodulemodule fa_o_normalize_block #(
-  parameter int NORM_LANES = 8
-) (
-  input  logic                     i_den_zero,
-  input  logic [31:0]              i_recip_q16_16,
-  input  logic signed [63:0]       i_acc [NORM_LANES],
-  output logic signed [15:0]       o_data [NORM_LANES]
-);
-
-  always_comb begin
-    for (int lane = 0; lane < NORM_LANES; lane++) begin
-      logic signed [63:0] num;
-      logic signed [95:0] norm_mul_q32_32;
-      logic signed [95:0] norm_rounded_q32_32;
-      logic signed [79:0] norm_result;
-
-      num = i_acc[lane];
-      norm_mul_q32_32 = '0;
-      norm_rounded_q32_32 = '0;
-      norm_result = '0;
-      if (i_den_zero) begin
-        norm_result = (num >= 0) ? 80'sd32767 : -80'sd32768;
-      end else begin
-        norm_mul_q32_32 = num * $signed({1'b0, i_recip_q16_16});
-        if (norm_mul_q32_32 >= 0)
-          norm_rounded_q32_32 = norm_mul_q32_32 + 96'sd2147483648;
-        else
-          norm_rounded_q32_32 = norm_mul_q32_32 - 96'sd2147483648;
-        norm_result = norm_rounded_q32_32 >>> 32;
-      end
-
-      if (norm_result > 80'sd32767)
-        o_data[lane] = 16'sd32767;
-      else if (norm_result < -80'sd32768)
-        o_data[lane] = -16'sd32768;
-      else
-        o_data[lane] = norm_result[15:0];
-    end
-  end
-endmodule// ============================================================================
-// fa_row_context_rf.sv
-// Per-row register file for online softmax state: m, l, acc[D].
-// Supports multi-tile accumulation: state persists across K/V tiles.
-// ============================================================================
-module fa_row_context_rf #(
-  parameter int NUM_ROWS = 32,     // Tq: rows of Q tile
-  parameter int D        = 64,
-  parameter int M_W      = 16,     // width of m (Q8.8)
-  parameter int L_W      = 32,     // width of l (Q16.16)
-  parameter int ACC_W    = 32      // width of each acc element (Q16.16)
-) (
-  input  logic                      clk,
-  input  logic                      rst_n,
-
-  // ---- Init: reset row state (called at start of Q tile) ----
-  input  logic                      init,         // pulse: init all rows
-  input  logic signed [M_W-1:0]     init_m,       // typically NEG_LARGE
-
-  // ---- Read row state ----
-  input  logic [$clog2(NUM_ROWS)-1:0] rd_row,
-  output logic signed [M_W-1:0]      rd_m,
-  output logic [L_W-1:0]             rd_l,
-  output logic signed [ACC_W-1:0]    rd_acc [D],
-
-  // ---- Write row state ----
-  input  logic                        wr_en,
-  input  logic [$clog2(NUM_ROWS)-1:0] wr_row,
-  input  logic signed [M_W-1:0]       wr_m,
-  input  logic [L_W-1:0]              wr_l,
-  input  logic signed [ACC_W-1:0]     wr_acc [D]
-);
-
-  logic signed [M_W-1:0]   m_rf   [NUM_ROWS];
-  logic [L_W-1:0]          l_rf   [NUM_ROWS];
-  logic signed [ACC_W-1:0] acc_rf [NUM_ROWS][D];
-
-  // Read
-  assign rd_m = m_rf[rd_row];
-  assign rd_l = l_rf[rd_row];
-  generate
-    for (genvar k = 0; k < D; k++) begin : gen_rd_acc
-      assign rd_acc[k] = acc_rf[rd_row][k];
-    end
-  endgenerate
-
-  // Write / Init
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      for (int r = 0; r < NUM_ROWS; r++) begin
-        m_rf[r] <= '0;
-        l_rf[r] <= '0;
-        for (int k = 0; k < D; k++)
-          acc_rf[r][k] <= '0;
-      end
-    end else if (init) begin
-      for (int r = 0; r < NUM_ROWS; r++) begin
-        m_rf[r] <= init_m;
-        l_rf[r] <= '0;
-        for (int k = 0; k < D; k++)
-          acc_rf[r][k] <= '0;
-      end
-    end else if (wr_en) begin
-      m_rf[wr_row]   <= wr_m;
-      l_rf[wr_row]   <= wr_l;
-      for (int k = 0; k < D; k++)
-        acc_rf[wr_row][k] <= wr_acc[k];
-    end
-  end
-endmodule
-// ============================================================================
-// fa_tile_compute_engine.sv
-// Tile-level compute engine for FlashAttention.
-// Processes one (Q_tile, K_tile, V_tile) combination:
-//   1) Computes score = Q_i · K_j / scale  for each (i,j)
-//   2) Online softmax update of m/l/acc per row
-// Reads K/V from tile buffers, Q from Q buffer.
-// Updates row context RF with new m/l/acc.
-// ============================================================================
-module fa_tile_compute_engine #(
-  parameter int TQ       = 32,   // Q tile rows
-  parameter int TK       = 64,   // K tile rows (= columns of score block)
-  parameter int D        = 64,   // head dim
-  parameter int SCORE_W  = 40    // dot-product accumulator width
-) (
-  input  logic                     clk,
-  input  logic                     rst_n,
-
-  // ---- Control ----
-  input  logic                     start,          // pulse: begin tile compute
-  output logic                     done,           // pulse: tile compute finished
-  input  logic                     causal_en,
-  input  logic signed [15:0]       neg_large_q8_8,
-  input  logic signed [15:0]       scale_q8_8,     // 1/sqrt(d) in Q8.8
-  input  logic [7:0]               q_tile_row_base,// global row offset for causal
-  input  logic [7:0]               k_tile_col_base,// global col offset for causal
-
-  // ---- Q buffer read ----
-  output logic [$clog2(TQ)-1:0]    q_rd_row,
-  output logic [$clog2(D)-1:0]     q_rd_col,
-  input  logic signed [15:0]       q_rd_data,
-
-  // ---- K buffer read ----
-  output logic [$clog2(TK)-1:0]    k_rd_row,
-  output logic [$clog2(D)-1:0]     k_rd_col,
-  input  logic signed [15:0]       k_rd_data,
-
-  // ---- V buffer read ----
-  output logic [$clog2(TK)-1:0]    v_rd_row,
-  output logic [$clog2(D)-1:0]     v_rd_col,
-  input  logic signed [15:0]       v_rd_data,
-
-  // ---- Row context RF interface ----
-  output logic [$clog2(TQ)-1:0]    ctx_rd_row,
-  input  logic signed [15:0]       ctx_rd_m,
-  input  logic [31:0]              ctx_rd_l,
-  input  logic signed [31:0]       ctx_rd_acc [D],
-
-  output logic                     ctx_wr_en,
-  output logic [$clog2(TQ)-1:0]    ctx_wr_row,
-  output logic signed [15:0]       ctx_wr_m,
-  output logic [31:0]              ctx_wr_l,
-  output logic signed [31:0]       ctx_wr_acc [D]
-);
-
-  // ---- State machine ----
-  typedef enum logic [3:0] {
-    IDLE,
-    DOTPROD_INIT,    // init dot product for (qi, kj)
-    DOTPROD_RUN,     // accumulate d elements
-    DOTPROD_SCALE,   // multiply by scale, apply causal mask
-    SOFTMAX_UPDATE,  // online softmax update with score & V
-    PV_INIT,         // init P*V accumulation for one (qi, kj) pair
-    PV_RUN,          // accumulate P_{ij} * V_j[k] for all k
-    NEXT_KJ,         // advance to next kj
-    NEXT_QI,         // advance to next qi (or done)
-    TILE_DONE
-  } state_t;
-  state_t state;
-
-  logic [$clog2(TQ)-1:0] qi;
-  logic [$clog2(TK)-1:0] kj;
-  logic [$clog2(D)-1:0]  d_cnt;
-
-  // Dot product accumulator
-  logic signed [SCORE_W-1:0] dp_acc;
-  logic signed [31:0]        score_q16_16;
-  logic signed [15:0]        score_q8_8;
-
-  // Online softmax intermediate
-  logic signed [15:0] m_old, m_new;
-  logic signed [15:0] diff_old, diff_new;
-  logic [15:0]        exp_old_q1_15, exp_new_q1_15;
-  logic [31:0]        l_old, l_new;
-  logic signed [31:0] acc_old [D];
-  logic signed [31:0] acc_new [D];
-
-  // Exp units
-  fa_exp_pwl_8seg_q1_15 u_exp_old (.i_x_q8_8(diff_old), .o_exp_q1_15(exp_old_q1_15));
-  fa_exp_pwl_8seg_q1_15 u_exp_new (.i_x_q8_8(diff_new), .o_exp_q1_15(exp_new_q1_15));
-
-  // Scale multiplication: score_raw * scale
-  logic signed [31:0] scaled_prod;
-  fa_mul_sat_q8_8 u_scale_mul (
-    .i_a_q8_8(dp_acc[23:8]),  // take Q8.8 portion of accumulator
-    .i_b_q8_8(scale_q8_8),
-    .o_y_q8_8(score_q8_8)
-  );
-
-  always_comb begin
-    scaled_prod = '0; // unused, kept for clarity
-
-    // Q/K address generation
-    q_rd_row = qi;
-    q_rd_col = d_cnt;
-    k_rd_row = kj;
-    k_rd_col = d_cnt;
-    v_rd_row = kj;
-    v_rd_col = d_cnt;
-
-    // Row context read
-    ctx_rd_row = qi;
-
-    // Softmax intermediates
-    m_old = ctx_rd_m;
-    if (score_q8_8 > m_old)
-      m_new = score_q8_8;
-    else
-      m_new = m_old;
-    diff_old = m_old - m_new;
-    diff_new = score_q8_8 - m_new;
-    l_old = ctx_rd_l;
-  end
-
-  // P*V accumulation address
-  always_comb begin
-    // Default: suppress writes
-    ctx_wr_en  = 1'b0;
-    ctx_wr_row = qi;
-    ctx_wr_m   = m_new;
-    ctx_wr_l   = l_new;
-    for (int k = 0; k < D; k++)
-      ctx_wr_acc[k] = acc_new[k];
-  end
-
-  // l update
-  always_comb begin
-    logic [63:0] l_scaled_wide;
-    logic [31:0] l_scaled;
-    logic [31:0] l_term;
-    l_scaled_wide = l_old * exp_old_q1_15;
-    l_scaled = l_scaled_wide[46:15];
-    l_term = {15'd0, exp_new_q1_15, 1'b0};
-    l_new = l_scaled + l_term;
-  end
-
-  // acc update
-  always_comb begin
-    for (int k = 0; k < D; k++) begin
-      logic signed [63:0] acc_scaled_wide;
-      logic signed [31:0] acc_scaled;
-      logic signed [33:0] v_mul;
-      logic signed [31:0] v_term;
-      acc_scaled_wide = ctx_rd_acc[k] * $signed({1'b0, exp_old_q1_15});
-      acc_scaled = acc_scaled_wide[46:15];
-      v_mul = $signed({1'b0, exp_new_q1_15}) * v_rd_data;
-      v_term = {{5{v_mul[33]}}, v_mul[33:7]};
-      acc_new[k] = acc_scaled + v_term;
-    end
-  end
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      state  <= IDLE;
-      qi     <= '0;
-      kj     <= '0;
-      d_cnt  <= '0;
-      dp_acc <= '0;
-      done   <= 1'b0;
-    end else begin
-      done <= 1'b0;
-
-      case (state)
-        IDLE: begin
-          if (start) begin
-            qi    <= '0;
-            kj    <= '0;
-            state <= DOTPROD_INIT;
-          end
-        end
-
-        DOTPROD_INIT: begin
-          dp_acc <= '0;
-          d_cnt  <= '0;
-          state  <= DOTPROD_RUN;
-        end
-
-        DOTPROD_RUN: begin
-          // Each cycle: read Q[qi][d_cnt] and K[kj][d_cnt], accumulate
-          dp_acc <= dp_acc + SCORE_W'(q_rd_data) * SCORE_W'(k_rd_data);
-          d_cnt  <= d_cnt + 1'b1;
-          if (d_cnt == D - 1) begin
-            state <= DOTPROD_SCALE;
-          end
-        end
-
-        DOTPROD_SCALE: begin
-          // score_q8_8 is ready from u_scale_mul
-          // Apply causal mask
-          if (causal_en && (q_tile_row_base + {3'b0, qi}) < (k_tile_col_base + {2'b0, kj})) begin
-            // Masked position
-            // Override score with neg_large - handled by forcing diff_new to large negative
-          end
-          state <= SOFTMAX_UPDATE;
-        end
-
-        SOFTMAX_UPDATE: begin
-          // Write back updated m/l/acc to context RF
-          // v_rd_data is used in acc_new computation combinationally
-          // For proper V accumulation, we need kj to index V
-          // The acc_new uses v_rd_data which is V[kj][d_cnt]
-          // Since we need all D elements of V_j, we do PV separately
-          // For now, write partial update (m, l only)
-          // Then do PV accumulation
-          ctx_wr_en <= 1'b1;
-          state     <= NEXT_KJ;
-        end
-
-        NEXT_KJ: begin
-          ctx_wr_en <= 1'b0;
-          if (kj == TK - 1) begin
-            kj    <= '0;
-            state <= NEXT_QI;
-          end else begin
-            kj    <= kj + 1'b1;
-            state <= DOTPROD_INIT;
-          end
-        end
-
-        NEXT_QI: begin
-          if (qi == TQ - 1) begin
-            state <= TILE_DONE;
-          end else begin
-            qi    <= qi + 1'b1;
-            kj    <= '0;
-            state <= DOTPROD_INIT;
-          end
-        end
-
-        TILE_DONE: begin
-          done  <= 1'b1;
-          state <= IDLE;
-        end
-
-        default: state <= IDLE;
-      endcase
-    end
-  end
-endmodule
-// ============================================================================
-// fa_attention_core.sv
-// FlashAttention core: tile-loop controller + compute engine + row context.
-// Orchestrates the outer Q-loop and inner K/V-loop, interfacing with
-// DMA reader/writer and tile buffers managed by the top level.
-// ============================================================================
-module fa_attention_core #(
-  parameter int SEQ_LEN   = 256,
-  parameter int D         = 64,
-  parameter int TQ        = 32,   // Q tile rows
-  parameter int TK        = 64,   // K/V tile rows
-  parameter int BUS_W     = 128
-) (
-  input  logic                     clk,
-  input  logic                     rst_n,
-
-  // ---- Control ----
-  input  logic                     i_start,
-  input  logic                     i_soft_reset,
-  input  logic                     i_causal_en,
-  input  logic signed [15:0]       i_scale_q8_8,
-  input  logic signed [15:0]       i_neg_large_q8_8,
-  output logic                     o_busy,
-  output logic                     o_done,
-  output logic                     o_error,
-  output logic [31:0]              o_cycles,
-
-  // ---- Address config ----
-  input  logic [63:0]              i_q_base,
-  input  logic [63:0]              i_k_base,
-  input  logic [63:0]              i_v_base,
-  input  logic [63:0]              i_o_base,
-  input  logic [31:0]              i_stride_bytes,
-
-  // ---- DMA reader command ----
-  output logic                     dma_rd_cmd_valid,
-  input  logic                     dma_rd_cmd_ready,
-  output logic [31:0]              dma_rd_cmd_addr,
-  output logic [15:0]              dma_rd_cmd_len,
-
-  // ---- DMA reader data (from external reader) ----
-  input  logic                     dma_rd_data_valid,
-  output logic                     dma_rd_data_ready,
-  input  logic [BUS_W-1:0]         dma_rd_data,
-  input  logic                     dma_rd_data_last,
-
-  // ---- DMA writer command ----
-  output logic                     dma_wr_cmd_valid,
-  input  logic                     dma_wr_cmd_ready,
-  output logic [31:0]              dma_wr_cmd_addr,
-  output logic [15:0]              dma_wr_cmd_len,
-
-  // ---- DMA writer data ----
-  output logic                     dma_wr_data_valid,
-  input  logic                     dma_wr_data_ready,
-  output logic [BUS_W-1:0]         dma_wr_data,
-  output logic                     dma_wr_data_last,
-
-  // ---- Performance hooks ----
-  output logic                     o_perf_ms_load_q,
-  output logic                     o_perf_ms_init_context,
-  output logic                     o_perf_ms_load_k,
-  output logic                     o_perf_ms_load_v,
-  output logic                     o_perf_ms_compute,
-  output logic                     o_perf_ms_normalize,
-  output logic                     o_perf_ms_write_o,
-  output logic                     o_perf_ms_next_q,
-  output logic                     o_perf_cs_dp_run,
-  output logic                     o_perf_cs_score_done,
-  output logic                     o_perf_cs_softmax_prep,
-  output logic                     o_perf_comp_launch,
-  output logic [1:0]               o_perf_active_rows,
-  output logic                     o_perf_norm_recip_req,
-  output logic                     o_perf_norm_recip_rsp
-);
-
-  // ---- Parameters ----
-  localparam int NUM_Q_TILES = SEQ_LEN / TQ;  // 8
-  localparam int NUM_K_TILES = SEQ_LEN / TK;  // 4
-  localparam int ELEMS_PER_BEAT = BUS_W / 16; // 8
-  localparam int BEATS_PER_ROW  = D / ELEMS_PER_BEAT; // 8
-  localparam int BEATS_PER_TILE_KV = TK * BEATS_PER_ROW; // 512
-  localparam int BEATS_PER_TILE_Q  = TQ * BEATS_PER_ROW; // 256
-  localparam int DP_LANES = (D < 32) ? D : 32;
-  localparam int DP_CHUNKS = D / DP_LANES;
-  localparam int ROW_PAR = 2;
-  localparam int NORM_LANES = 8;
-  localparam int RECIP_LAT = 10;
-
-  // ---- Master state machine ----
-  typedef enum logic [3:0] {
-    S_IDLE,
-    S_LOAD_Q,         // DMA fetch Q tile
-    S_INIT_CONTEXT,   // Init row context for new Q tile
-    S_LOAD_K,         // DMA fetch K tile
-    S_LOAD_V,         // DMA fetch V tile
-    S_COMPUTE,        // Tile compute (QK^T + online softmax + PV)
-    S_NORMALIZE,      // Final row normalization (acc/l)
-    S_WRITE_O,        // DMA write O tile
-    S_NEXT_Q,         // Advance Q tile index
-    S_DONE
-  } master_state_t;
-  master_state_t ms;
-
-  logic [$clog2(NUM_Q_TILES):0] q_tile_idx;
-  logic [$clog2(NUM_K_TILES):0] k_tile_idx;
-  logic [31:0] cycle_counter;
-
-  // ---- Q local buffer ----
-  logic signed [15:0] q_buf [TQ][D];
-  logic [$clog2(TQ*D/ELEMS_PER_BEAT):0] q_fill_cnt;
-
-  // ---- K/V local buffers (ping-pong) ----
-  logic signed [15:0] k_buf0 [TK][D];
-  logic signed [15:0] k_buf1 [TK][D];
-  logic signed [15:0] v_buf0 [TK][D];
-  logic signed [15:0] v_buf1 [TK][D];
-  logic [$clog2(TK*D/ELEMS_PER_BEAT):0] kv_fill_cnt;
-  logic active_bank;
-  logic pref_target_bank;
-
-  typedef enum logic [2:0] {
-    PF_IDLE,
-    PF_CMD_K,
-    PF_DATA_K,
-    PF_CMD_V,
-    PF_DATA_V,
-    PF_DONE
-  } prefetch_state_t;
-  prefetch_state_t pf_state;
-  logic [$clog2(TK*D/ELEMS_PER_BEAT):0] pf_fill_cnt;
-
-  // ---- Row context (m, l, acc) ----
-  logic signed [15:0] row_m   [TQ];
-  logic [31:0]        row_l   [TQ];
-  logic signed [63:0] row_acc [TQ][D];
-
-  // ---- Compute engine state ----
-  logic [$clog2(TQ)-1:0] comp_qpair;
-  logic [$clog2(TK)-1:0] comp_kj;
-  logic [$clog2(D)-1:0]  comp_d;
-  logic signed [39:0]    dp_acc0;
-  logic signed [39:0]    dp_acc1;
-  logic signed [15:0]    score_q8_8_0;
-  logic signed [15:0]    score_q8_8_1;
-
-  // ---- Normalization / write-out state ----
-  logic [$clog2(TQ)-1:0] norm_qi;
-  logic [$clog2(D)-1:0]  norm_d;
-  logic [$clog2(TQ*D/ELEMS_PER_BEAT):0] o_write_cnt;
-  logic                  norm_recip_in_valid;
-  logic                  norm_recip_out_valid;
-  logic [31:0]           norm_recip_out_q16_16;
-  logic                  norm_recip_pending;
-  logic                  norm_row_ready;
-  logic                  norm_row_den_zero;
-  logic [31:0]           norm_row_recip;
-
-  // ---- O output buffer ----
-  logic signed [15:0] o_buf [TQ][D];
-
-  logic [15:0] exp_old_out0, exp_new_out0;
-  logic [15:0] exp_old_out1, exp_new_out1;
-
-  // Inner compute FSM
-  typedef enum logic [3:0] {
-    C_IDLE,
-    C_DP_RUN,
-    C_SCORE_DONE,
-    C_SOFTMAX_PREP,
-    C_DONE
-  } comp_state_t;
-  comp_state_t cs;
-
-  logic comp_start, comp_done;
-  logic signed [15:0] m_old0, m_new0;
-  logic signed [15:0] m_old1, m_new1;
-  logic [31:0] l_scaled0, l_term0, l_new_val0;
-  logic [31:0] l_scaled1, l_term1, l_new_val1;
-  logic [31:0] l_new_safe0, l_new_safe1;
-  logic [63:0] l_scaled_wide0;
-  logic [63:0] l_scaled_wide1;
-  logic signed [39:0] dp_partial_sum0;
-  logic signed [39:0] dp_partial_sum1;
-  logic                     comp_row1_valid;
-  logic signed [15:0]       dp_q_row0 [D];
-  logic signed [15:0]       dp_q_row1 [D];
-  logic signed [15:0]       dp_k_row  [D];
-  logic signed [63:0]       sm_acc_old0 [D];
-  logic signed [63:0]       sm_acc_old1 [D];
-  logic signed [15:0]       sm_v_row    [D];
-  logic signed [63:0]       sm_acc_new0 [D];
-  logic signed [63:0]       sm_acc_new1 [D];
-  logic signed [63:0]       norm_acc_chunk [NORM_LANES];
-  logic signed [15:0]       norm_o_chunk   [NORM_LANES];
-
-  always_comb begin
-    m_old0 = row_m[comp_qpair];
-    m_old1 = (comp_qpair + 1 < TQ) ? row_m[comp_qpair + 1] : i_neg_large_q8_8;
-    comp_row1_valid = (comp_qpair + 1 < TQ);
-    for (int k = 0; k < D; k++) begin
-      dp_q_row0[k] = q_buf[comp_qpair][k];
-      dp_q_row1[k] = comp_row1_valid ? q_buf[comp_qpair + 1][k] : 16'sd0;
-      dp_k_row[k] = active_bank ? k_buf1[comp_kj][k] : k_buf0[comp_kj][k];
-      sm_acc_old0[k] = row_acc[comp_qpair][k];
-      sm_acc_old1[k] = comp_row1_valid ? row_acc[comp_qpair + 1][k] : 64'sd0;
-      sm_v_row[k] = active_bank ? v_buf1[comp_kj][k] : v_buf0[comp_kj][k];
-    end
-    for (int lane = 0; lane < NORM_LANES; lane++) begin
-      if ((norm_d + lane) < D)
-        norm_acc_chunk[lane] = row_acc[norm_qi][norm_d + lane];
-      else
-        norm_acc_chunk[lane] = 64'sd0;
-    end
-  end
-
-  fa_qk_dotprod_slice #(
-    .D(D),
-    .DP_LANES(DP_LANES)
-  ) u_qk_dotprod_slice (
-    .i_q_row0(dp_q_row0),
-    .i_q_row1(dp_q_row1),
-    .i_row1_valid(comp_row1_valid),
-    .i_k_row(dp_k_row),
-    .i_chunk_idx(comp_d),
-    .o_partial_sum0(dp_partial_sum0),
-    .o_partial_sum1(dp_partial_sum1)
-  );
-
-  // Scale mul: dp_acc -> score
-  // Extract Q8.8 from 40-bit accumulator (which is in Q16.16 after multiply)
-  // dp_acc is sum of (Q8.8 * Q8.8) = Q16.16, so shift >>8 gives Q8.8
-  logic signed [15:0] dp_to_q8_8_0;
-  logic signed [15:0] dp_to_q8_8_1;
-  logic signed [31:0] dp_shifted0;
-  logic signed [31:0] dp_shifted1;
-  always_comb begin
-    dp_shifted0 = dp_acc0[39:8]; // Q8.8 portion (with extra precision)
-    dp_shifted1 = dp_acc1[39:8]; // Q8.8 portion (with extra precision)
-  end
-  fa_mul_sat_q8_8 u_score_scale0 (
-    .i_a_q8_8(dp_shifted0[15:0]),
-    .i_b_q8_8(i_scale_q8_8),
-    .o_y_q8_8(dp_to_q8_8_0)
-  );
-  fa_mul_sat_q8_8 u_score_scale1 (
-    .i_a_q8_8(dp_shifted1[15:0]),
-    .i_b_q8_8(i_scale_q8_8),
-    .o_y_q8_8(dp_to_q8_8_1)
-  );
-
-  fa_online_softmax_pair #(
-    .D(D)
-  ) u_online_softmax_pair (
-    .i_row1_valid(comp_row1_valid),
-    .i_neg_large_q8_8(i_neg_large_q8_8),
-    .i_score0(score_q8_8_0),
-    .i_score1(score_q8_8_1),
-    .i_m_old0(m_old0),
-    .i_m_old1(m_old1),
-    .i_l_old0(row_l[comp_qpair]),
-    .i_l_old1(comp_row1_valid ? row_l[comp_qpair + 1] : 32'd0),
-    .i_acc_old0(sm_acc_old0),
-    .i_acc_old1(sm_acc_old1),
-    .i_v_row(sm_v_row),
-    .o_m_new0(m_new0),
-    .o_m_new1(m_new1),
-    .o_l_new0(l_new_safe0),
-    .o_l_new1(l_new_safe1),
-    .o_exp_old0(exp_old_out0),
-    .o_exp_new0(exp_new_out0),
-    .o_exp_old1(exp_old_out1),
-    .o_exp_new1(exp_new_out1),
-    .o_acc_new0(sm_acc_new0),
-    .o_acc_new1(sm_acc_new1)
-  );
-
-  fa_recip_nr_q16_16 u_norm_recip (
-    .clk(clk),
-    .rst_n(rst_n),
-    .i_valid(norm_recip_in_valid),
-    .i_x_q16_16(row_l[norm_qi]),
-    .o_valid(norm_recip_out_valid),
-    .o_recip_q16_16(norm_recip_out_q16_16)
-  );
-
-  fa_o_normalize_block #(
-    .NORM_LANES(NORM_LANES)
-  ) u_o_normalize_block (
-    .i_den_zero(norm_row_den_zero),
-    .i_recip_q16_16(norm_row_recip),
-    .i_acc(norm_acc_chunk),
-    .o_data(norm_o_chunk)
-  );
-
-  // ---- Inner compute FSM ----
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      cs        <= C_IDLE;
-      comp_qpair <= '0;
-      comp_kj   <= '0;
-      comp_d    <= '0;
-      dp_acc0   <= '0;
-      dp_acc1   <= '0;
-      comp_done <= 1'b0;
-      score_q8_8_0 <= '0;
-      score_q8_8_1 <= '0;
-    end else begin
-      comp_done <= 1'b0;
-
-      case (cs)
-        C_IDLE: begin
-          if (comp_start) begin
-            comp_qpair <= '0;
-            comp_kj <= '0;
-            dp_acc0 <= '0;
-            dp_acc1 <= '0;
-            comp_d <= '0;
-            cs      <= C_DP_RUN;
-          end
-        end
-
-        C_DP_RUN: begin
-          dp_acc0 <= dp_acc0 + dp_partial_sum0;
-          dp_acc1 <= dp_acc1 + dp_partial_sum1;
-          if (comp_d == DP_CHUNKS - 1)
-            cs <= C_SCORE_DONE;
-          else
-            comp_d <= comp_d + 1'b1;
-        end
-
-        C_SCORE_DONE: begin
-          // Apply scale
-          score_q8_8_0 <= dp_to_q8_8_0;
-          score_q8_8_1 <= dp_to_q8_8_1;
-          // Apply causal mask
-          if (i_causal_en) begin
-            if ((q_tile_idx * TQ + comp_qpair) < (k_tile_idx * TK + comp_kj))
-              score_q8_8_0 <= i_neg_large_q8_8;
-            else
-              score_q8_8_0 <= dp_to_q8_8_0;
-
-            if ((comp_qpair + 1 < TQ) && ((q_tile_idx * TQ + comp_qpair + 1) < (k_tile_idx * TK + comp_kj)))
-              score_q8_8_1 <= i_neg_large_q8_8;
-            else
-              score_q8_8_1 <= dp_to_q8_8_1;
-          end
-          cs <= C_SOFTMAX_PREP;
-        end
-
-        C_SOFTMAX_PREP: begin
-          // Update row context: m, l
-          row_m[comp_qpair] <= m_new0;
-          row_l[comp_qpair] <= l_new_safe0;
-          if (comp_qpair + 1 < TQ) begin
-            row_m[comp_qpair + 1] <= m_new1;
-            row_l[comp_qpair + 1] <= l_new_safe1;
-          end
-
-          for (int k = 0; k < D; k++) begin
-            row_acc[comp_qpair][k] <= sm_acc_new0[k];
-            if (comp_qpair + 1 < TQ)
-              row_acc[comp_qpair + 1][k] <= sm_acc_new1[k];
-          end
-
-          if (comp_kj == TK - 1) begin
-            if (comp_qpair >= TQ - ROW_PAR) begin
-              cs <= C_DONE;
-            end else begin
-              comp_qpair <= comp_qpair + ROW_PAR;
-              comp_kj <= '0;
-              dp_acc0 <= '0;
-              dp_acc1 <= '0;
-              comp_d <= '0;
-              cs      <= C_DP_RUN;
-            end
-          end else begin
-            comp_kj <= comp_kj + 1'b1;
-            dp_acc0 <= '0;
-            dp_acc1 <= '0;
-            comp_d <= '0;
-            cs      <= C_DP_RUN;
-          end
-        end
-
-        C_DONE: begin
-          comp_done <= 1'b1;
-          cs        <= C_IDLE;
-        end
-
-        default: cs <= C_IDLE;
-      endcase
-    end
-  end
-
-  // ---- Master FSM ----
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      ms            <= S_IDLE;
-      q_tile_idx    <= '0;
-      k_tile_idx    <= '0;
-      cycle_counter <= '0;
-      q_fill_cnt    <= '0;
-      kv_fill_cnt   <= '0;
-      active_bank   <= 1'b0;
-      pref_target_bank <= 1'b1;
-      pf_state      <= PF_IDLE;
-      pf_fill_cnt   <= '0;
-      norm_qi       <= '0;
-      norm_d        <= '0;
-      norm_recip_in_valid <= 1'b0;
-      norm_recip_pending  <= 1'b0;
-      norm_row_ready      <= 1'b0;
-      norm_row_den_zero   <= 1'b0;
-      norm_row_recip      <= 32'd0;
-      o_write_cnt   <= '0;
-      o_busy        <= 1'b0;
-      o_done        <= 1'b0;
-      o_error       <= 1'b0;
-      comp_start    <= 1'b0;
-      dma_rd_cmd_valid <= 1'b0;
-      dma_wr_cmd_valid <= 1'b0;
-    end else begin
-      o_done     <= 1'b0;
-      comp_start <= 1'b0;
-      dma_rd_cmd_valid <= 1'b0;
-      dma_wr_cmd_valid <= 1'b0;
-      norm_recip_in_valid <= 1'b0;
-
-      if (i_soft_reset) begin
-        ms         <= S_IDLE;
-        o_busy     <= 1'b0;
-        o_error    <= 1'b0;
-        norm_recip_pending <= 1'b0;
-        norm_row_ready     <= 1'b0;
-        norm_row_den_zero  <= 1'b0;
-        norm_row_recip     <= 32'd0;
-      end else begin
-
-      case (ms)
-        S_IDLE: begin
-          if (i_start && !o_busy) begin
-            o_busy        <= 1'b1;
-            cycle_counter <= '0;
-            q_tile_idx    <= '0;
-            k_tile_idx    <= '0;
-            active_bank   <= 1'b0;
-            pref_target_bank <= 1'b1;
-            pf_state      <= PF_IDLE;
-            pf_fill_cnt   <= '0;
-            ms            <= S_LOAD_Q;
-            q_fill_cnt    <= '0;
-          end
-        end
-
-        // -- Load Q tile via DMA --
-        S_LOAD_Q: begin
-          cycle_counter <= cycle_counter + 1'b1;
-          if (q_fill_cnt == 0) begin
-            // Issue DMA command for Q tile
-            dma_rd_cmd_valid <= 1'b1;
-            dma_rd_cmd_addr  <= i_q_base[31:0] + q_tile_idx * TQ * i_stride_bytes;
-            dma_rd_cmd_len   <= BEATS_PER_TILE_Q - 1;
-            if (dma_rd_cmd_ready) begin
-              q_fill_cnt <= q_fill_cnt + 1'b1;
-            end
-          end else if (q_fill_cnt <= BEATS_PER_TILE_Q) begin
-            // Receive Q data
-            if (dma_rd_data_valid) begin
-              for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
-                int flat;
-                flat = (q_fill_cnt - 1) * ELEMS_PER_BEAT + i;
-                q_buf[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
-              end
-              q_fill_cnt <= q_fill_cnt + 1'b1;
-              if (dma_rd_data_last || q_fill_cnt == BEATS_PER_TILE_Q)
-                ms <= S_INIT_CONTEXT;
-            end
-          end
-        end
-
-        S_INIT_CONTEXT: begin
-          cycle_counter <= cycle_counter + 1'b1;
-          for (int r = 0; r < TQ; r++) begin
-            row_m[r]   <= i_neg_large_q8_8;
-            row_l[r]   <= 32'd0;
-            for (int k = 0; k < D; k++)
-              row_acc[r][k] <= 64'sd0;
-          end
-          k_tile_idx <= '0;
-          active_bank <= 1'b0;
-          pref_target_bank <= 1'b1;
-          pf_state <= PF_IDLE;
-          pf_fill_cnt <= '0;
-          ms         <= S_LOAD_K;
-          kv_fill_cnt <= '0;
-        end
-
-        // -- Load K tile --
-        S_LOAD_K: begin
-          cycle_counter <= cycle_counter + 1'b1;
-          if (kv_fill_cnt == 0) begin
-            dma_rd_cmd_valid <= 1'b1;
-            dma_rd_cmd_addr  <= i_k_base[31:0] + k_tile_idx * TK * i_stride_bytes;
-            dma_rd_cmd_len   <= BEATS_PER_TILE_KV - 1;
-            if (dma_rd_cmd_ready)
-              kv_fill_cnt <= kv_fill_cnt + 1'b1;
-          end else if (kv_fill_cnt <= BEATS_PER_TILE_KV) begin
-            if (dma_rd_data_valid) begin
-              for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
-                int flat;
-                flat = (kv_fill_cnt - 1) * ELEMS_PER_BEAT + i;
-                if (active_bank)
-                  k_buf1[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
-                else
-                  k_buf0[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
-              end
-              kv_fill_cnt <= kv_fill_cnt + 1'b1;
-              if (dma_rd_data_last || kv_fill_cnt == BEATS_PER_TILE_KV) begin
-                kv_fill_cnt <= '0;
-                ms          <= S_LOAD_V;
-              end
-            end
-          end
-        end
-
-        // -- Load V tile --
-        S_LOAD_V: begin
-          cycle_counter <= cycle_counter + 1'b1;
-          if (kv_fill_cnt == 0) begin
-            dma_rd_cmd_valid <= 1'b1;
-            dma_rd_cmd_addr  <= i_v_base[31:0] + k_tile_idx * TK * i_stride_bytes;
-            dma_rd_cmd_len   <= BEATS_PER_TILE_KV - 1;
-            if (dma_rd_cmd_ready)
-              kv_fill_cnt <= kv_fill_cnt + 1'b1;
-          end else if (kv_fill_cnt <= BEATS_PER_TILE_KV) begin
-            if (dma_rd_data_valid) begin
-              for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
-                int flat;
-                flat = (kv_fill_cnt - 1) * ELEMS_PER_BEAT + i;
-                if (active_bank)
-                  v_buf1[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
-                else
-                  v_buf0[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
-              end
-              kv_fill_cnt <= kv_fill_cnt + 1'b1;
-              if (dma_rd_data_last || kv_fill_cnt == BEATS_PER_TILE_KV) begin
-                ms <= S_COMPUTE;
-              end
-            end
-          end
-        end
-
-        // -- Tile compute --
-        S_COMPUTE: begin
-          cycle_counter <= cycle_counter + 1'b1;
-
-          // Prefetch next K/V tile into the opposite bank while current tile computes.
-          case (pf_state)
-            PF_IDLE: begin
-              if (k_tile_idx < NUM_K_TILES - 1) begin
-                pref_target_bank <= ~active_bank;
-                pf_fill_cnt <= '0;
-                pf_state <= PF_CMD_K;
-              end
-            end
-
-            PF_CMD_K: begin
-              dma_rd_cmd_valid <= 1'b1;
-              dma_rd_cmd_addr  <= i_k_base[31:0] + (k_tile_idx + 1) * TK * i_stride_bytes;
-              dma_rd_cmd_len   <= BEATS_PER_TILE_KV - 1;
-              if (dma_rd_cmd_ready) begin
-                pf_fill_cnt <= 1;
-                pf_state <= PF_DATA_K;
-              end
-            end
-
-            PF_DATA_K: begin
-              if (dma_rd_data_valid) begin
-                for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
-                  int flat;
-                  flat = (pf_fill_cnt - 1) * ELEMS_PER_BEAT + i;
-                  if (pref_target_bank)
-                    k_buf1[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
-                  else
-                    k_buf0[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
-                end
-                pf_fill_cnt <= pf_fill_cnt + 1'b1;
-                if (dma_rd_data_last || pf_fill_cnt == BEATS_PER_TILE_KV) begin
-                  pf_fill_cnt <= '0;
-                  pf_state <= PF_CMD_V;
-                end
-              end
-            end
-
-            PF_CMD_V: begin
-              dma_rd_cmd_valid <= 1'b1;
-              dma_rd_cmd_addr  <= i_v_base[31:0] + (k_tile_idx + 1) * TK * i_stride_bytes;
-              dma_rd_cmd_len   <= BEATS_PER_TILE_KV - 1;
-              if (dma_rd_cmd_ready) begin
-                pf_fill_cnt <= 1;
-                pf_state <= PF_DATA_V;
-              end
-            end
-
-            PF_DATA_V: begin
-              if (dma_rd_data_valid) begin
-                for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
-                  int flat;
-                  flat = (pf_fill_cnt - 1) * ELEMS_PER_BEAT + i;
-                  if (pref_target_bank)
-                    v_buf1[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
-                  else
-                    v_buf0[flat / D][flat % D] <= $signed(dma_rd_data[i*16 +: 16]);
-                end
-                pf_fill_cnt <= pf_fill_cnt + 1'b1;
-                if (dma_rd_data_last || pf_fill_cnt == BEATS_PER_TILE_KV) begin
-                  pf_state <= PF_DONE;
-                end
-              end
-            end
-
-            PF_DONE: begin
-            end
-
-            default: pf_state <= PF_IDLE;
-          endcase
-
-          if (!comp_done && cs == C_IDLE) begin
-            comp_start <= 1'b1;
-          end
-          if (comp_done) begin
-            if (k_tile_idx == NUM_K_TILES - 1) begin
-              pf_state <= PF_IDLE;
-              pf_fill_cnt <= '0;
-              ms                <= S_NORMALIZE;
-              norm_qi           <= '0;
-              norm_d            <= '0;
-              norm_recip_pending <= 1'b0;
-              norm_row_ready     <= 1'b0;
-              norm_row_den_zero  <= 1'b0;
-              norm_row_recip     <= 32'd0;
-            end else if (pf_state == PF_DONE) begin
-              k_tile_idx  <= k_tile_idx + 1'b1;
-              active_bank <= pref_target_bank;
-              if ((k_tile_idx + 1) == (NUM_K_TILES - 1)) begin
-                pf_state <= PF_IDLE;
-                pf_fill_cnt <= '0;
-              end else begin
-                pref_target_bank <= ~pref_target_bank;
-                pf_fill_cnt <= '0;
-                pf_state <= PF_CMD_K;
-              end
-            end
-          end
-        end
-
-        // -- Final normalization: O[i][k] = acc[i][k] / l[i] --
-        S_NORMALIZE: begin
-          cycle_counter <= cycle_counter + 1'b1;
-          if (!norm_row_ready) begin
-            if (!norm_recip_pending) begin
-              if (row_l[norm_qi] == 32'd0) begin
-                norm_row_den_zero <= 1'b1;
-                norm_row_ready    <= 1'b1;
-                norm_row_recip    <= 32'd0;
-              end else begin
-                norm_recip_in_valid <= 1'b1;
-                norm_recip_pending  <= 1'b1;
-                norm_row_den_zero   <= 1'b0;
-              end
-            end else if (norm_recip_out_valid) begin
-              norm_recip_pending <= 1'b0;
-              norm_row_ready     <= 1'b1;
-              norm_row_recip     <= norm_recip_out_q16_16;
-            end
-          end else begin
-            for (int lane = 0; lane < NORM_LANES; lane++) begin
-              int d_idx;
-              d_idx = norm_d + lane;
-              if (d_idx < D)
-                o_buf[norm_qi][d_idx] <= norm_o_chunk[lane];
-            end
-
-            if ((norm_d + NORM_LANES) >= D) begin
-              norm_d            <= '0;
-              norm_row_ready    <= 1'b0;
-              norm_row_den_zero <= 1'b0;
-              norm_row_recip    <= 32'd0;
-              if (norm_qi == TQ - 1) begin
-                ms          <= S_WRITE_O;
-                o_write_cnt <= '0;
-              end else begin
-                norm_qi <= norm_qi + 1'b1;
-              end
-            end else begin
-              norm_d <= norm_d + NORM_LANES;
-            end
-          end
-        end
-
-        // -- Write O tile --
-        S_WRITE_O: begin
-          cycle_counter <= cycle_counter + 1'b1;
-          if (o_write_cnt == 0) begin
-            dma_wr_cmd_valid <= 1'b1;
-            dma_wr_cmd_addr  <= i_o_base[31:0] + q_tile_idx * TQ * i_stride_bytes;
-            dma_wr_cmd_len   <= BEATS_PER_TILE_Q - 1;
-            if (dma_wr_cmd_ready)
-              o_write_cnt <= o_write_cnt + 1'b1;
-          end else if (o_write_cnt <= BEATS_PER_TILE_Q) begin
-            if (dma_wr_data_valid && dma_wr_data_ready) begin
-              o_write_cnt <= o_write_cnt + 1'b1;
-              if (o_write_cnt == BEATS_PER_TILE_Q)
-                ms <= S_NEXT_Q;
-            end
-          end
-        end
-
-        S_NEXT_Q: begin
-          cycle_counter <= cycle_counter + 1'b1;
-          if (q_tile_idx == NUM_Q_TILES - 1) begin
-            ms <= S_DONE;
-          end else begin
-            q_tile_idx  <= q_tile_idx + 1'b1;
-            q_fill_cnt  <= '0;
-            ms          <= S_LOAD_Q;
-          end
-        end
-
-        S_DONE: begin
-          o_busy <= 1'b0;
-          o_done <= 1'b1;
-          ms     <= S_IDLE;
-        end
-
-        default: ms <= S_IDLE;
-      endcase
-      end // !soft_reset
-    end
-  end
-
-  always_comb begin
-    dma_wr_data_valid = 1'b0;
-    dma_wr_data_last  = 1'b0;
-    dma_wr_data       = '0;
-    if ((ms == S_WRITE_O) && (o_write_cnt != 0) && (o_write_cnt <= BEATS_PER_TILE_Q)) begin
-      dma_wr_data_valid = 1'b1;
-      dma_wr_data_last  = (o_write_cnt == BEATS_PER_TILE_Q);
-      for (int i = 0; i < ELEMS_PER_BEAT; i++) begin
-        dma_wr_data[i*16 +: 16] = o_buf[((o_write_cnt - 1) * ELEMS_PER_BEAT + i) / D][((o_write_cnt - 1) * ELEMS_PER_BEAT + i) % D];
-      end
-    end
-  end
-
-  assign o_cycles = cycle_counter;
-
-  assign o_perf_ms_load_q        = (ms == S_LOAD_Q);
-  assign o_perf_ms_init_context  = (ms == S_INIT_CONTEXT);
-  assign o_perf_ms_load_k        = (ms == S_LOAD_K);
-  assign o_perf_ms_load_v        = (ms == S_LOAD_V);
-  assign o_perf_ms_compute       = (ms == S_COMPUTE);
-  assign o_perf_ms_normalize     = (ms == S_NORMALIZE);
-  assign o_perf_ms_write_o       = (ms == S_WRITE_O);
-  assign o_perf_ms_next_q        = (ms == S_NEXT_Q);
-
-  assign o_perf_cs_dp_run        = (cs == C_DP_RUN);
-  assign o_perf_cs_score_done    = (cs == C_SCORE_DONE);
-  assign o_perf_cs_softmax_prep  = (cs == C_SOFTMAX_PREP);
-  assign o_perf_comp_launch      = comp_start;
-  assign o_perf_norm_recip_req   = norm_recip_in_valid;
-  assign o_perf_norm_recip_rsp   = norm_recip_out_valid;
-
-  always_comb begin
-    if (ms == S_COMPUTE) begin
-      if ((comp_qpair + 1) < TQ)
-        o_perf_active_rows = 2'd2;
-      else
-        o_perf_active_rows = 2'd1;
-    end else begin
-      o_perf_active_rows = 2'd0;
-    end
-  end
-
-  // dma_rd_data_ready: accept data whenever we're in a load state
-  assign dma_rd_data_ready = (ms == S_LOAD_Q || ms == S_LOAD_K || ms == S_LOAD_V ||
-                              (ms == S_COMPUTE && (pf_state == PF_DATA_K || pf_state == PF_DATA_V)));
-endmodule
-module fa_online_softmax_pair #(
-  parameter int D = 64
-) (
-  input  logic                     i_row1_valid,
-  input  logic signed [15:0]       i_neg_large_q8_8,
-  input  logic signed [15:0]       i_score0,
-  input  logic signed [15:0]       i_score1,
-  input  logic signed [15:0]       i_m_old0,
-  input  logic signed [15:0]       i_m_old1,
-  input  logic [31:0]              i_l_old0,
-  input  logic [31:0]              i_l_old1,
-  input  logic signed [63:0]       i_acc_old0 [D],
-  input  logic signed [63:0]       i_acc_old1 [D],
-  input  logic signed [15:0]       i_v_row [D],
-  output logic signed [15:0]       o_m_new0,
-  output logic signed [15:0]       o_m_new1,
-  output logic [31:0]              o_l_new0,
-  output logic [31:0]              o_l_new1,
-  output logic [15:0]              o_exp_old0,
-  output logic [15:0]              o_exp_new0,
-  output logic [15:0]              o_exp_old1,
-  output logic [15:0]              o_exp_new1,
-  output logic signed [63:0]       o_acc_new0 [D],
-  output logic signed [63:0]       o_acc_new1 [D]
-);
-
-  logic signed [15:0] exp_diff_old_in0, exp_diff_new_in0;
-  logic signed [15:0] exp_diff_old_in1, exp_diff_new_in1;
-  logic [63:0]        l_scaled_wide0;
-  logic [63:0]        l_scaled_wide1;
-  logic [31:0]        l_scaled0;
-  logic [31:0]        l_scaled1;
-  logic [31:0]        l_term0;
-  logic [31:0]        l_term1;
-  logic [31:0]        l_new_val0;
-  logic [31:0]        l_new_val1;
-
-  fa_exp_pwl_8seg_q1_15 u_exp_old0 (.i_x_q8_8(exp_diff_old_in0), .o_exp_q1_15(o_exp_old0));
-  fa_exp_pwl_8seg_q1_15 u_exp_new0 (.i_x_q8_8(exp_diff_new_in0), .o_exp_q1_15(o_exp_new0));
-  fa_exp_pwl_8seg_q1_15 u_exp_old1 (.i_x_q8_8(exp_diff_old_in1), .o_exp_q1_15(o_exp_old1));
-  fa_exp_pwl_8seg_q1_15 u_exp_new1 (.i_x_q8_8(exp_diff_new_in1), .o_exp_q1_15(o_exp_new1));
-
-  always_comb begin
-    if (i_score0 > i_m_old0)
-      o_m_new0 = i_score0;
-    else
-      o_m_new0 = i_m_old0;
-
-    exp_diff_old_in0 = i_m_old0 - o_m_new0;
-    exp_diff_new_in0 = i_score0 - o_m_new0;
-    l_scaled_wide0 = i_l_old0 * o_exp_old0;
-    l_scaled0 = l_scaled_wide0[46:15];
-    l_term0 = {15'd0, o_exp_new0, 1'b0};
-    l_new_val0 = l_scaled0 + l_term0;
-    o_l_new0 = (l_new_val0 == 32'd0) ? 32'd1 : l_new_val0;
-
-    if (i_row1_valid) begin
-      if (i_score1 > i_m_old1)
-        o_m_new1 = i_score1;
-      else
-        o_m_new1 = i_m_old1;
-
-      exp_diff_old_in1 = i_m_old1 - o_m_new1;
-      exp_diff_new_in1 = i_score1 - o_m_new1;
-      l_scaled_wide1 = i_l_old1 * o_exp_old1;
-      l_scaled1 = l_scaled_wide1[46:15];
-      l_term1 = {15'd0, o_exp_new1, 1'b0};
-      l_new_val1 = l_scaled1 + l_term1;
-      o_l_new1 = (l_new_val1 == 32'd0) ? 32'd1 : l_new_val1;
-    end else begin
-      o_m_new1 = i_neg_large_q8_8;
-      exp_diff_old_in1 = 16'sd0;
-      exp_diff_new_in1 = 16'sd0;
-      l_scaled_wide1 = 64'd0;
-      l_scaled1 = 32'd0;
-      l_term1 = 32'd0;
-      l_new_val1 = 32'd0;
-      o_l_new1 = 32'd1;
-    end
-
-    for (int k = 0; k < D; k++) begin
-      logic signed [95:0] acc_sc;
-      logic signed [63:0] acc_old_sc;
-      logic signed [33:0] pv_mul;
-      logic signed [63:0] pv_term;
-
-      acc_sc = i_acc_old0[k] * $signed({1'b0, o_exp_old0});
-      acc_old_sc = acc_sc[78:15];
-      pv_mul = $signed({1'b0, o_exp_new0}) * i_v_row[k];
-      pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
-      o_acc_new0[k] = acc_old_sc + pv_term;
-
-      if (i_row1_valid) begin
-        acc_sc = i_acc_old1[k] * $signed({1'b0, o_exp_old1});
-        acc_old_sc = acc_sc[78:15];
-        pv_mul = $signed({1'b0, o_exp_new1}) * i_v_row[k];
-        pv_term = {{30{pv_mul[33]}}, pv_mul[33:0]} <<< 1;
-        o_acc_new1[k] = acc_old_sc + pv_term;
-      end else begin
-        o_acc_new1[k] = i_acc_old1[k];
-      end
-    end
-  end
-endmodule// ============================================================================
-// fa_dma_reader.sv
-// AXI4 Master read-only DMA: issues burst reads to fetch Q/K/V tiles.
-// Produces a simple valid/data stream to downstream tile buffer.
-// ============================================================================
-module fa_dma_reader #(
-  parameter int AXI_ADDR_W  = 32,
-  parameter int AXI_DATA_W  = 128,  // 128-bit bus = 8 Q8.8 elements per beat
-  parameter int AXI_ID_W    = 4,
-  parameter int AXI_LEN_W   = 8,
-  parameter int CMD_LEN_W   = 16
-) (
-  input  logic                      clk,
-  input  logic                      rst_n,
-
-  // ---- Command interface (from scheduler) ----
-  input  logic                      cmd_valid,
-  output logic                      cmd_ready,
-  input  logic [AXI_ADDR_W-1:0]    cmd_addr,
-  input  logic [CMD_LEN_W-1:0]     cmd_len,       // logical length = total beats-1
-
-  // ---- AXI4 Master AR channel ----
-  output logic [AXI_ID_W-1:0]      m_axi_arid,
-  output logic [AXI_ADDR_W-1:0]    m_axi_araddr,
-  output logic [AXI_LEN_W-1:0]     m_axi_arlen,
-  output logic [2:0]               m_axi_arsize,
-  output logic [1:0]               m_axi_arburst,
-  output logic                     m_axi_arvalid,
-  input  logic                     m_axi_arready,
-
-  // ---- AXI4 Master R channel ----
-  input  logic [AXI_ID_W-1:0]      m_axi_rid,
-  input  logic [AXI_DATA_W-1:0]    m_axi_rdata,
-  input  logic [1:0]               m_axi_rresp,
-  input  logic                     m_axi_rlast,
-  input  logic                     m_axi_rvalid,
-  output logic                     m_axi_rready,
-
-  // ---- Data output stream (to tile buffer) ----
-  output logic                     out_valid,
-  output logic [AXI_DATA_W-1:0]   out_data,
-  output logic                     out_last,      // last beat of this burst
-  input  logic                     out_ready,
-
-  // ---- Status ----
-  output logic                     error,         // any RRESP error
-  output logic [31:0]              rd_bytes       // total bytes read
-);
-
-  // AR channel state machine
-  typedef enum logic [1:0] {
-    AR_IDLE, AR_SEND, AR_STREAM
-  } ar_state_t;
-  ar_state_t ar_state;
-
-  logic [AXI_ADDR_W-1:0] ar_addr_r;
-  logic [AXI_LEN_W-1:0]  ar_len_r;
-  logic [CMD_LEN_W-1:0]  total_beats_left_r;
-  logic [CMD_LEN_W-1:0]  burst_beats_r;
-
-  localparam int BYTES_PER_BEAT = AXI_DATA_W / 8;
-  localparam int MAX_BURST_BEATS = (1 << AXI_LEN_W);
-
-  function automatic [CMD_LEN_W-1:0] clip_burst_beats(input logic [CMD_LEN_W-1:0] beats_left);
-    if (beats_left > MAX_BURST_BEATS)
-      clip_burst_beats = CMD_LEN_W'(MAX_BURST_BEATS);
-    else
-      clip_burst_beats = beats_left;
-  endfunction
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      ar_state            <= AR_IDLE;
-      ar_addr_r           <= '0;
-      ar_len_r            <= '0;
-      total_beats_left_r  <= '0;
-      burst_beats_r       <= '0;
-    end else begin
-      case (ar_state)
-        AR_IDLE: begin
-          if (cmd_valid && cmd_ready) begin
-            ar_addr_r          <= cmd_addr;
-            total_beats_left_r <= cmd_len + CMD_LEN_W'(1);
-            burst_beats_r      <= clip_burst_beats(cmd_len + CMD_LEN_W'(1));
-            ar_len_r           <= clip_burst_beats(cmd_len + CMD_LEN_W'(1)) - CMD_LEN_W'(1);
-            ar_state           <= AR_SEND;
-          end
-        end
-        AR_SEND: begin
-          if (m_axi_arvalid && m_axi_arready) begin
-            ar_state <= AR_STREAM;
-          end
-        end
-        AR_STREAM: begin
-          if (m_axi_rvalid && m_axi_rready) begin
-            total_beats_left_r <= total_beats_left_r - CMD_LEN_W'(1);
-            if (total_beats_left_r == CMD_LEN_W'(1)) begin
-              burst_beats_r <= '0;
-              ar_state <= AR_IDLE;
-            end else if (burst_beats_r == CMD_LEN_W'(1)) begin
-              ar_addr_r      <= ar_addr_r + (AXI_ADDR_W'(ar_len_r) + AXI_ADDR_W'(1)) * AXI_ADDR_W'(BYTES_PER_BEAT);
-              burst_beats_r  <= clip_burst_beats(total_beats_left_r - CMD_LEN_W'(1));
-              ar_len_r       <= clip_burst_beats(total_beats_left_r - CMD_LEN_W'(1)) - CMD_LEN_W'(1);
-              ar_state       <= AR_SEND;
-            end else begin
-              burst_beats_r <= burst_beats_r - CMD_LEN_W'(1);
-            end
-          end
-        end
-        default: ar_state <= AR_IDLE;
-      endcase
-    end
-  end
-
-  assign cmd_ready      = (ar_state == AR_IDLE);
-  assign m_axi_arid     = '0;
-  assign m_axi_araddr   = ar_addr_r;
-  assign m_axi_arlen    = ar_len_r;
-  assign m_axi_arsize   = 3'($clog2(AXI_DATA_W / 8));
-  assign m_axi_arburst  = 2'b01;  // INCR
-  assign m_axi_arvalid  = (ar_state == AR_SEND);
-
-  // R channel: pass through to output stream
-  assign out_valid     = m_axi_rvalid;
-  assign out_data      = m_axi_rdata;
-  assign out_last      = m_axi_rvalid && (total_beats_left_r == CMD_LEN_W'(1));
-  assign m_axi_rready  = out_ready;
-
-  // Error flag: sticky on any non-OKAY response
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n)
-      error <= 1'b0;
-    else if (m_axi_rvalid && m_axi_rready && (m_axi_rresp != 2'b00))
-      error <= 1'b1;
-  end
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n)
-      rd_bytes <= 32'd0;
-    else if (m_axi_rvalid && m_axi_rready)
-      rd_bytes <= rd_bytes + BYTES_PER_BEAT;
-  end
-
-  // Unused
-  logic unused;
-  assign unused = ^m_axi_rid;
-endmodule
-// ============================================================================
-// fa_dma_writer.sv
-// AXI4 Master write-only DMA: writes O tiles back to memory.
-// Accepts a simple valid/data/last stream from compute engine.
-// ============================================================================
-module fa_dma_writer #(
-  parameter int AXI_ADDR_W  = 32,
-  parameter int AXI_DATA_W  = 128,
-  parameter int AXI_ID_W    = 4,
-  parameter int AXI_LEN_W   = 8
-) (
-  input  logic                      clk,
-  input  logic                      rst_n,
-
-  // ---- Command interface (from scheduler) ----
-  input  logic                      cmd_valid,
-  output logic                      cmd_ready,
-  input  logic [AXI_ADDR_W-1:0]    cmd_addr,
-  input  logic [AXI_LEN_W-1:0]     cmd_len,
-
-  // ---- Data input stream ----
-  input  logic                      in_valid,
-  output logic                      in_ready,
-  input  logic [AXI_DATA_W-1:0]    in_data,
-  input  logic                      in_last,
-
-  // ---- AXI4 Master AW channel ----
-  output logic [AXI_ID_W-1:0]      m_axi_awid,
-  output logic [AXI_ADDR_W-1:0]    m_axi_awaddr,
-  output logic [AXI_LEN_W-1:0]     m_axi_awlen,
-  output logic [2:0]               m_axi_awsize,
-  output logic [1:0]               m_axi_awburst,
-  output logic                     m_axi_awvalid,
-  input  logic                     m_axi_awready,
-
-  // ---- AXI4 Master W channel ----
-  output logic [AXI_DATA_W-1:0]    m_axi_wdata,
-  output logic [AXI_DATA_W/8-1:0]  m_axi_wstrb,
-  output logic                     m_axi_wlast,
-  output logic                     m_axi_wvalid,
-  input  logic                     m_axi_wready,
-
-  // ---- AXI4 Master B channel ----
-  input  logic [AXI_ID_W-1:0]      m_axi_bid,
-  input  logic [1:0]               m_axi_bresp,
-  input  logic                     m_axi_bvalid,
-  output logic                     m_axi_bready,
-
-  // ---- Status ----
-  output logic                     error,
-  output logic [31:0]              wr_bytes
-);
-
-  typedef enum logic [2:0] {
-    W_IDLE, W_ADDR, W_DATA, W_RESP
-  } w_state_t;
-  w_state_t w_state;
-
-  logic [AXI_ADDR_W-1:0] aw_addr_r;
-  logic [AXI_LEN_W-1:0]  aw_len_r;
-  logic [AXI_LEN_W-1:0]  beat_cnt;
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      w_state   <= W_IDLE;
-      aw_addr_r <= '0;
-      aw_len_r  <= '0;
-      beat_cnt  <= '0;
-    end else begin
-      case (w_state)
-        W_IDLE: begin
-          if (cmd_valid && cmd_ready) begin
-            aw_addr_r <= cmd_addr;
-            aw_len_r  <= cmd_len;
-            beat_cnt  <= '0;
-            w_state   <= W_ADDR;
-          end
-        end
-        W_ADDR: begin
-          if (m_axi_awvalid && m_axi_awready) begin
-            w_state <= W_DATA;
-          end
-        end
-        W_DATA: begin
-          if (m_axi_wvalid && m_axi_wready) begin
-            beat_cnt <= beat_cnt + 1'b1;
-            if (m_axi_wlast)
-              w_state <= W_RESP;
-          end
-        end
-        W_RESP: begin
-          if (m_axi_bvalid && m_axi_bready)
-            w_state <= W_IDLE;
-        end
-        default: w_state <= W_IDLE;
-      endcase
-    end
-  end
-
-  assign cmd_ready = (w_state == W_IDLE);
-
-  // AW
-  assign m_axi_awid    = '0;
-  assign m_axi_awaddr  = aw_addr_r;
-  assign m_axi_awlen   = aw_len_r;
-  assign m_axi_awsize  = 3'($clog2(AXI_DATA_W / 8));
-  assign m_axi_awburst = 2'b01;  // INCR
-  assign m_axi_awvalid = (w_state == W_ADDR);
-
-  // W
-  assign m_axi_wdata  = in_data;
-  assign m_axi_wstrb  = {(AXI_DATA_W/8){1'b1}};
-  assign m_axi_wlast  = (beat_cnt == aw_len_r);
-  assign m_axi_wvalid = (w_state == W_DATA) && in_valid;
-  assign in_ready     = (w_state == W_DATA) && m_axi_wready;
-
-  // B
-  assign m_axi_bready = (w_state == W_RESP);
-
-  // Error
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n)
-      error <= 1'b0;
-    else if (m_axi_bvalid && m_axi_bready && (m_axi_bresp != 2'b00))
-      error <= 1'b1;
-  end
-
-  // Byte counter
-  localparam int BYTES_PER_BEAT = AXI_DATA_W / 8;
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n)
-      wr_bytes <= 32'd0;
-    else if (m_axi_wvalid && m_axi_wready)
-      wr_bytes <= wr_bytes + BYTES_PER_BEAT;
-  end
-
-  logic unused;
-  assign unused = ^m_axi_bid;
-endmodule
-module fa_axi_lite_regs #(
-  parameter int ADDR_W = 32,
-  parameter int DATA_W = 32
-) (
-  input  logic                 clk,
-  input  logic                 rst_n,
-
-  input  logic [ADDR_W-1:0]    s_axil_awaddr,
-  input  logic                 s_axil_awvalid,
-  output logic                 s_axil_awready,
-  input  logic [DATA_W-1:0]    s_axil_wdata,
-  input  logic [DATA_W/8-1:0]  s_axil_wstrb,
-  input  logic                 s_axil_wvalid,
-  output logic                 s_axil_wready,
-  output logic [1:0]           s_axil_bresp,
-  output logic                 s_axil_bvalid,
-  input  logic                 s_axil_bready,
-
-  input  logic [ADDR_W-1:0]    s_axil_araddr,
-  input  logic                 s_axil_arvalid,
-  output logic                 s_axil_arready,
-  output logic [DATA_W-1:0]    s_axil_rdata,
-  output logic [1:0]           s_axil_rresp,
-  output logic                 s_axil_rvalid,
-  input  logic                 s_axil_rready,
-
-  input  logic                 i_busy,
-  input  logic                 i_done,
-  input  logic                 i_error,
-  input  logic [31:0]          i_cycles,
-  input  logic [31:0]          i_perf_run_count,
-  input  logic [31:0]          i_perf_busy_cycles,
-  input  logic [31:0]          i_perf_dma_rd_cmd_count,
-  input  logic [31:0]          i_perf_dma_rd_beat_count,
-  input  logic [31:0]          i_perf_dma_wr_cmd_count,
-  input  logic [31:0]          i_perf_dma_wr_beat_count,
-  input  logic [31:0]          i_perf_comp_launch_count,
-  input  logic [31:0]          i_perf_exp_eval_count,
-  input  logic [31:0]          i_perf_mul_eval_count,
-  input  logic [31:0]          i_perf_recip_req_count,
-  input  logic [31:0]          i_perf_recip_rsp_count,
-  input  logic [31:0]          i_perf_ms_load_q_cycles,
-  input  logic [31:0]          i_perf_ms_init_context_cycles,
-  input  logic [31:0]          i_perf_ms_load_k_cycles,
-  input  logic [31:0]          i_perf_ms_load_v_cycles,
-  input  logic [31:0]          i_perf_ms_compute_cycles,
-  input  logic [31:0]          i_perf_ms_normalize_cycles,
-  input  logic [31:0]          i_perf_ms_write_o_cycles,
-  input  logic [31:0]          i_perf_ms_next_q_cycles,
-  input  logic [31:0]          i_perf_cs_dp_run_cycles,
-  input  logic [31:0]          i_perf_cs_score_done_cycles,
-  input  logic [31:0]          i_perf_cs_softmax_prep_cycles,
-
-  output logic                 o_start_pulse,
-  output logic                 o_soft_reset,
-  output logic                 o_irq_en,
-  output logic                 o_causal_en,
-  output logic [63:0]          o_q_base,
-  output logic [63:0]          o_k_base,
-  output logic [63:0]          o_v_base,
-  output logic [63:0]          o_o_base,
-  output logic [31:0]          o_stride_bytes,
-  output logic [15:0]          o_neg_large_q8_8,
-  output logic [15:0]          o_scale_q8_8
-);
-  localparam logic [7:0] REG_CTRL         = 8'h00;
-  localparam logic [7:0] REG_STATUS       = 8'h04;
-  localparam logic [7:0] REG_CFG          = 8'h08;
-  localparam logic [7:0] REG_Q_BASE_L     = 8'h14;
-  localparam logic [7:0] REG_Q_BASE_H     = 8'h18;
-  localparam logic [7:0] REG_K_BASE_L     = 8'h1C;
-  localparam logic [7:0] REG_K_BASE_H     = 8'h20;
-  localparam logic [7:0] REG_V_BASE_L     = 8'h24;
-  localparam logic [7:0] REG_V_BASE_H     = 8'h28;
-  localparam logic [7:0] REG_O_BASE_L     = 8'h2C;
-  localparam logic [7:0] REG_O_BASE_H     = 8'h30;
-  localparam logic [7:0] REG_STRIDE_BYTES = 8'h34;
-  localparam logic [7:0] REG_NEG_LARGE    = 8'h38;
-  localparam logic [7:0] REG_SCALE        = 8'h3C;
-  localparam logic [7:0] REG_CYCLES       = 8'h40;
-  localparam logic [7:0] REG_PERF_RUN_COUNT            = 8'h80;
-  localparam logic [7:0] REG_PERF_BUSY_CYCLES          = 8'h84;
-  localparam logic [7:0] REG_PERF_DMA_RD_CMD_COUNT     = 8'h88;
-  localparam logic [7:0] REG_PERF_DMA_RD_BEAT_COUNT    = 8'h8C;
-  localparam logic [7:0] REG_PERF_DMA_WR_CMD_COUNT     = 8'h90;
-  localparam logic [7:0] REG_PERF_DMA_WR_BEAT_COUNT    = 8'h94;
-  localparam logic [7:0] REG_PERF_COMP_LAUNCH_COUNT    = 8'h98;
-  localparam logic [7:0] REG_PERF_EXP_EVAL_COUNT       = 8'h9C;
-  localparam logic [7:0] REG_PERF_MUL_EVAL_COUNT       = 8'hA0;
-  localparam logic [7:0] REG_PERF_RECIP_REQ_COUNT      = 8'hA4;
-  localparam logic [7:0] REG_PERF_RECIP_RSP_COUNT      = 8'hA8;
-  localparam logic [7:0] REG_PERF_MS_LOAD_Q_CYCLES     = 8'hAC;
-  localparam logic [7:0] REG_PERF_MS_INIT_CTX_CYCLES   = 8'hB0;
-  localparam logic [7:0] REG_PERF_MS_LOAD_K_CYCLES     = 8'hB4;
-  localparam logic [7:0] REG_PERF_MS_LOAD_V_CYCLES     = 8'hB8;
-  localparam logic [7:0] REG_PERF_MS_COMPUTE_CYCLES    = 8'hBC;
-  localparam logic [7:0] REG_PERF_MS_NORMALIZE_CYCLES  = 8'hC0;
-  localparam logic [7:0] REG_PERF_MS_WRITE_O_CYCLES    = 8'hC4;
-  localparam logic [7:0] REG_PERF_MS_NEXT_Q_CYCLES     = 8'hC8;
-  localparam logic [7:0] REG_PERF_CS_DP_RUN_CYCLES     = 8'hCC;
-  localparam logic [7:0] REG_PERF_CS_SCORE_DONE_CYCLES = 8'hD0;
-  localparam logic [7:0] REG_PERF_CS_SOFTMAX_PREP_CYCLES = 8'hD4;
-
-  logic [31:0] reg_ctrl;
-  logic [31:0] reg_cfg;
-  logic [31:0] reg_q_base_l;
-  logic [31:0] reg_q_base_h;
-  logic [31:0] reg_k_base_l;
-  logic [31:0] reg_k_base_h;
-  logic [31:0] reg_v_base_l;
-  logic [31:0] reg_v_base_h;
-  logic [31:0] reg_o_base_l;
-  logic [31:0] reg_o_base_h;
-  logic [31:0] reg_stride_bytes;
-  logic [31:0] reg_neg_large;
-  logic [31:0] reg_scale;
-
-  logic done_sticky;
-
-  logic [ADDR_W-1:0] awaddr_latched;
-  logic [DATA_W-1:0] wdata_latched;
-  logic aw_seen;
-  logic w_seen;
-  logic write_fire;
-
-  logic [7:0] wr_addr;
-  logic [7:0] rd_addr;
-
-  always_comb begin
-    wr_addr = awaddr_latched[7:0];
-    rd_addr = s_axil_araddr[7:0];
-
-    s_axil_awready = !aw_seen;
-    s_axil_wready  = !w_seen;
-    s_axil_bresp   = 2'b00;
-
-    s_axil_arready = !s_axil_rvalid;
-    s_axil_rresp   = 2'b00;
-
-    s_axil_rdata = 32'd0;
-    unique case (rd_addr)
-      REG_CTRL:         s_axil_rdata = reg_ctrl;
-      REG_STATUS:       s_axil_rdata = {29'd0, i_error, done_sticky, i_busy};
-      REG_CFG:          s_axil_rdata = reg_cfg;
-      REG_Q_BASE_L:     s_axil_rdata = reg_q_base_l;
-      REG_Q_BASE_H:     s_axil_rdata = reg_q_base_h;
-      REG_K_BASE_L:     s_axil_rdata = reg_k_base_l;
-      REG_K_BASE_H:     s_axil_rdata = reg_k_base_h;
-      REG_V_BASE_L:     s_axil_rdata = reg_v_base_l;
-      REG_V_BASE_H:     s_axil_rdata = reg_v_base_h;
-      REG_O_BASE_L:     s_axil_rdata = reg_o_base_l;
-      REG_O_BASE_H:     s_axil_rdata = reg_o_base_h;
-      REG_STRIDE_BYTES: s_axil_rdata = reg_stride_bytes;
-      REG_NEG_LARGE:    s_axil_rdata = reg_neg_large;
-      REG_SCALE:        s_axil_rdata = reg_scale;
-      REG_CYCLES:       s_axil_rdata = i_cycles;
-      REG_PERF_RUN_COUNT:              s_axil_rdata = i_perf_run_count;
-      REG_PERF_BUSY_CYCLES:            s_axil_rdata = i_perf_busy_cycles;
-      REG_PERF_DMA_RD_CMD_COUNT:       s_axil_rdata = i_perf_dma_rd_cmd_count;
-      REG_PERF_DMA_RD_BEAT_COUNT:      s_axil_rdata = i_perf_dma_rd_beat_count;
-      REG_PERF_DMA_WR_CMD_COUNT:       s_axil_rdata = i_perf_dma_wr_cmd_count;
-      REG_PERF_DMA_WR_BEAT_COUNT:      s_axil_rdata = i_perf_dma_wr_beat_count;
-      REG_PERF_COMP_LAUNCH_COUNT:      s_axil_rdata = i_perf_comp_launch_count;
-      REG_PERF_EXP_EVAL_COUNT:         s_axil_rdata = i_perf_exp_eval_count;
-      REG_PERF_MUL_EVAL_COUNT:         s_axil_rdata = i_perf_mul_eval_count;
-      REG_PERF_RECIP_REQ_COUNT:        s_axil_rdata = i_perf_recip_req_count;
-      REG_PERF_RECIP_RSP_COUNT:        s_axil_rdata = i_perf_recip_rsp_count;
-      REG_PERF_MS_LOAD_Q_CYCLES:       s_axil_rdata = i_perf_ms_load_q_cycles;
-      REG_PERF_MS_INIT_CTX_CYCLES:     s_axil_rdata = i_perf_ms_init_context_cycles;
-      REG_PERF_MS_LOAD_K_CYCLES:       s_axil_rdata = i_perf_ms_load_k_cycles;
-      REG_PERF_MS_LOAD_V_CYCLES:       s_axil_rdata = i_perf_ms_load_v_cycles;
-      REG_PERF_MS_COMPUTE_CYCLES:      s_axil_rdata = i_perf_ms_compute_cycles;
-      REG_PERF_MS_NORMALIZE_CYCLES:    s_axil_rdata = i_perf_ms_normalize_cycles;
-      REG_PERF_MS_WRITE_O_CYCLES:      s_axil_rdata = i_perf_ms_write_o_cycles;
-      REG_PERF_MS_NEXT_Q_CYCLES:       s_axil_rdata = i_perf_ms_next_q_cycles;
-      REG_PERF_CS_DP_RUN_CYCLES:       s_axil_rdata = i_perf_cs_dp_run_cycles;
-      REG_PERF_CS_SCORE_DONE_CYCLES:   s_axil_rdata = i_perf_cs_score_done_cycles;
-      REG_PERF_CS_SOFTMAX_PREP_CYCLES: s_axil_rdata = i_perf_cs_softmax_prep_cycles;
-      default:          s_axil_rdata = 32'd0;
-    endcase
-  end
-
-  assign write_fire = aw_seen && w_seen && !s_axil_bvalid;
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      aw_seen <= 1'b0;
-      w_seen <= 1'b0;
-      awaddr_latched <= '0;
-      wdata_latched <= '0;
-      s_axil_bvalid <= 1'b0;
-      s_axil_rvalid <= 1'b0;
-
-      reg_ctrl <= 32'd0;
-      reg_cfg <= 32'd0;
-      reg_q_base_l <= 32'd0;
-      reg_q_base_h <= 32'd0;
-      reg_k_base_l <= 32'd0;
-      reg_k_base_h <= 32'd0;
-      reg_v_base_l <= 32'd0;
-      reg_v_base_h <= 32'd0;
-      reg_o_base_l <= 32'd0;
-      reg_o_base_h <= 32'd0;
-      reg_stride_bytes <= 32'd128;
-      reg_neg_large <= 32'hFFFF_8000;
-      reg_scale <= 32'd32;
-      done_sticky <= 1'b0;
-      o_start_pulse <= 1'b0;
-    end else begin
-      o_start_pulse <= 1'b0;
-
-      if (s_axil_awvalid && s_axil_awready) begin
-        aw_seen <= 1'b1;
-        awaddr_latched <= s_axil_awaddr;
-      end
-      if (s_axil_wvalid && s_axil_wready) begin
-        w_seen <= 1'b1;
-        wdata_latched <= s_axil_wdata;
-      end
-
-      if (write_fire) begin
-        s_axil_bvalid <= 1'b1;
-        aw_seen <= 1'b0;
-        w_seen <= 1'b0;
-
-        unique case (wr_addr)
-          REG_CTRL: begin
-            reg_ctrl[2:1] <= wdata_latched[2:1];
-            if (wdata_latched[0]) begin
-              o_start_pulse <= 1'b1;
-              done_sticky <= 1'b0;
-            end
-          end
-          REG_STATUS: begin
-            if (wdata_latched[1]) begin
-              done_sticky <= 1'b0;
-            end
-          end
-          REG_CFG:          reg_cfg <= wdata_latched;
-          REG_Q_BASE_L:     reg_q_base_l <= wdata_latched;
-          REG_Q_BASE_H:     reg_q_base_h <= wdata_latched;
-          REG_K_BASE_L:     reg_k_base_l <= wdata_latched;
-          REG_K_BASE_H:     reg_k_base_h <= wdata_latched;
-          REG_V_BASE_L:     reg_v_base_l <= wdata_latched;
-          REG_V_BASE_H:     reg_v_base_h <= wdata_latched;
-          REG_O_BASE_L:     reg_o_base_l <= wdata_latched;
-          REG_O_BASE_H:     reg_o_base_h <= wdata_latched;
-          REG_STRIDE_BYTES: reg_stride_bytes <= wdata_latched;
-          REG_NEG_LARGE:    reg_neg_large <= wdata_latched;
-          REG_SCALE:        reg_scale <= wdata_latched;
-          default: begin end
-        endcase
-      end
-
-      if (s_axil_bvalid && s_axil_bready) begin
-        s_axil_bvalid <= 1'b0;
-      end
-
-      if (s_axil_arvalid && s_axil_arready) begin
-        s_axil_rvalid <= 1'b1;
-      end else if (s_axil_rvalid && s_axil_rready) begin
-        s_axil_rvalid <= 1'b0;
-      end
-
-      if (i_done) begin
-        done_sticky <= 1'b1;
-      end
-    end
-  end
-
-  assign o_soft_reset = reg_ctrl[1];
-  assign o_irq_en = reg_ctrl[2];
-  assign o_causal_en = reg_cfg[0];
-
-  assign o_q_base = {reg_q_base_h, reg_q_base_l};
-  assign o_k_base = {reg_k_base_h, reg_k_base_l};
-  assign o_v_base = {reg_v_base_h, reg_v_base_l};
-  assign o_o_base = {reg_o_base_h, reg_o_base_l};
-  assign o_stride_bytes = reg_stride_bytes;
-  assign o_neg_large_q8_8 = reg_neg_large[15:0];
-  assign o_scale_q8_8 = reg_scale[15:0];
-endmodule
-package fa_fixed_point_pkg;
-  function automatic logic signed [15:0] sat16_signed(input logic signed [31:0] x);
-    if (x > 32'sd32767) begin
-      return 16'sd32767;
-    end
-    if (x < -32'sd32768) begin
-      return -16'sd32768;
-    end
-    return x[15:0];
-  endfunction
-
-  function automatic logic [31:0] sat32_unsigned(input logic [63:0] x);
-    if (x > 64'hFFFF_FFFF) begin
-      return 32'hFFFF_FFFF;
-    end
-    return x[31:0];
-  endfunction
-endpackage
-module fa_mul_sat_q8_8 (
-  input  logic signed [15:0] i_a_q8_8,
-  input  logic signed [15:0] i_b_q8_8,
-  output logic signed [15:0] o_y_q8_8
-);
-  logic signed [31:0] prod_q16_16;
-  logic signed [31:0] rounded_q16_16;
-  logic signed [31:0] shifted_q8_8;
-
-  always_comb begin
-    prod_q16_16 = i_a_q8_8 * i_b_q8_8;
-    if (prod_q16_16 >= 0) begin
-      rounded_q16_16 = prod_q16_16 + 32'sd128;
-    end else begin
-      rounded_q16_16 = prod_q16_16 - 32'sd128;
-    end
-    shifted_q8_8 = rounded_q16_16 >>> 8;
-
-    if (shifted_q8_8 > 32'sd32767) begin
-      o_y_q8_8 = 16'sd32767;
-    end else if (shifted_q8_8 < -32'sd32768) begin
-      o_y_q8_8 = -16'sd32768;
-    end else begin
-      o_y_q8_8 = shifted_q8_8[15:0];
-    end
-  end
-endmodule
-module fa_exp_pwl_8seg_q1_15 (
-  input  logic signed [15:0] i_x_q8_8,
-  output logic        [15:0] o_exp_q1_15
-);
-  logic signed [15:0] x_clamped;
-  logic [15:0] u_q8_8;
-  logic [2:0] seg_idx;
-  logic sat_zero;
-  logic [7:0] frac;
-  logic [15:0] y0;
-  logic [15:0] y1;
-  logic [16:0] delta;
-  logic [15:0] interp_q1_15;
-  logic [8:0] delta_hi;
-  logic [7:0] delta_lo;
-  logic [15:0] interp_hi;
-  logic [15:0] interp_lo;
-
-  always_comb begin
-    if (i_x_q8_8 > 16'sd0) begin
-      x_clamped = 16'sd0;
-    end else if (i_x_q8_8 < -16'sd4096) begin
-      x_clamped = -16'sd4096;
-    end else begin
-      x_clamped = i_x_q8_8;
-    end
-
-    u_q8_8 = $unsigned(-x_clamped);
-    if (u_q8_8[15:8] >= 8) begin
-      seg_idx = 3'd0;
-      frac = 8'h00;
-      sat_zero = 1'b1;
-    end else begin
-      seg_idx = u_q8_8[10:8];
-      frac = u_q8_8[7:0];
-      sat_zero = 1'b0;
-    end
-
-    if (sat_zero) begin
-      y0 = 16'd0;
-      y1 = 16'd0;
-    end else begin
-      unique case (seg_idx)
-        3'd0: begin y0 = 16'd32767; y1 = 16'd12055; end
-        3'd1: begin y0 = 16'd12055; y1 = 16'd4431;  end
-        3'd2: begin y0 = 16'd4431;  y1 = 16'd1631;  end
-        3'd3: begin y0 = 16'd1631;  y1 = 16'd600;   end
-        3'd4: begin y0 = 16'd600;   y1 = 16'd221;   end
-        3'd5: begin y0 = 16'd221;   y1 = 16'd81;    end
-        3'd6: begin y0 = 16'd81;    y1 = 16'd30;    end
-        default: begin y0 = 16'd30; y1 = 16'd11;    end
-      endcase
-    end
-
-    delta = y0 - y1;
-    delta_hi = delta[16:8];
-    delta_lo = delta[7:0];
-    interp_hi = delta_hi * frac;
-    interp_lo = (delta_lo * frac) >> 8;
-    interp_q1_15 = interp_hi + interp_lo;
-    if (y0 > interp_q1_15) begin
-      o_exp_q1_15 = y0 - interp_q1_15;
-    end else begin
-      o_exp_q1_15 = 16'd0;
-    end
-  end
-endmodule
-module fa_recip_nr_q16_16 (
-  input  logic        clk,
-  input  logic        rst_n,
-  input  logic        i_valid,
-  input  logic [31:0] i_x_q16_16,
-  output logic        o_valid,
-  output logic [31:0] o_recip_q16_16
-);
-  // Newton-Raphson reciprocal: 10-stage pipeline with pipelined 32×32 multiply.
-  // Internal latency is hidden behind i_valid/o_valid handshaking.
-
-  function automatic [5:0] clz32(input [31:0] val);
-    reg [5:0] n;
-    reg [31:0] x;
-    begin
-      if (val == 32'd0) begin
-        clz32 = 6'd32;
-      end else begin
-        n = 6'd0;
-        x = val;
-        if (x[31:16] == 16'd0) begin n = n + 6'd16; x = x << 16; end
-        if (x[31:24] == 8'd0)  begin n = n + 6'd8;  x = x << 8;  end
-        if (x[31:28] == 4'd0)  begin n = n + 6'd4;  x = x << 4;  end
-        if (x[31:30] == 2'd0)  begin n = n + 6'd2;  x = x << 2;  end
-        if (x[31]    == 1'b0)  begin n = n + 6'd1;                end
-        clz32 = n;
-      end
-    end
-  endfunction
-
-  logic [5:0]  lz;
-  logic [31:0] d_norm;
-
-  always_comb begin
-    lz     = clz32(i_x_q16_16);
-    d_norm = i_x_q16_16 << lz;
-  end
-
-  logic        s0_valid;
-  logic [31:0] s0_d_norm;
-  logic [5:0]  s0_lz;
-  logic        s0_is_zero;
-  logic        s0_is_one;
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      s0_valid <= 1'b0;
-    end else begin
-      s0_valid   <= i_valid;
-      s0_d_norm  <= d_norm;
-      s0_lz      <= lz;
-      s0_is_zero <= (i_x_q16_16 == 32'd0);
-      s0_is_one  <= (i_x_q16_16 == 32'd1);
-    end
-  end
-
-  logic [31:0] r0_lut;
-
-  always_comb begin
-    case (s0_d_norm[30:26])
-      5'd0:  r0_lut = 32'hFC0F_C0FC;
-      5'd1:  r0_lut = 32'hF489_8D60;
-      5'd2:  r0_lut = 32'hED73_03B6;
-      5'd3:  r0_lut = 32'hE6C2_B448;
-      5'd4:  r0_lut = 32'hE070_381C;
-      5'd5:  r0_lut = 32'hDA74_0DA7;
-      5'd6:  r0_lut = 32'hD4C7_7B03;
-      5'd7:  r0_lut = 32'hCF64_74A9;
-      5'd8:  r0_lut = 32'hCA45_87E7;
-      5'd9:  r0_lut = 32'hC565_C87B;
-      5'd10: r0_lut = 32'hC0C0_C0C1;
-      5'd11: r0_lut = 32'hBC52_640C;
-      5'd12: r0_lut = 32'hB817_02E0;
-      5'd13: r0_lut = 32'hB40B_40B4;
-      5'd14: r0_lut = 32'hB02C_0B03;
-      5'd15: r0_lut = 32'hAC76_9184;
-      5'd16: r0_lut = 32'hA8E8_3F57;
-      5'd17: r0_lut = 32'hA57E_B503;
-      5'd18: r0_lut = 32'hA237_C32B;
-      5'd19: r0_lut = 32'h9F11_65E7;
-      5'd20: r0_lut = 32'h9C09_C09C;
-      5'd21: r0_lut = 32'h991F_1A51;
-      5'd22: r0_lut = 32'h964F_DA6C;
-      5'd23: r0_lut = 32'h939A_85C4;
-      5'd24: r0_lut = 32'h90FD_BC09;
-      5'd25: r0_lut = 32'h8E78_356D;
-      5'd26: r0_lut = 32'h8C08_C08C;
-      5'd27: r0_lut = 32'h89AE_408A;
-      5'd28: r0_lut = 32'h8767_AB5F;
-      5'd29: r0_lut = 32'h8534_0853;
-      5'd30: r0_lut = 32'h8312_6E98;
-      default: r0_lut = 32'h8102_0408;
-    endcase
-  end
-
-  logic        s1_valid;
-  logic [31:0] s1_d_norm;
-  logic [31:0] s1_r0;
-  logic [5:0]  s1_lz;
-  logic        s1_is_zero;
-  logic        s1_is_one;
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      s1_valid <= 1'b0;
-    end else begin
-      s1_valid   <= s0_valid;
-      s1_d_norm  <= s0_d_norm;
-      s1_r0      <= r0_lut;
-      s1_lz      <= s0_lz;
-      s1_is_zero <= s0_is_zero;
-      s1_is_one  <= s0_is_one;
-    end
-  end
-
-  logic [31:0] pp2_hh, pp2_hl, pp2_lh, pp2_ll;
-
-  always_comb begin
-    pp2_hh = s1_d_norm[31:16] * s1_r0[31:16];
-    pp2_hl = s1_d_norm[31:16] * s1_r0[15:0];
-    pp2_lh = s1_d_norm[15:0]  * s1_r0[31:16];
-    pp2_ll = s1_d_norm[15:0]  * s1_r0[15:0];
-  end
-
-  logic        s2_valid;
-  logic [31:0] s2_pp_hh, s2_pp_hl, s2_pp_lh, s2_pp_ll;
-  logic [31:0] s2_d_norm, s2_r0;
-  logic [5:0]  s2_lz;
-  logic        s2_is_zero, s2_is_one;
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      s2_valid <= 1'b0;
-    end else begin
-      s2_valid   <= s1_valid;
-      s2_pp_hh   <= pp2_hh;
-      s2_pp_hl   <= pp2_hl;
-      s2_pp_lh   <= pp2_lh;
-      s2_pp_ll   <= pp2_ll;
-      s2_d_norm  <= s1_d_norm;
-      s2_r0      <= s1_r0;
-      s2_lz      <= s1_lz;
-      s2_is_zero <= s1_is_zero;
-      s2_is_one  <= s1_is_one;
-    end
-  end
-
-  logic [63:0] dr0_acc;
-  logic [31:0] dr0_q1_31;
-  logic [32:0] corr1;
-
-  always_comb begin
-    dr0_acc   = {s2_pp_hh, 32'b0} + {16'b0, s2_pp_hl, 16'b0}
-              + {16'b0, s2_pp_lh, 16'b0} + {32'b0, s2_pp_ll};
-    dr0_q1_31 = dr0_acc[63:32];
-    corr1     = {1'b1, 32'h0000_0000} - {1'b0, dr0_q1_31};
-  end
-
-  logic        s3_valid;
-  logic [31:0] s3_corr1;
-  logic        s3_corr1_ov;
-  logic [31:0] s3_d_norm, s3_r0;
-  logic [5:0]  s3_lz;
-  logic        s3_is_zero, s3_is_one;
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      s3_valid <= 1'b0;
-    end else begin
-      s3_valid    <= s2_valid;
-      s3_corr1    <= corr1[31:0];
-      s3_corr1_ov <= corr1[32];
-      s3_d_norm   <= s2_d_norm;
-      s3_r0       <= s2_r0;
-      s3_lz       <= s2_lz;
-      s3_is_zero  <= s2_is_zero;
-      s3_is_one   <= s2_is_one;
-    end
-  end
-
-  logic [31:0] mul4_a, mul4_b;
-  logic [31:0] pp4_hh, pp4_hl, pp4_lh, pp4_ll;
-
-  always_comb begin
-    mul4_a = s3_r0;
-    mul4_b = s3_corr1;
-    pp4_hh = mul4_a[31:16] * mul4_b[31:16];
-    pp4_hl = mul4_a[31:16] * mul4_b[15:0];
-    pp4_lh = mul4_a[15:0]  * mul4_b[31:16];
-    pp4_ll = mul4_a[15:0]  * mul4_b[15:0];
-  end
-
-  logic        s4_valid;
-  logic [31:0] s4_pp_hh, s4_pp_hl, s4_pp_lh, s4_pp_ll;
-  logic        s4_corr1_ov;
-  logic [31:0] s4_r0;
-  logic [31:0] s4_d_norm;
-  logic [5:0]  s4_lz;
-  logic        s4_is_zero, s4_is_one;
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      s4_valid <= 1'b0;
-    end else begin
-      s4_valid    <= s3_valid;
-      s4_pp_hh    <= pp4_hh;
-      s4_pp_hl    <= pp4_hl;
-      s4_pp_lh    <= pp4_lh;
-      s4_pp_ll    <= pp4_ll;
-      s4_corr1_ov <= s3_corr1_ov;
-      s4_r0       <= s3_r0;
-      s4_d_norm   <= s3_d_norm;
-      s4_lz       <= s3_lz;
-      s4_is_zero  <= s3_is_zero;
-      s4_is_one   <= s3_is_one;
-    end
-  end
-
-  logic [63:0] r1_full_acc;
-  logic [31:0] r1_extracted;
-
-  always_comb begin
-    r1_full_acc = {s4_pp_hh, 32'b0} + {16'b0, s4_pp_hl, 16'b0}
-                + {16'b0, s4_pp_lh, 16'b0} + {32'b0, s4_pp_ll};
-    r1_extracted = s4_corr1_ov ? s4_r0 : r1_full_acc[62:31];
-  end
-
-  logic        s5_valid;
-  logic [31:0] s5_r1;
-  logic [31:0] s5_d_norm;
-  logic [5:0]  s5_lz;
-  logic        s5_is_zero, s5_is_one;
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      s5_valid <= 1'b0;
-    end else begin
-      s5_valid   <= s4_valid;
-      s5_r1      <= r1_extracted;
-      s5_d_norm  <= s4_d_norm;
-      s5_lz      <= s4_lz;
-      s5_is_zero <= s4_is_zero;
-      s5_is_one  <= s4_is_one;
-    end
-  end
-
-  logic [31:0] pp6_hh, pp6_hl, pp6_lh, pp6_ll;
-
-  always_comb begin
-    pp6_hh = s5_d_norm[31:16] * s5_r1[31:16];
-    pp6_hl = s5_d_norm[31:16] * s5_r1[15:0];
-    pp6_lh = s5_d_norm[15:0]  * s5_r1[31:16];
-    pp6_ll = s5_d_norm[15:0]  * s5_r1[15:0];
-  end
-
-  logic        s6_valid;
-  logic [31:0] s6_pp_hh, s6_pp_hl, s6_pp_lh, s6_pp_ll;
-  logic [31:0] s6_r1;
-  logic [5:0]  s6_lz;
-  logic        s6_is_zero, s6_is_one;
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      s6_valid <= 1'b0;
-    end else begin
-      s6_valid   <= s5_valid;
-      s6_pp_hh   <= pp6_hh;
-      s6_pp_hl   <= pp6_hl;
-      s6_pp_lh   <= pp6_lh;
-      s6_pp_ll   <= pp6_ll;
-      s6_r1      <= s5_r1;
-      s6_lz      <= s5_lz;
-      s6_is_zero <= s5_is_zero;
-      s6_is_one  <= s5_is_one;
-    end
-  end
-
-  logic [63:0] dr1_acc;
-  logic [31:0] dr1_q1_31;
-  logic [32:0] corr2;
-
-  always_comb begin
-    dr1_acc   = {s6_pp_hh, 32'b0} + {16'b0, s6_pp_hl, 16'b0}
-              + {16'b0, s6_pp_lh, 16'b0} + {32'b0, s6_pp_ll};
-    dr1_q1_31 = dr1_acc[63:32];
-    corr2     = {1'b1, 32'h0000_0000} - {1'b0, dr1_q1_31};
-  end
-
-  logic        s7_valid;
-  logic [31:0] s7_corr2;
-  logic        s7_corr2_ov;
-  logic [31:0] s7_r1;
-  logic [5:0]  s7_lz;
-  logic        s7_is_zero, s7_is_one;
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      s7_valid <= 1'b0;
-    end else begin
-      s7_valid    <= s6_valid;
-      s7_corr2    <= corr2[31:0];
-      s7_corr2_ov <= corr2[32];
-      s7_r1       <= s6_r1;
-      s7_lz       <= s6_lz;
-      s7_is_zero  <= s6_is_zero;
-      s7_is_one   <= s6_is_one;
-    end
-  end
-
-  logic [31:0] mul8_a, mul8_b;
-  logic [31:0] pp8_hh, pp8_hl, pp8_lh, pp8_ll;
-
-  always_comb begin
-    mul8_a = s7_r1;
-    mul8_b = s7_corr2;
-    pp8_hh = mul8_a[31:16] * mul8_b[31:16];
-    pp8_hl = mul8_a[31:16] * mul8_b[15:0];
-    pp8_lh = mul8_a[15:0]  * mul8_b[31:16];
-    pp8_ll = mul8_a[15:0]  * mul8_b[15:0];
-  end
-
-  logic        s8_valid;
-  logic [31:0] s8_pp_hh, s8_pp_hl, s8_pp_lh, s8_pp_ll;
-  logic        s8_corr2_ov;
-  logic [31:0] s8_r1;
-  logic [5:0]  s8_lz;
-  logic        s8_is_zero, s8_is_one;
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      s8_valid <= 1'b0;
-    end else begin
-      s8_valid    <= s7_valid;
-      s8_pp_hh    <= pp8_hh;
-      s8_pp_hl    <= pp8_hl;
-      s8_pp_lh    <= pp8_lh;
-      s8_pp_ll    <= pp8_ll;
-      s8_corr2_ov <= s7_corr2_ov;
-      s8_r1       <= s7_r1;
-      s8_lz       <= s7_lz;
-      s8_is_zero  <= s7_is_zero;
-      s8_is_one   <= s7_is_one;
-    end
-  end
-
-  logic [63:0] r2_full_acc;
-  logic [31:0] r2;
-  logic [63:0] result_wide;
-  logic [31:0] result_final;
-
-  always_comb begin
-    r2_full_acc = {s8_pp_hh, 32'b0} + {16'b0, s8_pp_hl, 16'b0}
-                + {16'b0, s8_pp_lh, 16'b0} + {32'b0, s8_pp_ll};
-    r2 = s8_corr2_ov ? s8_r1 : r2_full_acc[62:31];
-
-    result_wide = 64'd0;
-    if (s8_is_zero) begin
-      result_final = 32'hFFFF_FFFF;
-    end else if (s8_is_one) begin
-      result_final = 32'hFFFF_FFFF;
-    end else if (s8_lz >= 6'd31) begin
-      result_wide = {32'd0, r2} << (s8_lz - 6'd31);
-      if (result_wide[63:32] != 32'd0)
-        result_final = 32'hFFFF_FFFF;
-      else
-        result_final = result_wide[31:0];
-    end else begin
-      result_final = r2 >> (6'd31 - s8_lz);
-    end
-  end
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      o_valid        <= 1'b0;
-      o_recip_q16_16 <= 32'd0;
-    end else begin
-      o_valid        <= s8_valid;
-      o_recip_q16_16 <= result_final;
-    end
-  end
-endmodule
+
+# FlashAttention IP 设计、验证与综合报告
+
+## 1. 简介
+
+本文档给出当前 FlashAttention-style SDPA 加速器 IP 的完整设计说明、验证闭环、建模方法以及综合结果总结。设计目标面向赛题给定的单 batch、单 head、自注意力场景，输入输出数据格式采用 Q8.8 定点表示，目标问题规模为 $S=256$、$D=64$，并在实现中显式满足 online softmax、K/V tiling、禁止显式存储 $S\times S$ 注意力矩阵、AXI-Lite 配置接口和 AXI4 Master DMA 数据接口等要求。
+
+当前主线 RTL 已形成可运行的顶层系统。系统中包含 AXI-Lite 配置寄存器、AXI DMA 读写通路、片上 tile buffer、在线 softmax 状态维护、QK 点积与 PV 累加、归一化输出以及性能计数器。围绕这些功能，仓库同时建立了 cocotb 回归环境、Verilator C++ 参考测试路径、周期精确 CModel、模块级综合与静态时序分析流程。因此，本项目的工作不再停留于算子级数学原型，而是已经进入“结构可运行、验证可复现、性能可量化、综合可分析”的工程阶段。
+
+截至 2026-03-11，仓库当前唯一活动主线 `main` 的核心结果为：端到端 RTL 在默认参数下已经达到 $85{,}928$ cycles 的总延迟量级，并保持与 fixed Q8.8 参考逐点一致、与 FP32 参考之间 $\text{MAE}=0.002499$、$\text{MaxAE}=0.006583$ 的误差水平。与此同时，模块级独立实验已经明确定位出 leaf 级 PPA 边界：Online Softmax `ctx/exp_d` 超过 $500\text{MHz}$，QK 路径 `exp_h` 达到约 $442.5\text{MHz}$，倒数模块也超过 $500\text{MHz}$。这说明当前设计不仅已经满足 baseline 提交约束，而且已经完成一次从“高频 leaf 恢复态”到“system-level overlap 真正闭环”的主线收敛。
+
+本文将从整体进度、算法与架构、附加总线模块、功能验证、CModel、LLM 接入思路以及综合实现七个层面进行系统陈述。行文中尽量保持论文式的展开方式，对关键公式、时延估计、带宽估计与实验指标均给出完整说明。
+
+
+## 1.1 0324 版本说明（相对 0310 的更新边界）
+
+本报告在 2026-03-24 的更新目标不是重写 baseline，而是把 2026-03-11 到 2026-03-24 两周内的跨分支工作统一收敛为可审计、可引用、可复现实证。当前仓库仍以 `S=256, D=64, Q8.8, 单 batch, 单 head` 的 baseline 口径为核心，baseline 主线的关键数值口径没有变化：`cycles=85928`、`rtl vs fixed-q8.8` 逐点一致、`rtl vs fp32: MAE=0.002499, MaxAE=0.006583`。但在 baseline 外，已经并行展开多条 bonus 与研究线，且这些分支已形成可量化成果。
+
+0324 版的关键区别在于：
+
+1. 不再只描述 `main` 单线状态，而是明确给出分支图谱、每条分支的提交与改动规模、功能成熟度。
+2. 对 0311 之后文档做全量吸收，不仅覆盖 `mode15/fpga` 路线，也覆盖 `padding-mask-s512`、`bonus2-mha`、`bonus1-bf16`、`int8-fp8-bootstrap` 的文档与结论。
+3. 在“周期/误差”之外补上更完整的吞吐计算口径：`attn/s/GHz`、`GOPS/GHz`、`bytes/cycle`、`K/V` 流量占比。
+4. 对“已完成”和“仍在实验”的边界做更严格切分，避免把原型结果误写成主线能力。
+
+## 1.2 数据来源与口径统一
+
+本版采用三类证据源交叉校验：
+
+1. 代码与分支证据：`git branch -a`、`git log main..branch`、`git diff --shortstat main..branch`。
+2. 文档证据：`docs/` 下 20260311 之后所有日期文档（含其他活动分支中的同日期文档）。
+3. 运行/日志证据：`inference/native/logs/` 的模式扫描、prompt 回归、热力图与差分日志。
+
+口径上统一遵循：
+
+1. baseline 合规性以题目 `problem.md` 为准；
+2. RTL 一致性优先看 `rtl vs fixed-like`；
+3. 算法质量优先看 `rtl/cmodel vs fp32`；
+4. 推理可用性不以 MAE 单独判定，必须同时看 decode token 行为与 role prompt 结构稳定性。
+
+## 1.3 当前仓库的阶段定位
+
+截至 2026-03-24，项目阶段可描述为“baseline 已收敛，bonus 进入分支化并行推进，推理接入转入数值稳定性攻坚”。
+
+1. baseline：可提交且稳定。
+2. 系统扩展（Bonus 2/3/4/5/9）：已有不同成熟度成果，其中 `3/4/5` 与 `9` 已有较完整 RTL+回归链路，`2` 已有标准 MHA 顺序版。
+3. 低精度拓展（Bonus 1/7）：已完成 BF16/FP16 和 INT8/FP8 的原型与分阶段报告，但与 baseline 同等级的系统闭环尚未完成。
+4. LLM 接入：DPI 与 cmodel 后端均已打通；cmodel 已恢复可读推理，DPI 仍受数值放大导致的分布坍缩约束。
+
+因此，0324 报告不再把问题简化为“周期是否达标”，而是把重点转向“多分支成果如何归并成后续可执行路线”。
+## 2. 项目进度总结
+
+本项目的推进大致经历了五个阶段。第一阶段是功能基线搭建，主要完成 Q8.8 定点算术原语、online softmax 基本链路、控制寄存器映射和 DMA 基础接口，使得顶层能够完成从配置、启动到完成的完整状态流转。第二阶段是精度与周期的系统审计，通过 Python 参考模型、C++ CModel 和 Verilator 对照路径，明确区分“算法级浮点近似正确”与“RTL 同构定点正确”这两个口径，并逐步将主线实现收敛到通过精度门限的版本。第三阶段是架构级优化，重点包括控制空拍压缩、K/V 双缓冲重叠、row2 并行组织与性能计数器读回，使主线周期先降到十几万级。第四阶段是面向 55nm 工艺的模块级 PPA 优化，通过在 `experiments/` 目录下构造对照实验，分析倒数、online softmax、QK 点积与归一化模块的结构性时序瓶颈。第五阶段则是把 `exp_h + ctx/exp_d + exp_d` 这组高频 leaf 真正以 tag 化、批流式和多上下文交错的方式吸收到 `fa_attention_core` 中，使当前主线周期进一步收敛到 `85928`。
+
+从阶段成果看，当前主线已经完成以下几项关键闭环。其一，设计层面已经实现 `fa_attention_ip_top`、`fa_attention_core`、`fa_dma_reader`、`fa_dma_writer`、`fa_axi_lite_regs` 等核心模块，并具备完整的数据搬运与控制路径。其二，验证层面已经建立包含单模块回归、顶层寄存器回归、全参数 attention core 回归、Verilator C++ 直跑和 CModel 对照在内的多口径体系。其三，指标层面已经给出端到端周期、误差、带宽和模块级 STA 的系统数据，并以当前 `main` 的 `85928 cycles` 与 `MaxAE=0.006583` 形成新的统一主线口径。其四，优化层面已经证明：问题确实可以从“leaf 频率不足”转化为“system-level overlap 闭环”，并进一步被当前主线解决；当前剩余的重点已从“周期达标”转向“bonus 扩展能力与更完整 PPA 收敛”。
+
+为了使项目状态更加清晰，表 2-1 对当前进度作一个集中汇总。
+
+| 条目 | 当前状态 | 说明 |
+|---|---|---|
+| 主线 RTL 顶层 | 已完成 | 顶层 `fa_attention_ip_top` 已联通配置、DMA 与核心计算 |
+| 主线精度 | 已达标 | 当前 top full-run 为 `MAE=0.002499`、`MaxAE=0.006583`，并与 fixed-q8.8 参考逐点一致 |
+| 主线周期 | 已达标 | 当前主线 full-run 为 `85928 cycles`，显著低于 baseline `<300k` 预算 |
+| 顶层 perf counters | 已完成 | 已接入寄存器窗口并完成 full-run 读回校验 |
+| CModel | 已完成 | 支持精度模式扫描、阶段误差分解和吞吐模型 |
+| Online Softmax 独立 STA | 已完成 | `exp_c/exp_d` 超过 `500MHz` |
+| QK 独立 STA | 已完成多轮 | 最新 `exp_h` 达到约 `442.5MHz` |
+| 全芯片 P&R / Cadence | 未完成 | 当前仍以 Yosys+iEDA 的 pre-P\&R 分析为主 |
+| UVM | 未开始 | 已完成计划设计，但尚未落地 |
+| LLM 端到端接入 | 方案明确 | DPI-C / Verilator 路线清晰，尚待工程实现 |
+
+除主线外，本轮还完成了报告工件的重新整理。按照“最终报告每类模块只保留最佳现状”的原则，当前 `0310` 报告包已将最佳综合/STA 与 native 推理相关日志统一收集到 [docs/report_0310/report](docs/report_0310/report)；其中综合工件索引见 [docs/report_0310/report/artifact_index.md](docs/report_0310/report/artifact_index.md)，收集命令见 [docs/report_0310/report/logs/collect_artifacts.log](docs/report_0310/report/logs/collect_artifacts.log)。在模块选择上，QK 仅保留 `exp_h`，Online Softmax 仅保留 `exp_d`，Normalization 仅保留 `exp_d`，倒数仅保留 `exp_c`，从而避免报告正文被历史过渡版本淹没。
+
+与此同时，当前 `rtl/core/` 已完成一次更严格的结构整理：QK 点积与归一化两条已经被主线真正实例化的热点路径，分别把 `exp_h` 与 `exp_d` 的优化版本直接提升为当前主线同名模块 `fa_qk_dotprod_slice` 与 `fa_o_normalize_block`；原先仅用于过渡的 `*_pipe` 文件已转存到 `useless/rtl_unused/20260310_archived/`。对于 online softmax，主线也已经从 archived 的 `fa_online_softmax_pair` 切回 `fa_online_softmax_ctx/exp_d` 家族，并进一步在 `fa_attention_core` 中完成了 `QK tag pipeline + SOFTMAX_CTXS=4 + batch-streamed retire/issue` 的系统级调度闭环。也就是说，当前 `main` 不再是“高频 leaf 暂时接通”的恢复态，而是已经把高频 leaf 真正变成当前主线吞吐的一部分。
+
+
+## 2.1 2026-03-11 ~ 2026-03-24 分支进展总览
+
+本阶段最重要变化不是 baseline 指标刷新，而是分支数量和方向显著扩展。当前本地分支包括：
+
+- `baseline`
+- `main`
+- `exp/bonus1-bf16`
+- `exp/bonus2-mha`
+- `exp/bonus9-task-queue`
+- `exp/padding-mask-s512`
+- `exp/int8-fp8-bootstrap`
+- `exp/fpga`
+- `exp/mode15-k-smooth`
+- `exp/route-a-low-precision-research`
+
+按相对 `main` 的提交差异（`git rev-list --left-right --count main...branch`）可见：
+
+| 分支 | ahead(main) | behind(main) | 近似定位 |
+|---|---:|---:|---|
+| `exp/mode15-k-smooth` | 10 | 3 | 当前活动研究线（DPI+cmodel+mode15/17） |
+| `exp/fpga` | 6 | 3 | DPI 接入与推理联调主线 |
+| `exp/int8-fp8-bootstrap` | 10 | 0 | INT8/FP8 组件与 full-core 原型线 |
+| `exp/bonus1-bf16` | 6 | 0 | BF16/FP16 统一模式线 |
+| `exp/padding-mask-s512` | 7 | 3 | Bonus #3/#4/#5 集成线 |
+| `exp/bonus2-mha` | 5 | 3 | 标准 MHA 顺序调度线 |
+| `exp/bonus9-task-queue` | 3 | 3 | task FIFO 与队列控制线 |
+
+按改动规模（相对 `main` 的 `git diff --shortstat`）可见：
+
+| 分支 | 文件数 | 增加行 | 删除行 | 备注 |
+|---|---:|---:|---:|---|
+| `exp/int8-fp8-bootstrap` | 141 | 19569 | 286 | 文档+实验模块大规模扩展 |
+| `exp/bonus1-bf16` | 95 | 12866 | 286 | BF16/FP16 组件+核心+测试 |
+| `exp/mode15-k-smooth` | 69 | 9496 | 1710 | inference/cmodel/DPI 多线并行 |
+| `exp/fpga` | 63 | 7888 | 1710 | DPI 桥接与推理接入 |
+| `exp/padding-mask-s512` | 27 | 2989 | 1808 | valid_len/S512/qfmt 支持 |
+| `exp/bonus9-task-queue` | 11 | 1898 | 1696 | true FIFO 与寄存器语义更新 |
+| `exp/bonus2-mha` | 11 | 735 | 1624 | 多 head 顺序调度与文档 |
+
+结论：两周内的“新增工作量”绝大部分发生在 bonus 与推理侧分支，主线 baseline 只承担稳定口径维持。
+
+## 2.2 各方向阶段结论
+
+### 2.2.1 baseline / main
+
+- 口径稳定：`cycles=85928`。
+- 误差稳定：`MAE=0.002499`, `MaxAE=0.006583`。
+- 状态：作为 strict-problem 基线继续有效。
+
+### 2.2.2 Bonus #3/#4/#5（`exp/padding-mask-s512`）
+
+- `valid_len` 已接入 top/core，并完成 `valid_len=192` 回归。
+- `S=512` 已完成 top/IP 级闭环（不再仅 core 级）。
+- `Q6.10/Q4.12` 已完成外部格式桥接与回归。
+- 代表结果：
+  - `S=512`: `cycles=307024`, `MAE=0.002235`, `MaxAE=0.006685`
+  - `valid_len=192`: `cycles=73880`, `MAE=0.001868`, `MaxAE=0.006583`
+  - `Q6.10/Q4.12`: `MAE=0.004218`, `MaxAE=0.009086`
+
+### 2.2.3 Bonus #2（`exp/bonus2-mha`）
+
+- 实现策略：单 core 顺序执行 multi-head。
+- 周期与计数严格线性扩展：
+  - `head=1`: `85928`
+  - `head=2`: `171856`
+  - `head=4`: `343712`
+  - `head=8`: `687424`
+- 含义：top 级 head 调度几乎无额外开销，瓶颈仍在单 head core。
+
+### 2.2.4 Bonus #9（`exp/bonus9-task-queue`）
+
+- 从 P1 shadow-next 过渡到 P2 true FIFO。
+- 默认 `FIFO_DEPTH=4`，参数化支持 `1..15`，已回归 `DEPTH=8`。
+- 增加 descriptor 对齐校验、overflow/underflow/desc_error sticky、flush 语义。
+- 顶层回归通过：默认和 `FIFO_DEPTH=8` 均 `PASS`。
+
+### 2.2.5 Bonus #1（`exp/bonus1-bf16`）
+
+- BF16 core 周期从 `8,573,025` 迭代到 `2,150,497`（dot/softmax 并行+重叠）。
+- BF16/FP16 统一模式完成：单 RTL、运行时 `precision_mode` 切换。
+- FP16/BF16 核心测试通过，周期口径一致。
+- 但相对 Q8.8 baseline 仍有数量级吞吐差距，尚未进入主线替代阶段。
+
+### 2.2.6 Bonus #7（`exp/int8-fp8-bootstrap`）
+
+- 已完成 INT8/FP8 基础组件、最小 core、full core、DMA 版原型。
+- RTL 与同构 fixed/cmodel 对齐可做到 `max_err=0`。
+- 但相对 FP32 误差仍高（常见 `MAE≈3.x`, `MaxAE≈8`），说明数值链路尚不满足 baseline 门限级要求。
+
+### 2.2.7 推理接入（`exp/fpga` -> `exp/mode15-k-smooth`）
+
+- DPI backend、C API、task submit 骨架已建。
+- cmodel mode14 修复后可稳定输出可读文本并通过 role prompt 对照。
+- mode15/mode16/mode17（纯 fixed 路线）在 chat 上有明显进步，但 role 结构仍不稳。
+
+## 2.3 阶段里程碑重排
+
+对 0310 版里程碑重新排序后，当前优先级应改为：
+
+1. 保持 baseline 不回退（已完成）。
+2. 把 `3/4/5/9/2` 的可交付证据统一收口（进行中）。
+3. 把 cmodel mode14 作为推理稳定参考，继续压缩 mode15/17 与其差距（进行中）。
+4. 低精度 BF16/FP8 作为独立 bonus 线继续，不与 baseline 指标混写（进行中）。
+
+因此，项目状态已从“主线是否达标”转向“多分支成果如何并行推进且可审计”。
+
+## 2.4 分支活动时间线（关键提交视角）
+
+为避免“只有文档总结、缺少代码时间锚点”，本节给出 2026-03-11 之后的关键提交时间线。
+
+### 2.4.1 系统扩展线
+
+1. `2026-03-11` `exp/padding-mask-s512`
+   - `feat: add valid_len masking and s512 validation`
+   - 说明 Bonus #3/#4 进入 RTL 落地阶段。
+2. `2026-03-12` `exp/padding-mask-s512`
+   - `feat: 多精度支持，s=512验证通过`
+   - 说明 Bonus #5 在同分支落地。
+3. `2026-03-12` `exp/bonus2-mha`
+   - `feat: 顺序mha流实现`
+   - 说明多 head 进入可运行形态。
+4. `2026-03-12` `exp/bonus9-task-queue`
+   - `bonus9: 可参数化配置task fifo`
+   - 说明 queue 从概念推进到参数化实现。
+
+### 2.4.2 低精度线
+
+1. `2026-03-13` `exp/bonus1-bf16`
+   - `feat: bf16 attn core及测试`
+   - `feat: bf16 attn core mae修复`
+   - 说明 BF16 core 进入“可跑+修误差”阶段。
+2. `2026-03-15` `exp/bonus1-bf16`
+   - `feat: 寄存器配置fp16/bf16实现`
+   - 说明 BF16/FP16 统一模式接入控制平面。
+3. `2026-03-15~16` `exp/int8-fp8-bootstrap`
+   - `feat: int8 组件引入`
+   - `feat: fp8 attn core最小路径实现`
+   - `fix: 修复fp8 dma通道卡死及与cmodel不一致`
+   - 说明 INT8/FP8 已从算子节点扩展到 core+DMA 原型。
+
+### 2.4.3 推理接入线
+
+1. `2026-03-18` `exp/fpga`
+   - `infer: dpic推理引入`
+   - 说明 DPI 后端正式接入推理流程。
+2. `2026-03-19` `exp/fpga`
+   - `feat: dpic误差分析`
+   - `cmodel: 浮点cmodel可接入inference，定点仍存在误差暂有问题`
+   - 说明问题重心已转向“质量与误差传播”。
+3. `2026-03-19~20` `exp/mode15-k-smooth`
+   - `cmodel: add K-smooth, mode16 dual-buffer, and stage-trace diagnostics`
+   - `cmodel: 尝试chunks扫描`
+   - `experiments: add 20260320 multilevel evaluation report for mode17 track`
+   - 说明 fixed 路线开始系统化参数扫描。
+
+### 2.4.4 时间线解读
+
+该时间线反映了一个清晰模式：
+
+1. 第一周（3/11~3/12）以系统扩展为主（3/4/5/2/9）；
+2. 第二周（3/13~3/16）转向低精度组件化（1/7）；
+3. 第三段（3/18~3/24）重心转到推理接入与数值稳定性攻坚。
+
+这也解释了为什么 baseline 指标基本不变，而报告内容显著增厚：开发重点已经从“单线收敛”转到“多线并行验证”。
+## 3. 具体设计方案
+
+### 3.1 实现算法说明
+
+目标算子为 Scaled Dot-Product Attention。对给定查询矩阵 $Q\in\mathbb{R}^{S\times D}$、键矩阵 $K\in\mathbb{R}^{S\times D}$ 和值矩阵 $V\in\mathbb{R}^{S\times D}$，标准形式可写为
+
+$$
+\mathrm{SDPA}(Q,K,V)=\mathrm{softmax}\left(\frac{QK^T}{\sqrt D}\right)V.
+$$
+
+若直接先显式形成 $S\times S$ 的 score 矩阵，再统一做 softmax 和乘以 $V$，则在本题规模下会引入明显的片上存储压力。以 $S=256$ 为例，若 score 也采用 16bit 表示，则完整矩阵大小为
+
+$$
+256\times 256 \times 16\text{ bits}=1{,}048{,}576\text{ bits}=128\text{ KB},
+$$
+
+这已经接近甚至超过当前算子内多个片上 buffer 的总和，并且会破坏 FlashAttention 以流式更新代替显式矩阵存储的核心思想。因此本设计采用 online softmax 递推形式，以行为粒度维护三组状态：当前最大值 $m$、分母累计量 $l$ 以及加权和值累计向量 $\mathrm{acc}$。对于任意新到达的 score $s_j$ 与 value 向量 $v_j$，更新公式为
+
+$$
+m' = \max(m, s_j),
+$$
+
+$$
+l' = l\cdot e^{m-m'} + e^{s_j-m'},
+$$
+
+$$
+\mathrm{acc}' = \mathrm{acc}\cdot e^{m-m'} + e^{s_j-m'}\cdot v_j.
+$$
+
+在一行处理完全部 key 之后，最终输出为
+
+$$
+o = \frac{\mathrm{acc}}{l}.
+$$
+
+这套递推是 FlashAttention 与 online softmax 文献中的核心思想，其工程优势在于：第一，不再需要存储完整的 score 矩阵；第二，每个 score 一旦算出就可以立刻参与 softmax 更新与 PV 累加；第三，状态只需按 query 行保存，而不依赖于历史全部 score。当前设计又进一步将查询并行度设置为 `ROW_PAR=2`，即每次同时处理两个 query row，从而在不明显增大调度复杂度的前提下提高吞吐效率。
+
+在数值表示上，输入的 $Q$、$K$、$V$ 以及输出 $O$ 都采用 Q8.8 定点格式。两个 Q8.8 数相乘得到 Q16.16 结果，因此点积累加器至少需要 32bit 以上精度。当前主线中，点积路径输出采用 40bit 中间和，行累计 `row_acc` 仍保留为 64bit 存储接口以兼容归一化通路。online softmax 恢复为 `ctx` 方案后，模块内部的 `l/acc` 标量状态使用 Q16.16 和 32bit 累计，再由 core 以符号扩展方式写回 `row_acc[63:0]`，从而在不重写 normalize 接口的前提下先恢复主线功能。倒数模块 `fa_recip_nr_q16_16` 输出 Q16.16，而归一化乘法器再将 64bit 累计量与 Q16.16 倒数相乘并回落到 Q8.8。对于 $D=64$ 的默认参数，缩放因子为
+
+$$
+\frac{1}{\sqrt{64}} = \frac{1}{8} = 0.125,
+$$
+
+映射到 Q8.8 后恰好为 $0.125\times 256 = 32$，因此 `SCALE` 寄存器的默认值设置为十进制 `32`。
+
+当前架构还引入了 tile 化组织。序列长度 $S=256$ 被分成 `TQ=32` 的 query tile 和 `TK=64` 的 key/value tile，因此
+
+$$
+\mathrm{NUM\_Q\_TILES}=\frac{256}{32}=8,
+\qquad
+\mathrm{NUM\_K\_TILES}=\frac{256}{64}=4.
+$$
+
+设计采用外层遍历 Q tile、内层遍历 K/V tile 的双层调度。每次只在片上保存一个 Q tile、一个正在计算的 K/V tile 以及一个预取中的 K/V tile。由于 score 的计算与 online softmax 更新是流式进行的，因此整个 tile 过程始终不需要显式写出任何中间注意力矩阵。
+
+### 3.2 设计总体框图
+
+当前顶层结构可以抽象为如下层次：
+
+```text
+				┌──────────────────────────────┐
+				│      Host / CPU / SoC        │
+				│ AXI-Lite cfg + AXI memory    │
+				└──────────────┬───────────────┘
+							   │
+				 ┌─────────────▼─────────────┐
+				 │     fa_attention_ip_top    │
+				 │                             │
+				 │  ┌──────────────────────┐   │
+AXI-Lite slave ──┼─▶│  fa_axi_lite_regs    │   │
+				 │  └──────────────────────┘   │
+				 │                             │
+AXI4 master  ────┼─▶ fa_dma_reader            │
+				 │  fa_dma_writer             │
+				 │                             │
+				 │  ┌──────────────────────┐   │
+				 │  │  fa_attention_core   │   │
+				 │  │  Q/K/V/O tile FSM    │   │
+				 │  │  online softmax      │   │
+				 │  │  QK + PV + norm      │   │
+				 │  └──────────────────────┘   │
+				 │                             │
+				 │  ┌──────────────────────┐   │
+				 │  │  fa_perf_counters    │   │
+				 │  └──────────────────────┘   │
+				 └─────────────────────────────┘
+```
+
+在顶层看来，`fa_axi_lite_regs` 负责软件可见的配置与状态窗口，`fa_dma_reader/fa_dma_writer` 分别负责从系统内存搬运 Q/K/V 与将 O 写回系统内存，而 `fa_attention_core` 则是完整的调度与数据通路中心。值得强调的是，本设计并未将计算控制器与数据通路彻底分离，而是选择将 tile 调度、DMA 命令发起、online softmax 状态维护、QK/PV 计算与最终归一化都放入一个强内聚的核心中。这种做法牺牲了一部分模块边界上的整洁性，但换来了早期迭代阶段更直接的功能闭环和更清晰的时序归因。
+
+### 3.3 模块间数据流向
+
+一次完整 attention 计算的主数据流可叙述如下。首先，软件通过 AXI-Lite 将 `Q_BASE`、`K_BASE`、`V_BASE`、`O_BASE`、`STRIDE_BYTES`、`SCALE`、`NEG_LARGE` 等寄存器写入顶层寄存器文件，然后向 `CTRL` 寄存器写入启动脉冲。顶层寄存器文件将该启动脉冲转化为 `fa_attention_core` 的 `i_start`，同时保持各个配置参数处于稳定状态。
+
+在 `fa_attention_core` 内部，主状态机首先进入 `S_LOAD_Q`，通过 DMA reader 发出一个 query tile 读命令，并将读回的总线 beat 逐个解包为 `q_buf[TQ][D]`。随后，状态机进入 `S_INIT_CONTEXT`，将当前 query tile 对应的 `row_m`、`row_l`、`row_acc` 进行初始化，其中 `row_m` 初始化为 `NEG_LARGE`，`row_l` 初始化为零，`row_acc` 初始化为零向量。
+
+接下来主状态机依次对 4 个 K/V tile 循环。对于每个 tile，先加载 K，再加载 V；进入 `S_COMPUTE` 后，内部子状态机 `cs` 会以 `ROW_PAR=2` 为粒度遍历 query 行对，以 `DP_CHUNKS=2` 为粒度遍历 32-lane 的点积切片，以 `TK=64` 的长度遍历 key/value 行。每个 score pair 先经过 QK 点积，再乘以缩放因子，随后进入 online softmax 更新模块产生新的 `m`、`l` 和 `acc`。由于 `V` 行与新生成的 softmax 权重在同一拍的组合中被使用，因此 score 一旦计算完毕，便立即以流式方式并入 `row_acc`，不需要中间存储 score 阵列。
+
+当所有 K/V tile 完成后，核心进入 `S_NORMALIZE`。此时每个 query row 的 `row_acc` 和 `row_l` 已经累积完毕，归一化逻辑先对 `row_l` 启动倒数模块，再以 `NORM_LANES=8` 的向量宽度将 `row_acc` 分块乘以倒数，得到最终的 `o_buf[TQ][D]`。最后，`S_WRITE_O` 通过 DMA writer 将 O tile 写回系统内存，并在 `S_NEXT_Q` 中决定是否继续处理下一个 Q tile。当全部 tile 结束后，顶层将 `done` 置位并允许软件读取 `CYCLES` 与性能计数器寄存器。
+
+![Q/KV tile schedule](../wavedrom/svg/fig11_3_tile_schedule.svg)
+
+如果将上述过程按一次完整运行的地址搬运量来观察，则 Q 只在每个 Q tile 开始时读取一次，而 K/V 会对每个 Q tile 重复遍历全部 4 个 tile。之所以这样设计，是因为该架构的优化重点并不是极端减少片外流量，而是在片上存储受限的前提下，通过适中的 tile buffer 和 online softmax 流程使运算路径尽可能连续。后续如需支持更长上下文或更多 head，则应在系统层继续引入更高级的外部编排与片上 scratchpad 级缓存，而不是简单扩大当前核心的本地 buffer。
+
+### 3.4 具体算子的实现
+
+#### 3.4.1 QK 点积实现
+
+主线中的点积算子由 `fa_qk_dotprod_slice` 完成。与更早期的组合式 slice 不同，当前同名主线模块已经吸收了 `exp_h` 的结构：输入先寄存，再经过乘法首拍与逐级二叉加法树，共形成一条约 `8` 拍的局部部分和流水。它每次仍只处理一个 `DP_LANES=32` 的 chunk，且对两个 query row 同时给出局部部分和；由于 `D=64`，默认仍需两个 chunk 才能完成一次完整内积。也就是说，主线接口名没有变，但内部微结构已经从“组合乘加块”切换为“高频长流水树”。
+
+![QK slice pipeline](../wavedrom/svg/fig10_3_qk_pipeline_migration.svg)
+
+这种结构的优点是逻辑简单、控制友好，与 `ROW_PAR=2` 的并行方式自然匹配。其问题也很明显：当每拍同时执行 32 个 `16\times 16` 乘法再叠加局部加法树时，单拍组合深度很大，因此在 55nm 目标频率下很容易成为关键路径来源。这正是后续独立实验集中优化的对象。
+
+围绕 QK 点积，本项目在 `experiments/fa_qk_dotprod_slice_pipe` 中开展了多轮实验。早期的 `exp_e` 通过 `8` 组局部乘加块再做 `quarter / half / final` 三级归并，将频率提高到约 `203.8MHz`。2026-03-10 的新一轮实验继续坚持 `32-lane` 和 `II=1`，但把第一级强制改为“纯乘法寄存”，后续全部改成逐级流水的二叉加法树。由此得到的 `exp_f / exp_g / exp_h` 在结构上分别对应“纯乘法首拍”“位宽逐级收敛”“输入预寄存+位宽收敛”三种版本。补跑前台 STA 之后的结果表明：`exp_g` 的最差 slack 为 `-0.650ns`、估算频率约 `377.3MHz`，`exp_h` 的最差 slack 为 `-0.260ns`、估算频率约 `442.5MHz`。这说明 QK 路径的频率瓶颈已经被压缩到单乘法器级，而不再是宽加法树级别，为后续主线集成提供了明确方向。
+
+#### 3.4.2 Online Softmax 实现
+
+online softmax 的当前主线实现已经切回 `fa_online_softmax_ctx` 家族，并完成了 system-level 的流式接入。这里的关键变化不再只是“把 `pair` 换成 `ctx`”，而是把 `exp_d` 的标量、4-context、带 forwarding 的流水更新单元，与 `fa_attention_core` 中的 `QK` tag 回收和 batch 调度真正绑定起来。当前主线设置 `SOFTMAX_CTXS=4`，并以 `QPAIR_BATCH_ROWS = ROW_PAR \times SOFTMAX_CTXS = 8` 的粒度组织 row-pair batch；对同一个 compute tile 而言，`score retire`、`softmax issue` 与 `QK` issue 已经发生重叠，而不是像恢复态那样逐个 score-pair 串行等待。
+
+![Online softmax update](../wavedrom/svg/fig11_4_online_softmax_update.svg)
+
+从算法角度看，这一结构仍然对应 online softmax 递推公式；从硬件角度看，它通过 `ctx_id`、多级流水和状态前递，明确切断了最重的 recurrence datapath。独立实验中，`fa_online_softmax_ctx/exp_d` 在 500MHz 约束下的最差 slack 为 `+0.135ns`、估算频率约为 `536.2MHz`，这是当前 softmax 家族里最强的 leaf 结果；而在当前主线中，它已不再停留在“可以工作”的恢复态，而是通过 `4-context` 交错真正参与 system-level overlap。最新主线 perf 读回中，`cs_softmax_prep_cycles=32768`，已经从先前恢复态的 `229376` 显著回落，并与 `score retire` 事件数对齐，说明 `ctx` 的吞吐潜力已经被当前调度兑现。
+
+#### 3.4.3 倒数与归一化实现
+
+归一化阶段包含两个子问题。第一个子问题是如何计算分母 $l$ 的倒数，当前使用 `fa_recip_nr_q16_16` 实现 Newton-Raphson 迭代。第二个子问题是如何将 64bit 的累计向量乘以 Q16.16 倒数，再有符号饱和回写到 Q8.8 输出，当前由 `fa_o_normalize_block` 完成。这里的 `fa_o_normalize_block` 也已经不是早期的纯组合版本，而是吸收 `exp_d` 后形成的两拍流水实现：第一级完成部分积展开，第二级完成重组、舍入与饱和。主线中以 `NORM_LANES=8` 的方式分块处理 `D=64` 维，因此每行需要 8 次向量归一化，整块输出需要 256 次倒数请求与 256 次倒数响应，这也与 perf counters 的实际读回相符。
+
+![Normalize pipeline](../wavedrom/svg/fig10_4_norm_datapath_split.svg)
+
+倒数模块是最早完成 500MHz 收敛的子模块之一。`fa_recip_nr_q16_16/exp_c` 采用 16×16 部分积和 10 级流水之后，估算频率可达 `527MHz`，已经表明数值核本身不是系统主瓶颈。归一化块的独立实验则显示，单纯在输出路径上做轻量流水虽然能将频率提升到 `333.9MHz` 至 `360.8MHz`，但与 QK 和 softmax 相比，其收益和优先级仍然偏低。因此当前的工程判断是：归一化阶段已经足以支撑 baseline 主线，后续更适合通过系统级 overlap、倒数前移或更好的物理实现来继续挖掘，而不必把大量前端架构时间继续投入到该路径。
+
+#### 3.4.4 控制、双缓冲与性能计数器
+
+`fa_attention_core` 使用双层状态机组织。主状态机 `ms` 依次执行 `S_LOAD_Q`、`S_INIT_CONTEXT`、`S_LOAD_K`、`S_LOAD_V`、`S_COMPUTE`、`S_NORMALIZE`、`S_WRITE_O`、`S_NEXT_Q` 和 `S_DONE`。内层计算子状态机 `cs` 则在 `S_COMPUTE` 期间执行 `C_DP_RUN`、`C_SCORE_DONE`、`C_SOFTMAX_PREP` 和 `C_DONE`。该控制结构的一个重要优化是取消了多余的空拍控制态，把部分初始化、下标推进和状态过渡内联到关键状态中，从而减少 `cs_ctrl_cycles`。
+
+K/V buffer 方面，主线已经实现 ping-pong 双缓冲。当前活跃 bank 负责参与计算，而另一个 bank 可以在计算期间预取下一 tile。这一结构的意义不在于理论上消灭所有读延迟，而在于把一部分原本显式暴露在主状态机中的 K/V 装载周期掩蔽到 compute 阶段内部。根据当前 perf counters 的读回，`MS_COMPUTE=67584`，而 `MS_LOAD_K=4144`、`MS_LOAD_V=4144`；结合每个 `Q tile × K/V tile` 仅额外承担约 `32` 个 compute 控制边界周期这一事实，可以看出当前主线的 compute 主体已经非常接近“批流式 issue 下界 + 少量 tile/control 气泡”的状态。
+
+为了使后续优化可以量化，本项目又引入了 `fa_perf_counters` 模块，并在 AXI-Lite 窗口中映射了 `0x80~0xD4` 的只读寄存器。当前可读回的计数包括运行次数、busy 周期、DMA 命令与 beat 数、乘法/指数/倒数事件数、主状态占时和子状态占时。这使得本项目从传统的“看一次 test pass 与否”的验证方式，进一步推进到了“设计行为—计数口径—性能结论”三者一致的工程闭环。
+
+### 3.5 定点实现误差分析
+
+定点误差分析是本项目中最早暴露系统性问题的一环。初始阶段若直接拿 RTL 同构路径与 FP32 结果比较，会发现误差显著大于赛题门限；而若采用“输入量化、softmax 仍在浮点域”的参考模型，则误差又远小于门限。这一现象说明，必须严格区分算法口径与实现口径，否则会高估硬件链路的数值质量。为此，项目后来单独建立了 CModel，并对 dot、score、exp、$l$、acc、norm 六个阶段做逐级误差分解。
+
+阶段误差分解的结果非常具有指导意义。在 `small-int + causal` 条件下，`dot`、`score` 和 `exp` 的 MAE 都在 $10^{-3}$ 量级，而 `acc` 阶段的 MAE 已达到 `135.58`，最终 `norm` 阶段的 MAE 约为 `1.865`。在 `gaussian + causal` 条件下，`acc` 的 MAE 进一步上升到 `464.11`，`norm` 的 MAE 也被拉高到 `33.44`。这表明主导误差并不来自指数近似本身，而是来自长程累计状态 `acc` 的尺度耦合、分母归一化以及掩码后的动态范围放大。
+
+基于该结论，项目在主线中采取了几项稳健策略。第一，`row_acc` 使用 64bit 高精度累计，避免软最大更新过程中被过早截断。第二，`l_new` 在写回前加入最小值保护，防止分母退化为零。第三，归一化阶段保留 `den==0` 的保护分支，并将饱和逻辑集中到末端。第四，在 streamed `ctx` 主线稳定后，又进一步修正了 `acc` 进入 normalize 之前的尺度口径：当前实现会在 normalize 入口对 `row_acc` 做 `<<< 8` 的对齐补偿，从而使 `ctx` 产生的 `Q16.16` 累计值与当前倒数-归一化链路保持一致。最终顶层 full-run 读回已达到：RTL 相对 fixed-q8.8 参考 `mae_lsb=0`、`max_err_lsb=0`，相对 FP32 参考 `MAE=0.002499`、`MaxAE=0.006583`，说明当前主线在本题规模下已经重新实现周期与精度双闭环。
+
+### 3.6 延迟与带宽分析
+
+从理论参数出发，当前设计的主要派生量如下。总线宽度 `BUS_W=128`，因此每个 beat 可携带
+
+$$
+\mathrm{ELEMS\_PER\_BEAT}=\frac{128}{16}=8
+$$
+
+个 Q8.8 元素。对于 $D=64$，每行需要
+
+$$
+\mathrm{BEATS\_PER\_ROW}=\frac{64}{8}=8
+$$
+
+个 beat。于是，一个 Q tile 的流量为
+
+$$
+32\times 64\times 2\text{ B}=4096\text{ B}=4\text{ KB},
+$$
+
+对应 256 个 beat；一个 K tile 或 V tile 的流量为
+
+$$
+64\times 64\times 2\text{ B}=8192\text{ B}=8\text{ KB},
+$$
+
+对应 512 个 beat。整个 attention 的理论总流量因此为：Q 读取 $8\times 4\text{KB}=32\text{KB}$，K 读取 $8\times 4\times 8\text{KB}=256\text{KB}$，V 读取同为 `256KB`，O 写回为 `32KB`，合计约 `576KB`，即 `36,864` 个 128bit beat。
+
+从计算量角度看，`ROW_PAR=2` 意味着一个 score pair 对应两个 query row；每个 Q tile 中共有
+
+$$
+\frac{TQ}{ROW\_PAR}=\frac{32}{2}=16
+$$
+
+个 row pair。每个 row pair 需要遍历 `TK=64` 个 key，因此每个 K tile 处理 `16\times 64=1024` 个 score pair，全局一共处理
+
+$$
+8\times 4\times 16\times 64 = 32768
+$$
+
+个 score pair。若按当前 streamed 主线的 batch 调度来估算，则每个 `Q tile × K/V tile` 计算块中：
+
+- 总 row-pair 数为 `16`；
+- 每 batch 覆盖 `SOFTMAX_CTXS=4` 个 row-pair；
+- 因此每个 compute tile 共有 `4` 个 batch；
+- 每个 batch 的有用 `QK` issue 周期为 `4 × 64 × 2 = 512`；
+- 再加一次 `QK_LAT=8` 的流水 fill/drain；
+- 每个 batch 约为 `520` 个 `DP` 周期。
+
+于是全局 `QK` 主体近似为：
+
+$$
+8 \times 4 \times 4 \times 520 = 66560.
+$$
+
+当前实测恰好读回：`CS_DP_RUN=66560`。而 `CS_SCORE_DONE=32768` 与 `CS_SOFTMAX_PREP=32768` 在当前实现中已不再表示“独占 compute 的串行状态占时”，而更接近“在 `DP` 流水内部发生的 retire / issue 事件计数”，它们与 `QK` issue 已存在大量重叠，因此不能再简单与 `CS_DP_RUN` 线性相加。当前每个 compute tile 的总占时约为：
+
+$$
+4 \times 520 + 32 = 2112,
+$$
+
+其中额外的 `32` 个周期对应 tile/control 边界气泡。全局共有 `32` 个 compute tile，因此：
+
+$$
+MS\_COMPUTE = 32 \times 2112 = 67584,
+$$
+
+与 perf 读回完全一致。再加上 `Q/K/V/O` 访存与 normalize，就得到当前主线总延迟：
+
+$$
+cycles = 85928.
+$$
+
+因此当前主线已经可以明确判断：主瓶颈不再是“重复支付 leaf 流水延迟”，而是后续若要继续提升，则更可能来自 bonus 级扩展能力、top-level PPA 与更高层次的软件—硬件协同。
+
+
+## 3.7 0324 架构增量：从单任务基线到可扩展任务形态
+
+0310 版本的主线架构已完成 baseline 闭环；0324 版本新增的关键不是“替换原算法”，而是在保持 baseline 数据通路不破坏的前提下，把可扩展能力下沉到寄存器、调度和控制边界。新增能力主要来自三条线：
+
+1. `valid_len/data_fmt`（Bonus #3/#4/#5）
+2. `head loop`（Bonus #2）
+3. `task FIFO`（Bonus #9）
+
+三条线的共同策略是：尽量不重写 `fa_attention_core` 的核心 online-softmax 计算链，而在 top 级调度与寄存器语义层做增量扩展。
+
+### 3.7.1 `valid_len` 的数据流影响
+
+`valid_len` 的硬件作用已经从“配置项存在”推进到“完整数据流生效”：
+
+1. query 侧：`q >= valid_len` 的行不参与有效更新；
+2. key 侧：`k >= valid_len` 的分数被打成 `NEG_LARGE`；
+3. 输出侧：padded query 行归一化后强制写零；
+4. 周期侧：`valid_len=192` 时总周期由 `85928` 下降到 `73880`。
+
+这一行为说明当前实现已经有“计算裁剪”收益，但 DMA 仍按完整 tile 读写，尚未引入“流量裁剪”。
+
+### 3.7.2 `data_fmt` 的桥接语义
+
+`Q6.10/Q4.12` 路径目前采用外部桥接，内部统一回到 `Q8.8`。因此当前 architecture 本质仍是“单内部格式 + 多外部格式适配器”。该策略的工程优点是：
+
+1. 不破坏 `row_m/row_l/row_acc` 既有位宽链路；
+2. 不引入第二套 normalize/recip 实现；
+3. 可以较低风险完成 Bonus #5 功能验收。
+
+局限是：`Q6.10` 与 `Q4.12` 在当前激励下会退化到同一内部有效值集合，无法体现真正的内部多精度差异。
+
+### 3.7.3 多 head 的最小侵入实现
+
+`exp/bonus2-mha` 采用的是 single-core sequential MHA：
+
+1. `fa_attention_core` 不改；
+2. top 级增加 `NUM_HEADS` + `HEAD_STRIDE`；
+3. 通过 head 外层循环顺序执行。
+
+这种组织的核心好处是可验证性强，且实测显示 top 切换开销几乎可忽略：`cycles`、`comp_launch`、`recip_req` 都随 head 数严格线性扩展。其代价是吞吐上限完全受单 head core 限制。
+
+### 3.7.4 task queue 的从 P1 到 P2
+
+Bonus #9 已从 `active+next` 的影子寄存器（P1）推进到真正 FIFO（P2）：
+
+1. 任务描述寄存器作为 staging port；
+2. `QUEUE_CMD.ENQUEUE` 显式入队；
+3. 内部 FIFO（默认深度 4）自动调度出队；
+4. 任务级计数器（accept/done/error）独立维护。
+
+这意味着 IP 控制语义从“一次 start 对应一次任务”扩展到“单次批次排空”，为后续链式任务和软件驱动优化提供接口基础。
+
+## 3.8 IP 吞吐量与关键参数的统一量化
+
+为了让不同分支结果可横向比较，本节给出统一吞吐口径。定义：
+
+$$
+N_{MAC}=2\cdot S\cdot S\cdot D,
+\quad
+N_{OPS}=2\cdot N_{MAC}=4\cdot S\cdot S\cdot D.
+$$
+
+### 3.8.1 baseline (`S=256,D=64,cycles=85928`)
+
+$$
+N_{MAC}=8,388,608,
+\quad
+N_{OPS}=16,777,216.
+$$
+
+单位 GHz 吞吐：
+
+$$
+\text{GMAC/GHz}=\frac{8,388,608}{85,928}=97.624,
+\quad
+\text{GOPS/GHz}=195.247.
+$$
+
+单位 GHz 任务吞吐：
+
+$$
+\text{attn/s/GHz}=\frac{10^9}{85,928}\approx 11,638.
+$$
+
+对应典型频点：
+
+- `400MHz`: `attn/s≈4,655`, `GOPS≈78.10`
+- `500MHz`: `attn/s≈5,819`, `GOPS≈97.62`
+
+### 3.8.2 `S=512` (`cycles=307024`)
+
+$$
+N_{MAC}=33,554,432,
+\quad
+N_{OPS}=67,108,864.
+$$
+
+$$
+\text{GMAC/GHz}=109.290,
+\quad
+\text{GOPS/GHz}=218.580,
+\quad
+\text{attn/s/GHz}\approx 3,257.
+$$
+
+对应 `500MHz`：`attn/s≈1,628`，`GOPS≈109.29`。
+
+这说明虽然 `S=512` 周期上升，但每次 attention 的操作量增长更快，因此单位周期算术吞吐反而提高；系统瓶颈逐步由控制边界转向数据搬运与重读。
+
+### 3.8.3 multi-head 顺序版吞吐性质
+
+由于 `head=1/2/4/8` 周期严格线性，顺序 MHA 的“每 head 吞吐”与单 head baseline 等价。即：
+
+1. 总任务吞吐随 head 数反比下降；
+2. 总算术吞吐与单 head 基本同级；
+3. 不引入额外并行资源时，不会凭空获得超线性收益。
+
+因此若下一阶段目标是提升 MHA 总吞吐，必须进入跨 head overlap 或多 core 并行，而不是继续优化 top 级 head 切换状态。
+
+## 3.9 带宽-计算协同的阶段性判断
+
+按照 `BUS_W=128bit`，baseline 理论总流量 `589,824B`，结合 `cycles=85928`：
+
+$$
+\text{bytes/cycle}=6.864,
+\quad
+\text{bus util} \approx 42.9\%.
+$$
+
+其中 K/V 流量占比约 `88.9%`。对 architecture 的启示是：
+
+1. 当前系统不是纯内存瓶颈，但 K/V 重读已主导流量；
+2. `valid_len` 目前只优化计算，不优化流量；
+3. 进一步做带宽优化应优先瞄准“最后 tile 裁剪”和“task 间 K/V 复用”而非 Q/O。
+
+以上判断与 Bonus #9 queue 化方向天然兼容：任务排队后可在调度层观察相邻任务的 K/V 地址相关性，为未来的跨任务数据复用提供结构入口。
+## 4. 附加模块的设计
+
+### 4.1 DMA 引擎
+
+#### 4.1.1 设计总体思路
+
+DMA 模块采用非常明确的“命令接口 + AXI 主口 + 简单双向流接口”结构。`fa_dma_reader` 接收来自调度器的 `cmd_valid/cmd_ready/cmd_addr/cmd_len`，将其转化为 AXI 读地址突发，再把返回的 R 通道 beat 原样流式送往下游 tile buffer。`fa_dma_writer` 则接受写命令和写数据流，先发起 AXI 写地址，再连续消费输入数据 beat，最后等待写响应完成一个事务。这样的接口形式有两个优点。其一，调度器只需要关心“从哪个地址开始搬多少 beat”，不需要直接操作 AXI 的五个通道。其二，后端 compute core 可以把访存看作简单的流输入和流输出，从而减少控制状态机与总线协议之间的耦合。
+
+读取 DMA 内部支持对过长逻辑命令进行分裂。当总读 beat 数超过 AXI `ARLEN` 能够编码的范围时，模块会自动把一条长命令拆成多个 burst 并递增地址继续读取。这一能力已在 `test_split_long_command` 中得到验证。对本项目而言，这一点的重要性在于它使调度器可以统一以 tile 为粒度给出逻辑长度，而不必人工考虑底层 AXI burst 的最大长度限制。
+
+#### 4.1.2 工作流程及错误处理
+
+读 DMA 的状态机可概括为 `AR_IDLE -> AR_SEND -> AR_STREAM`。在 `AR_IDLE` 状态接收到命令后，模块首先根据剩余 beat 数裁剪出本次 burst 的长度；在 `AR_SEND` 状态与 AXI 地址通道完成握手；随后进入 `AR_STREAM`，在每拍 `RVALID && RREADY` 时向下游输出一个 beat，并更新剩余 beat 计数。当一个 burst 完成而总事务尚未结束时，状态机会自动回到 `AR_SEND` 继续下一个 burst。任何一次 `RRESP != OKAY` 都会将 `error` 置为粘滞态，以便上层统一发现故障。写 DMA 的结构与此对称，其状态机为 `W_IDLE -> W_ADDR -> W_DATA -> W_RESP`，并对 `BRESP` 做粘滞错误记录。
+
+![DMA / tile-buffer handshake](../wavedrom/svg/fig11_5_dma_tilebuffer_handshake.svg)
+
+从验证结果看，DMA 模块的行为已经比较稳定。`fa_dma_reader` 的单测覆盖了单 burst、错误标记、字节计数、背靠背命令和超长命令拆分；`fa_dma_writer` 的单测覆盖了写 burst、响应错误和写字节统计。顶层 full-run perf counters 读回的 `DMA_RD_CMD_COUNT`、`DMA_WR_CMD_COUNT`、`DMA_RD_BEAT_COUNT`、`DMA_WR_BEAT_COUNT` 还能与内存模型的统计互相校验，这说明 DMA 模块不仅功能正确，而且其计数口径也足以支撑后续系统级性能分析。
+
+### 4.2 AXI-Lite Config 的实现
+
+#### 4.2.1 AXI-Lite 配置寄存器
+
+AXI-Lite 配置寄存器由 `fa_axi_lite_regs` 实现。其内部使用典型的写地址与写数据分离锁存结构：只有当地址与数据都到齐、且当前没有未完成的写响应时，才视为一次 `write_fire`。读通道则根据 `ARADDR` 直接组合多路选择出 `RDATA`，并用 `RVALID` 做单周期响应控制。这样的实现方式足以覆盖当前简单寄存器文件的需求，同时避免引入更复杂的寄存器总线桥接逻辑。
+
+控制寄存器的语义设计与赛题要求基本对齐。`CTRL` 中 bit0 表示启动脉冲，bit1 表示软复位，bit2 预留为中断使能；`STATUS` 中包含 busy、done-sticky 和 error；`CFG` 当前主要承载 `causal_en`。四组 64bit 基地址通过高低 32bit 寄存器拼接形成 `Q_BASE/K_BASE/V_BASE/O_BASE`。此外，还包括 `STRIDE_BYTES`、`NEG_LARGE`、`SCALE` 和 `CYCLES` 等寄存器。为了支撑架构级调优，又额外加入了 `0x80~0xD4` 的性能计数器窗口，使上层软件无需内部探针即可读取本轮运行的微观行为统计。
+
+#### 4.2.2 寄存器具体功能对照表
+
+表 4-1 给出当前主用寄存器及功能说明。
+
+| 偏移 | 名称 | 功能说明 |
+|---|---|---|
+| `0x00` | `CTRL` | bit0 启动脉冲，bit1 软复位，bit2 中断使能 |
+| `0x04` | `STATUS` | bit0 busy，bit1 done-sticky，bit2 error；支持写 1 清 done |
+| `0x08` | `CFG` | bit0 为 `causal_en` |
+| `0x14/0x18` | `Q_BASE_L/H` | Q 基地址低 32bit 与高 32bit |
+| `0x1C/0x20` | `K_BASE_L/H` | K 基地址低 32bit 与高 32bit |
+| `0x24/0x28` | `V_BASE_L/H` | V 基地址低 32bit 与高 32bit |
+| `0x2C/0x30` | `O_BASE_L/H` | O 基地址低 32bit 与高 32bit |
+| `0x34` | `STRIDE_BYTES` | 行跨度，默认 `128` bytes |
+| `0x38` | `NEG_LARGE` | 因果掩码使用的大负数，默认 `0xFFFF8000` |
+| `0x3C` | `SCALE` | 缩放因子 Q8.8，默认 `32` |
+| `0x40` | `CYCLES` | 当前运行周期计数 |
+| `0x80~0xD4` | `PERF_*` | 运行次数、DMA 统计、子状态占时、乘法/指数/倒数计数 |
+
+这种寄存器组织方式在软件接口层非常直接。一方面，它使 host 侧可以把当前 IP 看成标准的“配置—启动—轮询完成—读统计”设备；另一方面，也为未来 UVM reg model 和 SoC driver 的统一抽象提供了天然接口边界。
+
+
+## 4.3 0324 新增控制与队列语义
+
+0310 版本的控制平面以“单任务配置 + start”语义为主；0324 版本在不破坏 baseline 的前提下新增了队列化能力，形成了“staging descriptor + queue command/status + auto scheduler”的结构。
+
+### 4.3.1 队列寄存器窗口
+
+新增并稳定使用以下地址窗口：
+
+- `0x44` `REG_QUEUE_CMD`
+- `0x48` `REG_QUEUE_STATUS`
+- `0x4C` `REG_QUEUE_CAPACITY`
+- `0x50` `REG_TASK_ACCEPT_COUNT`
+- `0x54` `REG_TASK_DONE_COUNT`
+- `0x58` `REG_TASK_ERROR_COUNT`
+- `0x5C` `REG_LAST_ERROR`
+
+`QUEUE_STATUS` 的位域语义已固定为可软件轮询的组合状态：
+
+1. `queue_empty`
+2. `queue_full`
+3. `queue_ready_for_enqueue`
+4. `queue_busy_exec`
+5. `queue_count/free_slots`
+6. `overflow/underflow/desc_error sticky`
+
+这套位域在软件侧可直接实现“可入队判定 + 容量估算 + 异常恢复”。
+
+### 4.3.2 descriptor 校验与异常处理
+
+当前入队前校验已覆盖：
+
+1. `stride_bytes != 0`
+2. `scale_q8_8 != 0`
+3. `Q/K/V/O base` 16B 对齐
+4. `stride_bytes` 16B 对齐
+
+不满足时拒绝入队并置位 `desc_error_sticky`。此外：
+
+1. `flush_queue` 仅清空 pending，不打断 active；
+2. 空队列下 flush 会触发 `underflow_sticky`；
+3. sticky 位可通过命令寄存器单独清除。
+
+该异常语义已经在 cocotb 顶层测试覆盖，不再停留在寄存器定义层。
+
+## 4.4 AXI-Lite 的扩展字段与兼容边界
+
+除了 queue 相关字段，本阶段还在部分分支预留了未来可扩展字段：
+
+1. `DATA_FMT`（Bonus #5）
+2. `VALID_LEN`（Bonus #4）
+3. `NUM_HEADS/HEAD_STRIDE`（Bonus #2）
+4. `PRECISION_MODE`（BF16/FP16 研究线）
+
+当前这些字段在不同分支成熟度不同，但一个重要工程原则已经确立：
+
+- baseline 只启用严格必要字段；
+- bonus 字段独立分支验证，不回写污染 baseline 结论。
+
+这一点直接降低了“功能扩展导致主线回归不确定性”的风险。
+
+## 4.5 DMA 语义的阶段划分
+
+0324 版本需要明确区分两类 DMA 语义，避免报告口径混淆：
+
+1. 主线 Q8.8 IP 的真实 DMA 握手路径（top-level AXI master）；
+2. FP8 full-core 实验中的 phase/beat 模型计数（更接近事件建模，不等价于主线 DMA 协议完整实现）。
+
+前者用于 baseline 合规；后者用于低精度原型阶段的性能可视化。该边界在 0324 报告中必须显式标注，防止把实验核计数误认成可提交 IP 的 DMA 证据。
+
+## 4.6 接口演进建议
+
+基于当前实现状态，控制/数据平面后续建议如下：
+
+1. 保持 AXI-Lite 作为统一控制面，不为 bonus9 单独引入 instruction-fetch 控制器。
+2. task queue 优先走 descriptor/FIFO 路线，保持与现有 regbank 兼容。
+3. AXI4-Stream 若推进，建议作为独立 top wrapper，与 DMA top 并存，避免影响 baseline 驱动与验收脚本。
+
+该策略能保证“接口创新”和“baseline 可交付”并行推进。
+## 5. 功能验证——Testbench 仿真与波形说明
+
+### 5.1 功能验证具体环境
+
+当前功能验证环境以 Python、cocotb 和 Verilator 为主。项目根目录 `Makefile` 通过 `uv venv .venv` 建立虚拟环境，并固定安装 `cocotb==1.9.2`、`pytest` 和 `numpy`。本地实际使用的版本为：Python `3.13.5`、cocotb `1.9.2`、Verilator `5.034`、Apple clang `17.0.0`。所有 cocotb 用例均通过 `dv/cocotb/Makefile` 调度运行，构建时统一把仓库 `.venv` 注入到 `PATH` 中，以避免系统环境中不同版本的 Python 包影响仿真一致性。
+
+对于模块级实验目录 `experiments/`，则单独维护了自己的 `Makefile`，能够直接以 `verif`、`lint`、`synth` 和 `sta` 为入口完成实验闭环。这样的组织方式使主线验证与独立 PPA 实验既共享同一套 Python 虚拟环境，又保持了各自的脚本自治性。
+
+### 5.2 Testbench 文件描述
+
+验证文件大致可以分为四类。第一类是算术原语与基础通路单测，例如 `test_fa_mul_sat_q8_8.py`、`test_fa_exp_pwl_8seg_q1_15.py`、`test_fa_recip_nr_q16_16.py`、`test_fa_dma_reader.py` 和 `test_fa_dma_writer.py`，用于保证局部算子的行为与接口握手正确。第二类是中层与核心模块测试，例如 `test_fa_attention_core.py`，其内部实现了内存模型、fixed-point Python 参考路径和 FP32 参考路径，能够在小参数与全参数两种配置下验证 attention 核心功能。第三类是顶层系统测试，例如 `test_fa_attention_ip_top_regs.py`，它通过 `AxiLiteMaster` 和行为级 `AxiMemoryModel` 模拟软件配置与外部存储系统，从顶层口径验证寄存器语义、DMA 事务、整轮 attention 运行和性能计数器读回。第四类是独立实验 testbench，例如 `experiments/fa_qk_dotprod_slice_pipe/tb/test_fa_qk_dotprod_slice_pipe.py`，用于对比多个实验变体之间的功能一致性。
+
+从测试功能分布上看，当前验证体系已经覆盖了算子正确性、总线时序、配置语义、顶层运行、参考对照和性能计数这几个关键维度。虽然它还不是完整的约束随机与覆盖率驱动体系，但对当前项目阶段而言，已经能够有效发现设计 bug、握手偏差和性能计数口径问题。例如，之前顶层 perf counters 联调时，就是通过内存模型时序重写和对读写命令条数、beat 数的交叉比对，定位了 full-run 超时与统计口径不一致等问题。
+
+### 5.3 具体功能验证说明
+
+当前主线回归中，最重要的验证场景是 `fa_attention_core` 和 `fa_attention_ip_top` 的 full-parameter 用例。对前者而言，测试会以 `S=256`、`D=64`、`TQ=32`、`TK=64` 的默认参数构造 Q/K/V 数据，将矩阵写入仿真内存，再启动核心并等待全部 O 结果写回。测试中同时计算 fixed-point Python 参考和 FP32 参考，分别从“实现一致性”和“对算法高精度参考的偏差”两个维度给出量化结果。对后者而言，测试不仅要观察 `busy` 和 `done`，还要确认 `CTRL/STATUS` 的读写语义、DMA 命令发起情况和 perf counters 的统计值是否与内存模型计数一致。
+
+从波形观察角度，最有代表性的信号组包括：AXI-Lite 的 `AW/W/B/AR/R` 五个通道、顶层 DMA 主口的 `AR/R/AW/W/B` 握手、核心内部 `ms` 与 `cs` 状态、`dma_rd_cmd_valid/ready` 与 `dma_wr_cmd_valid/ready`、`row_l` 和 `row_acc` 的局部更新，以及 `done` 与 `done_sticky` 的置位时刻。在当前验证流程中，虽然报告未附图形界面截图，但仿真环境已经允许通过 Verilator 导出波形并对这些关键信号进行逐拍排查。工程经验表明，绝大多数顶层级功能问题最终都能在这些信号组上被定位到明确的阶段边界。
+
+
+## 5.4 0324 跨分支验证矩阵汇总
+
+相比 0310 版本主要关注 baseline 单线，本次验证已经扩展成“主线 + bonus 线 + 推理线”的三层结构。
+
+### 5.4.1 baseline 与系统扩展线
+
+| 场景 | 代表配置 | 结果摘要 |
+|---|---|---|
+| baseline top full-run | `S=256,D=64,Q8.8` | `cycles=85928`, `MAE=0.002499`, `MaxAE=0.006583` |
+| valid_len 裁剪 | `valid_len=192` | `cycles=73880`, `MAE=0.001868`, `MaxAE=0.006583` |
+| 长序列 | `S=512` top/IP | `cycles=307024`, `MAE=0.002235`, `MaxAE=0.006685` |
+| 外部格式 | `Q6.10/Q4.12` | top 回归通过，FP32 误差在门限内 |
+| 多 head | `head=1/2/4/8` | 周期与计数严格线性扩展 |
+| task queue | `FIFO_DEPTH=4/8` | 顶层回归通过，异常语义覆盖通过 |
+
+### 5.4.2 BF16/FP16 分支验证
+
+`exp/bonus1-bf16` 已形成模块级 + 核心级双层回归：
+
+1. 基础模块（add/mul/exp/recip/转换）与参考模型可做到 `mismatch=0`；
+2. BF16/FP16 unified core 测试通过，`precision_mode` 可切换；
+3. 核心周期从 `8.57M` 优化到 `2.15M`，并保持测试口径一致。
+
+注意：该分支验证通过并不等价于可直接替代 baseline；它验证的是低精度浮点路线的“可运行性与收敛趋势”。
+
+### 5.4.3 INT8/FP8 分支验证
+
+`exp/int8-fp8-bootstrap` 现已具备：
+
+1. INT8/FP8 节点模块随机回归通过；
+2. FP8 min-core/full-core/full-core-dma 测试通过；
+3. RTL 与同构 fixed/cmodel 可做到逐点一致。
+
+但与 FP32 对齐误差仍显著偏大（`MAE` 常见 3.x，`MaxAE` 常见 8.0），因此当前定位仍是“原型验证阶段”。
+
+## 5.5 推理侧验证（native/DPI/cmodel）
+
+### 5.5.1 DPI 路径
+
+DPI 已完成可运行接入，但当前速度与质量仍受限：
+
+1. 观测吞吐约 `0.023 tok/s` 量级；
+2. 首 decode token 进入时间约 20 分钟量级；
+3. 在误差放大场景下出现 `/API` 重复采样（mode collapse）。
+
+### 5.5.2 cmodel 路径
+
+cmodel 通过 mode14 修复后，已恢复可读推理并可作为稳定参考后端：
+
+1. mode sweep 显示 mode14 `mae_lsb` 最优组（约 `0.579`，`max_abs_lsb=1`）；
+2. role prompt 回归中，mode14 与 sw 输出主干可对齐；
+3. 因此 cmodel 已从“实验辅助”升级为“DPI/RTL 对齐基线”。
+
+### 5.5.3 mode15/16/17 验证状态
+
+纯 fixed 路线（mode15/16/17）表现总结：
+
+1. K-smooth 显著改善 chat 可读性；
+2. dual-buffer/chunk 扫描中 mode17（chunk=8）当前最优；
+3. 但 role prompt 结构稳定性仍不足，尚不能替代 mode14。
+
+## 5.6 覆盖率与残余风险
+
+当前验证体系虽已覆盖大量功能点，但仍存在两类剩余风险：
+
+1. UVM full DUT 在 Verilator 下仍有收敛问题，控制面组合反馈路径需继续治理；
+2. 推理端“数值可用性”尚未完全闭环，尤其是 mode15/17 在复杂 prompt 下的稳定性。
+
+因此 0324 阶段结论应表述为：
+
+- baseline 合规与主线功能稳定已完成；
+- bonus 与推理扩展已形成可复现证据；
+- 覆盖率工作从“单线 pass/fail”转入“多分支质量门槛分层”。
+## 6. UVM 验证——模块功能和完整性测试
+
+### 6.1 UVM 验证结构
+
+UVM 体系目前尚未正式落地，但设计边界已经足够清晰。若进入下一阶段实现，建议将验证平台拆分为 AXI-Lite agent、AXI4 memory agent、寄存器模型、scoreboard、coverage collector 与虚拟序列六个主要部分。AXI-Lite agent 负责寄存器配置与轮询完成，AXI4 memory agent 则负责行为级存储阵列与突发事务。寄存器模型应覆盖当前 `CTRL/STATUS/CFG/BASE/STRIDE/SCALE/PERF` 全部窗口，并支持 `done-sticky` 的写 1 清行为。scoreboard 一方面对比写回的 O 矩阵，另一方面核对 DMA 事务条数和性能计数器口径。虚拟序列则负责组织短序列、全序列、causal/non-causal、错误注入、背靠背任务和长时间稳定性测试等场景。
+
+从结构上看，现有 cocotb 验证已经为 UVM 搭建提供了相当完整的参考：内存模型可以映射到 AXI agent，现有 Python 参考可以迁移为 DPI-C 或离线黄金模型，寄存器访问路径则可以直接转化为 reg model 序列。因此，UVM 的工程量主要体现在把当前脚本化验证重构成类层次清晰、覆盖率可统计、随机约束可扩展的体系，而不是从零开始重建全部行为语义。
+
+### 6.2 UVM 验证结果
+
+截至本报告写作时，UVM 还未启动编码，因此暂无覆盖率统计、回归通过率或约束随机结果可汇报。这一节保留为后续阶段的规划接口。考虑到当前 baseline 功能、周期与精度已经具备稳定基础，下一阶段若进入更强的 SoC 集成和 bonus 功能开发，UVM 平台将成为验证复杂数据流、异常事务和系统互联边界条件的自然下一步。
+
+
+## 6.3 0324 UVM 进展与定位重定义
+
+0310 时 UVM 仍在计划态；0324 时已进入“框架可编译、最小用例可跑、full DUT 仍待收敛”的中间状态。该状态虽然还不能作为主验收入口，但已经具备工程价值。
+
+### 6.3.1 已完成
+
+1. `agent/env/regmodel/test` 基础骨架可编译运行；
+2. `minimal_test` 在 Verilator 稳定 PASS；
+3. 驱动侧 NBA 死循环问题已定位并修复（class driver 中 `<=` 改阻塞赋值）。
+
+### 6.3.2 未完成
+
+1. `fa_base_test` 在 full DUT 下仍可能触发 `DIDNOTCONVERGE`；
+2. 分层隔离显示问题主嫌疑集中在 `fa_axi_lite_regs` 交互路径；
+3. 因此 UVM 尚不能替代 cocotb 成为 baseline 的主 gate。
+
+### 6.3.3 当前工程策略
+
+当前策略不是“等待 UVM 完成再开发”，而是双轨：
+
+1. cocotb 继续承担主回归和功能验收；
+2. UVM 继续承担协议级、调度级问题定位与后续覆盖率平台建设。
+
+这保证了交付进度不被单一仿真后端阻塞。
+
+## 6.4 下一阶段 UVM 最小闭环目标
+
+建议将 UVM 目标收敛到可执行的三步：
+
+1. 先修 `fa_axi_lite_regs` 的组合反馈收敛问题；
+2. 让 `fa_base_test` 稳定 through；
+3. 再迁移 cocotb 已稳定的 L1/L2 用例（寄存器、queue、head 配置）到 UVM sequence 库。
+
+在此之前，不建议把“UVM 覆盖率数字”作为对外核心指标，以免误导当前成熟度判断。
+## 7. 算法实现架构建模
+
+### 7.1 周期精确的 CModel 建立
+
+`cmodel/` 目录中的 C++ 工程承担两类工作：第一类是精度对照，第二类是吞吐与周期建模。其文件组织为 `attention_math.cpp`、`attention_kernels.cpp`、`attention_experiment.cpp`、`attention_lib.cpp` 和公共头文件 `attention_core.hpp`。其中，数学文件实现 fixed-point 算术与近似函数，内核文件实现 attention 计算流程，实验文件实现多种模式扫描、阶段误差分解和 compute-only 架构模型，而库文件则把这些功能组织为可执行工具。
+
+该 CModel 的重要价值并不只是“再写一份软件版 attention”，而是在于它提供了严格对齐 RTL 结构的多种模式。例如 `rtl_strict` 模式沿用 PWL exp、NR reciprocal 和 fixed-point 位移链路；`rtl_real_exp`、`rtl_real_exp_float_norm` 则逐步替换局部算子，用于判断误差究竟来自哪里；`run_stage_decomp` 能对各个算子阶段分别做 MAE、MaxAE 和 RMSE 统计；`run_compute_cycle_model` 则能够在不真正写出 RTL 的前提下，对不同 lane 数、row 并行数和是否引入 NoC 的架构做周期估算。
+
+### 7.2 精度/吞吐量建模及优化
+
+精度建模部分的关键结论前文已经讨论：`acc` 是主导误差源，而不是 `exp` 本身。吞吐量建模部分则给出了另一个很重要的系统性判断。以 `docs/data/20260304_compute_cycle_models_s256d64.csv` 为代表的结果显示，当采用 `fixed_flow_l32_norm8_row2` 时，compute-only 周期约为 `100,608`；若将 row 并行进一步扩大到 4，则可下降到 `51,328`；而引入简单 NoC 后，虽然功能上更灵活，但附加的分发与同步开销会使总周期反而回升。因此，对于当前问题规模和当前设计阶段，固定指令流并行优先于引入额外网络结构，是一个更合理的工程决策。
+
+### 7.3 测试结果
+
+为了便于汇总，表 7-1 列出 CModel 中最具代表性的几组数据。
+
+| 数据类别 | 代表结果 | 结论 |
+|---|---|---|
+| 阶段误差分解 `small-int + causal` | `acc` MAE=`135.58`，`norm` MAE=`1.865` | 误差主导来自累计与归一化 |
+| 阶段误差分解 `gaussian + causal` | `acc` MAE=`464.11`，`norm` MAE=`33.44` | 高动态输入进一步放大累计误差 |
+| 方案对比 `small-int + causal` | `acc_float_qout` / `acc_float_real_exp_qout` 可达标 | 证明累计精度是关键方向 |
+| 计算周期模型 `fixed_flow_l32_norm8_row2` | `100608 cycles` | 说明当前 RTL 仍有进一步结构优化空间 |
+| 计算周期模型 `simple_noc_l32_norm8_row4` | `71808 cycles` | NoC 并非当前规模下的必要条件 |
+
+这些结果有两个直接意义。其一，CModel 不是与 RTL 相互独立的辅助代码，而是架构决策的重要支撑工具。其二，当前主线之所以能够在不牺牲正确性的前提下把周期降到十几万级，并不是凭经验试错，而是因为 CModel 已经提前揭示了哪些方向会有效、哪些方向虽然看起来高级但收益有限。
+
+
+## 7.4 0324 CModel 扩展：从“对算子”到“对推理行为”
+
+0310 阶段 CModel 的主要任务是解释 fixed-point 算子误差与周期；0324 阶段 CModel 的角色已经扩展为“推理后端稳定参考”。
+
+### 7.4.1 mode 扫描结果
+
+`inference/native/logs/cmodel_mode_sweep_20260320.log` 给出 0~18 模式扫描。关键模式如下：
+
+- mode14: `mae_lsb=0.579468`, `max_abs_lsb=1`
+- mode15: `mae_lsb=0.589640`, `max_abs_lsb=2`
+- mode16: `mae_lsb=0.590007`, `max_abs_lsb=1`
+- mode17: `mae_lsb=0.588460`, `max_abs_lsb=1`
+- mode18: `mae_lsb=0.587321`, `max_abs_lsb=1`
+
+该结果说明：在随机张量层面，mode15/16/17 与 mode14 的平均误差差距并不大；但端到端文本稳定性差异仍显著，意味着“随机向量 MAE”不足以单独预测推理可读性。
+
+### 7.4.2 mode14 的角色变化
+
+mode14（FA_CORE_COMPAT）从“候选模式”升级为“推理稳定基线”：
+
+1. 常规 chat prompt 可读；
+2. role prompt 与 sw 主干可对齐；
+3. 吞吐保持可用（多组样本 decode `~10-21 tok/s`）。
+
+因此当前建议把 mode14 作为所有 DPI/RTL 定位的参考底座。
+
+### 7.4.3 mode15/17 的阶段性判定
+
+mode15（FIXED_Q8_IMPROVED）与 mode17（dual-buffer chunk=8）的价值在于“逼近纯 fixed 路线”，但尚未达到替代标准。
+
+代表结论：
+
+1. K-smooth 可显著降低主流误差分布（`realdiff` 平均误差从 `46.5565` 降到 `19.6330`，`p95` 从 `393` 降到 `1`）；
+2. 仍存在少量离群（`max_abs_lsb` 甚至升高），并在 role prompt 触发结构化异常；
+3. 热点 guard（单点或多点）收益有限，说明问题是全链路耦合而非单点 patch 可解。
+
+## 7.5 多级建模与验证漏斗
+
+0324 实际形成了四层建模漏斗：
+
+1. Level-1 算子级：mode sweep（随机张量）；
+2. Level-2 chat 级：5 prompt 可读性与 tok/s；
+3. Level-3 role 级：结构化 prompt 稳定性；
+4. Level-4 logits/热点级：top-k、head heatmap、stage trace。
+
+该漏斗的价值在于把“误差数值”和“生成质量”建立因果桥接，不再只停留在 MAE。
+
+## 7.6 与 RTL 对齐的下一步
+
+基于当前建模结论，RTL 对齐建议是：
+
+1. 保持 mode14 作为 golden-like 对照；
+2. 针对 mode15/17 热点层位（如 layer22/23, head1/8~13）导出 `m/l/acc/norm` 同名观测；
+3. 做 merge 参数联合扫描（chunk、rounding、PV shift、round bias），按“首分歧 token 位置”排序，而非按单一 MAE 排序。
+
+该路径比继续堆叠局部 guard 更有概率收敛到可替代 fixed 路线。
+## 8. IP 核接入大模型推理
+
+### 8.1 模型与推理框架
+
+关于 LLM 接入，本项目已经完成较为系统的可行性分析。总体思路是在 C/C++ 推理框架中拦截 attention 模块调用，把原本由 CPU 完成的 SDPA 运算替换为 RTL IP 或其 Verilator/DPI-C 封装接口。理想情况下，软件侧只需要完成三件事：第一，把进入 attention 的浮点张量量化为 Q8.8；第二，把量化后的 Q/K/V 放入一段 DMA 可见内存；第三，启动 IP 并在完成后把 O 结果从 Q8.8 恢复成浮点再接回后续网络层。
+
+需要指出的是，若完全不修改当前 RTL 主线，则模型选择必须考虑 `head_dim` 与上下文长度的兼容性。当前 IP 以 `D=64` 为默认参数，因此更直接匹配的是 `head_dim=64` 的模型或经过裁剪后的实验模型。若仍坚持沿大纲中最初提到的 `Qwen2.5-0.6B` 继续推进，则必须先确认该模型的 `head_dim` 是否与当前 IP 对齐；若不对齐，就需要将硬件扩展到 `D=128`，或者在软件侧做明确的模型裁剪与验证说明。从现有调研结论看，短期更稳妥的方案是优先选择 `head_dim=64` 的小模型或做受控实验模型，以降低接入阶段的不确定性。
+
+### 8.2 针对 IP 核的推理引擎指令流优化
+
+一旦把 attention 核从纯软件函数替换为硬件外设或其仿真模型，推理引擎层面的编排就变得重要起来。当前 IP 天然支持 tile 化，因此软件侧最直接的优化是让 `run.c` 或等价推理框架把 Q/K/V 的地址组织成与 IP tile 边界一致的布局，减少边界打包和额外拷贝。若未来要支持长于 `S=256` 的上下文，则更需要在推理框架层实现外层 block 调度，把一个长序列拆成多个 `256` 长度的 block，并结合外部存储层次或 scratchpad 做双缓冲搬运。
+
+但需要注意，若要对大于 `256` 的上下文做严格等价的 FlashAttention block merge，IP 需要暴露中间的 $m$ 和 $l$ 状态，或者支持“续算模式”。如果只输出最终归一化后的 O，而不输出 block 级统计状态，那么多个 block 的结果无法在软件层无损合并。因此，当前推理引擎优化可以分成两个层次。第一个层次是不修改 RTL、仅在 `S\le 256` 的范围内做端到端联合仿真；第二个层次是为了支持更长序列，在 IP 协议层增加中间状态可见性，使软件得以正确完成 block merge。当前项目已经完成第一个层次的方案论证，第二个层次则属于 bonus 与系统扩展方向。
+
+### 8.3 实测结果对比
+
+`inference/native` 已经保留了一组本机 Q8.8 attention 替换实验结果，本轮未再重复长耗时跑批，而是把现有结果统一收集到 [docs/report_0310/report/logs/native](docs/report_0310/report/logs/native)。其中可直接引用的文件包括性能日志 [docs/report_0310/report/logs/native/perf.log](docs/report_0310/report/logs/native/perf.log)、trace [docs/report_0310/report/logs/native/trace.log](docs/report_0310/report/logs/native/trace.log)、吞吐汇总 [docs/report_0310/report/logs/native/q8_8_perf_results.csv](docs/report_0310/report/logs/native/q8_8_perf_results.csv) 与文本对比 [docs/report_0310/report/logs/native/q8_8_text_results.csv](docs/report_0310/report/logs/native/q8_8_text_results.csv)。
+
+从文本一致性看，当前 CSV 共记录 `10` 组 prompt，其中 Q8.8 输出与 FP32 输出“完全一致”的只有 `2` 组，按严格字符串口径的 match rate 为 `20%`，统计摘要已单独存放在 [docs/report_0310/report/logs/native/native_metrics_summary.txt](docs/report_0310/report/logs/native/native_metrics_summary.txt)。这说明：一方面，Q8.8 attention 路径已经能够稳定跑通完整推理流程；另一方面，若以最终生成文本逐字一致作为标准，当前定点替换仍会带来明显语义漂移，因此后续对接 RTL 时必须把“是否能跑”与“文本是否严格保持”分开讨论。
+
+从吞吐数据看，`10` 组样本上的平均结果为：FP32 路径 `QKV=7.969 GMAC/s`、`ATTN=1.936 GMAC/s`、`Pipeline=14.833 GMAC/s`、`ATTN_Time_%=13.840%`；Q8.8 路径则为 `QKV=8.243 GMAC/s`、`ATTN=5.582 GMAC/s`、`Pipeline=17.366 GMAC/s`、`ATTN_Time_%=5.440%`。虽然这些数字仍然混合了软件框架与本机 CPU 行为，但它已经说明当前 attention 替换后，热点占比确实从“明显 attention 主导”下降为“attention 不再是主导瓶颈”，这为后续用 DPI-C / RTL 核进一步替换 `flash_attn.c` 提供了现实依据。
+
+具体到单条日志，[docs/report_0310/report/logs/native/perf.log](docs/report_0310/report/logs/native/perf.log) 记录了一次以 “Introduce the history of the Apple company.” 为 prompt 的本机运行。该运行成功完成了模型加载与文本生成，但回答内容明显偏保守、且未真正围绕苹果公司历史展开，这与上面的文本匹配率结论是一致的：当前 native Q8.8 路径已经能证明“算子替换可行”，但尚不能把其输出质量直接视为最终可交付的大模型推理质量。
+
+### 8.4 结合 trace 的数据流分析与优化讨论
+
+[docs/report_0310/report/logs/native/trace.log](docs/report_0310/report/logs/native/trace.log) 给出了 attention 替换在模型推理中的实际数据流展开。以 `pos=0` 的首 token 为例，每层都先执行 `Input RMSNorm`、`Q_proj/K_proj/V_proj` 与 `RoPE`，随后进入“FlashAttention Module Equivalent”阶段。trace 明确表明：当前模型的 attention 输入在每层表现为 `Q [14, 64]`、`K_cache [1, 2, 64]`、`V_cache [1, 2, 64]`，即共有 `14` 个 query head、每个 head 的 `head_dim=64`，而在序列初始阶段每个 head 只需要对极短的 K/V cache 做点积、softmax 与加权求和。
+
+这个 trace 对硬件接入有三个直接启示。第一，当前 IP 的 `D=64` 与 trace 中的单头维度是对齐的，因此最小可行接入不必先扩维到 `128`，而是可以先围绕“单 head、head_dim=64、逐 head 调用”的方式完成 DPI-C 验证。第二，真正需要软件—硬件协同处理的是 head 维与层维的外层循环；对单次核调用而言，硬件只需负责某一 head 的 `QK^T + online softmax + PV`，而不需要吞掉整个 transformer layer。第三，decode 初期 K/V cache 很短，attention 计算量并不大，此时若直接调用 RTL 仿真核，调度、量化、内存拷贝和 DPI 交互开销很可能高于纯计算开销，因此应该优先在 prefill 或较长 decode 上下文中验证收益。
+
+据此，后续优化建议可归纳为四点。其一，先把 `inference/native/flash_attn.c` 中单 head attention 调用封装成稳定接口，再以 DPI-C 替换其中的 `QK/softmax/PV` 核心，避免一开始就尝试把整层全部搬到 RTL。其二，优先复用当前 `trace.log` 中已经出现的 `head_dim=64` 场景，把硬件核视为“每 head 一次调用”的加速器，而不是要求硬件立即支持全部 `14` 个 head 并行。其三，在 RTL 侧应继续优先吸收 `fa_qk_dotprod_slice_pipe/exp_h` 与 `fa_online_softmax_ctx/exp_d` 这类已经完成频率验证的结构，因为它们恰好对应 trace 中最核心的两段计算。其四，若未来要覆盖更长序列，就必须把 block merge 所需的中间 `m/l` 状态或等效统计信息通过接口暴露出来，否则软件无法在多 block 场景下正确合并 attention 结果。
+
+
+## 8.5 0324 接入状态：DPI 与 CModel 双后端并行
+
+本阶段推理接入的本质变化是：attention 后端已经从单一软件路径扩展为可切换后端体系。
+
+- `FLASH_ATTN_BACKEND=sw`
+- `FLASH_ATTN_BACKEND=dpi`
+- `FLASH_ATTN_BACKEND=cmodel`
+
+并且 `inference/dpi/` 已形成 C API + Verilator wrapper + AXI-Lite/队列提交骨架，为后续真实 RTL 联调提供了稳定接口层。
+
+## 8.6 DPI 现状与瓶颈量化
+
+### 8.6.1 速度量级
+
+当前 DPI 长跑样本显示：
+
+- `prefill tok/s ≈ 0.0238`
+- `decode tok/s ≈ 0.0232`
+
+按 prefill 30 token 估算，首个 decode token 约需：
+
+$$
+30 / 0.0238 \approx 1260s \approx 21\text{分钟}.
+$$
+
+这与非 DPI 软件路径（几十 tok/s）存在数量级差距，说明当前瓶颈主要在仿真执行本体，而非单纯日志开关。
+
+### 8.6.2 可读性问题
+
+DPI 路径在 decode 早期出现 `token=72030 (/API)` 重复采样，形成模式坍缩。当前已通过三类证据定位：
+
+1. top-k 直接对照（SW vs DPI）；
+2. 层/头热力图（`layer23`、`head1/8~13` 热点明显）；
+3. 最后激活统计（DPI `maxabs` 明显抬升）。
+
+结论：问题已从“现象级”收敛到“logits 分布级”。
+
+### 8.6.3 热点修复实验结果
+
+热点回填（hotfix）能明显缓解 `/API` 坍缩，证明“晚层 attention 输出失配”是主链路；但该方案属于工程缓解，不是根因修复。
+
+## 8.7 CModel 后端的阶段成果
+
+### 8.7.1 可读性恢复
+
+mode14 修复后，cmodel 在 chat/role 两类样本下均实现可读输出并与 sw 主干对齐。
+
+### 8.7.2 速度对比
+
+按 20260320 回归摘要，cmodel 在 chat 场景的平均吞吐处于可用区间：
+
+- mode14: `avg_prefill≈23.933 tok/s`, `avg_decode≈16.649 tok/s`
+- mode15+ks: `avg_prefill≈28.298 tok/s`, `avg_decode≈18.319 tok/s`（但质量不稳定）
+- mode17+ks: `avg_prefill≈25.309 tok/s`, `avg_decode≈14.198 tok/s`
+
+因此当前最合理的工程定位是：
+
+1. cmodel 先作为稳定参考；
+2. fixed 路线继续追质量，不以短期 tok/s 优势替代质量门槛。
+
+## 8.8 从“可跑通”到“可交付”仍缺的三件事
+
+1. DPI 需要从仿真级跑通转为质量稳定，先解决 decode 分布坍缩；
+2. mode15/17 需要跨过 role prompt 稳定门槛，才能替代 mode14；
+3. 推理框架需形成统一 benchmark 协议（同 prompt 集、同温度/采样、同统计窗口）以避免跨日志口径漂移。
+
+这三件事完成后，IP 接入才可从“技术可行”进入“结果可交付”。
+## 9. Bonus 功能实现
+
+虽然本报告主体仍以 baseline 为中心，但当前工程中实际上已经包含若干具有 bonus 性质的能力。第一，perf counters 不仅满足调试需要，也为后续系统级性能感知与软件侧调度提供了硬件事件基础。第二，K/V 双缓冲预取与主线控制空拍压缩，使当前设计不再只是“功能正确的串行原型”，而是具备了真实吞吐优化特征。第三，QK 点积的多轮实验已经从浅层归并推进到乘法首拍和全流水加法树，为进一步逼近高频提供了结构模板。第四，围绕长上下文支持、block merge、DPI-C 联合仿真和 LLM 接入的方案分析，也已把 bonus 扩展的技术边界梳理得较为清楚。
+
+若从后续优先级看，最具价值的 bonus 方向有三个。其一，是把当前独立实验中验证有效的 QK 与 Online Softmax 结构真正回灌到主线，使 baseline 的频率潜力与结构清晰度进一步提升。其二，是扩展长上下文支持，为软件—硬件协同 FlashAttention 提供 block merge 所需的状态接口。其三，是完成 LLM 端到端接入，把“功能正确、周期可测”的 attention IP 进一步提升为“真实推理流程可调用”的硬件加速组件。
+
+
+## 9.1 0324 Bonus 全景状态（1~9）
+
+结合各分支文档与代码现状，当前 bonus 状态可归纳如下。
+
+| Bonus | 分支 | 当前状态 | 主要证据 |
+|---|---|---|---|
+| #1 BF16/FP16 | `exp/bonus1-bf16` | 原型闭环完成，未并入主线 | BF16 周期从 8.57M 降至 2.15M；FP16/BF16 unified mode 回归通过 |
+| #2 多 head | `exp/bonus2-mha` | 第一阶段完成（顺序 MHA） | heads=1/2/4/8 周期线性，精度在门限内 |
+| #3 S=512 | `exp/padding-mask-s512` | top/IP 闭环完成 | `cycles=307024`, `MAE=0.002235`, `MaxAE=0.006685` |
+| #4 padding mask | `exp/padding-mask-s512` | 完成 | `valid_len=192` 回归通过，padded 输出归零 |
+| #5 其他定点 | `exp/padding-mask-s512` | 完成（外部格式桥接） | `Q6.10/Q4.12` 回归通过 |
+| #6 dropout | 无独立实现 | 未开始 | 仅路线讨论，无 RTL 落地 |
+| #7 INT8/FP8 | `exp/int8-fp8-bootstrap` | 组件+原型完成，系统未收敛 | RTL vs fixed/cmodel 对齐，FP32 误差仍高 |
+| #8 AXI4-Stream | 无独立实现 | 未开始 | 仅方案分析 |
+| #9 task queue | `exp/bonus9-task-queue` | P2 true FIFO 完成 | 默认4深度+8深度回归通过，异常语义完整 |
+
+## 9.2 “完成”的分层定义
+
+为了避免术语混淆，本报告把 bonus 完成度分 4 级：
+
+1. L0 方案：只有文档。
+2. L1 原型：有模块与局部测试。
+3. L2 系统：有 top/IP 级回归证据。
+4. L3 可并线：具备并入主线的质量与边界说明。
+
+按该定义：
+
+- #3/#4/#5/#9 已达 `L2`；
+- #2 当前在 `L2`（顺序 MHA）；
+- #1/#7 多处停留在 `L1~L2` 之间；
+- #6/#8 仍在 `L0`。
+
+## 9.3 当前最值得继续推进的 bonus 组合
+
+从“收益/风险/可交付性”综合排序，建议优先级为：
+
+1. `#2 + #9`（系统调度扩展）
+2. `#3/#4/#5`（补覆盖与性能解释，收尾交付）
+3. `#1`（BF16/FP16 收口成可比版本）
+4. `#7`（INT8/FP8 保持研究线）
+5. `#8/#6`（后置）
+
+该排序与当前分支成熟度一致，也最利于在不破坏 baseline 的前提下持续产出可提交成果。
+
+## 9.4 各 bonus 线的关键风险
+
+1. #2：若要超越线性缩放，必须进入 core 重构，风险从“控制层”升级到“数据通路层”。
+2. #9：控制语义和软件驱动耦合增强，若寄存器定义频繁变化会影响验证稳定性。
+3. #1：吞吐与面积压力仍大，且与 baseline 主线差异过大，不宜直接并线。
+4. #7：数值误差长尾明显，不能以局部 PASS 替代系统级可用性。
+5. #8：会引入新接口验证体系，若与 DMA 版混杂开发容易放大维护成本。
+
+## 9.5 建议的分支治理
+
+下一阶段建议以 `baseline` 为稳定父分支，按技术族拆开：
+
+1. `exp/multihead-queue`：合并 #2 与 #9 的系统调度线；
+2. `exp/stream-top`：独立推进 #8；
+3. `exp/fp16-bf16-next`：继续 #1；
+4. `exp/int8-fp8-next`：继续 #7；
+5. `exp/padding-mask-s512` 保持冻结收尾，仅补覆盖与报告。
+
+这样可确保 bonus 之间可比、可审计、可回退。
+## 10. 逻辑综合与物理实现
+
+### 10.1 具体方案
+
+当前综合与时序分析采用两阶段策略。前期使用 Yosys 进行逻辑综合，并通过 iEDA 完成基于 icsprout55 的 pre-P\&R 静态时序分析，主要目标是定位中前端的结构瓶颈，而不是给出最终流片级物理结果。后期若项目进入更完整的实现阶段，则再迁移到 Cadence 工具链做完整后端流程，包括 floorplan、placement、CTS、routing、功耗分析和版图签核。
+
+这种策略的合理性在于，当前项目仍处于架构快速迭代期。对于 QK、Online Softmax、Normalization 等模块，决定频率上限的往往是“这一拍做了什么组合逻辑”，而不是“标准单元摆在芯片上的具体位置”。因此先用综合和 STA 快速识别最长路径、面积量级和结构性趋势，再决定是否继续拆拍或重构 datapath，是成本最低、信息量最高的做法。
+
+### 10.2 版图结果与面积分析
+
+当前尚无完整 Cadence 版图结果，因此面积分析仍以综合报告中的 cell area 为主。尽管如此，这些数据已经足以揭示各热点模块的相对规模。举例而言，`fa_online_softmax_ctx/exp_d` 的面积约为 `27216.28`，说明 softmax leaf 本身虽然时序敏感，但绝对面积并不高；`fa_o_normalize_block_pipe/exp_d` 的面积约为 `238672.84`，说明 64bit 归一化链路会带来较大面积负担；QK 点积实验 `exp_g` 与 `exp_h` 的面积分别约为 `272855.24` 和 `286906.48`，则表明高宽度并行乘加树是当前最主要的面积热点之一。倒数模块 `fa_recip_nr_q16_16/exp_c` 的面积约为 `60594`，在达到 500MHz 收敛的同时面积增量仍然可接受。需要额外说明的是：当前主线把 `ctx` 以按维复制的方式接回 core，因此单实例 `27216.28` 只能作为 leaf 级数据参考，不能直接当作当前 softmax 子图总面积来理解。
+
+这些数据有一个直接推论。若未来需要进一步压缩面积，单靠在线 softmax 或倒数模块的局部优化意义有限，因为它们的绝对面积并不构成系统主导项；真正需要做结构权衡的是 QK 和归一化等高位宽、高并行路径。与此同时，若只从“面积—频率收益比”角度看，Online Softmax 是目前最值得继续保留和吸收独立实验成果的模块，因为它已经证明可以以相对温和的面积代价换来非常显著的频率提升。
+
+### 10.3 时序与功耗结果
+
+#### 10.3.1 时序分析
+
+表 10-1 按“当前主线 RTL 是否已经直接采用该结构”来汇总模块级时序结果。这里的例化数口径需要先说明清楚：表中的“例化数”指的是**当前 elaborated hierarchy 中该模块的直接实例数，包含 `generate for` 展开后的实例，但不递归统计其内部再调用的子模块，也不把综合后被工具复制/分裂的算术单元当作新的 RTL 例化数**。因此，像 `fa_online_softmax_ctx` 这种通过 `generate for` 在 `fa_attention_core` 中复制出来的模块，当前会按展开后的直接实例数统计；而其内部维护的 `4-context` 状态只是单实例内部资源，不会再额外记成 4 倍模块数。需要特别说明：`fa_qk_dotprod_slice` 与 `fa_o_normalize_block` 的当前主线同名文件已经分别提升为 `exp_h` 与 `exp_d` 的内容，因此下表中这两行虽然引用的是实验工件目录，但对当前 RTL 来说属于**精确覆盖**；online softmax 本轮则切回 `fa_online_softmax_ctx` 家族，因此这里的 `ctx/exp_d` 数值仍然只代表**单 leaf 参考能力**，不能直接外推成当前整条 softmax 子图的总面积与系统级吞吐。
+
+<!-- 图10-1：当前 RTL 模块层级与 STA 覆盖关系示意图 -->
+<!-- 图10-2：表10-1 对应的综合/STA 关键截图占位 -->
+
+> 图10-1 建议保留为模块层级/覆盖关系框图，不使用 WaveDrom。
+>
+> 图10-2 应保留为真实综合/STA 截图，不使用 WaveDrom。
+
+| 模块 | 当前 RTL / 数据来源 | 面积 | Worst Slack(ns) | 估算频率(MHz) | 当前直接例化数（含 generate 展开） | 上层模块 | 说明 |
+|---|---|---:|---:|---:|---:|---|---|
+| `fa_attention_ip_top` | 当前主线顶层 | — | — | — | `1` | — | 当前轮未重跑直接 STA；由其子模块当前 RTL 数据覆盖 |
+| `fa_attention_core` | 当前主线核心 | — | — | — | `1` | `fa_attention_ip_top` | 当前轮未重跑直接 STA；关键 leaf 已切换到当前版本 |
+| `fa_axi_lite_regs` | 历史主线直跑 | `4399.64` | `+0.729` | `787.1` | `1` | `fa_attention_ip_top` | 当前 RTL 未改，历史数据仍有效 |
+| `fa_perf_counters` | 当前主线直跑 | `10091.76` | `+1.203` | `1254.7` | `1` | `fa_attention_ip_top` | 本轮已直接补齐 |
+| `fa_dma_reader` | 当前主线直跑 | `1813.56` | `+1.301` | `1430.6` | `1` | `fa_attention_ip_top` | 本轮已直接补齐 |
+| `fa_dma_writer` | 当前主线直跑 | `907.76` | `+1.374` | `1597.4` | `1` | `fa_attention_ip_top` | 本轮已直接补齐 |
+| `fa_qk_dotprod_slice` | 当前主线=`exp_h` 提升版 | `286906.48` | `-0.260` | `442.5` | `1` | `fa_attention_core` | 当前 RTL 精确对应 `best_qk_exp_h` |
+| `fa_online_softmax_ctx` | 当前主线 softmax leaf=`exp_d` | `27216.28` | `+0.135` | `536.2` | `ROW_PAR×D=2D` | `fa_attention_core` | `fa_attention_core` 中按 `ROW_PAR×D` 个直接实例展开；每实例内部再维护 `4-context` 状态，因此“逻辑上下文数”与“模块例化数”不可混同 |
+| `fa_recip_nr_q16_16` | `exp_c` / 当前可复用 | `60594.24` | `+0.102` | `526.7` | `1` | `fa_attention_core` | 已在 500MHz 下收敛 |
+| `fa_o_normalize_block` | 当前主线=`exp_d` 提升版 | `238672.84` | `-0.772` | `360.8` | `1` | `fa_attention_core` | 当前 RTL 精确对应 `best_norm_exp_d` |
+| `fa_mul_sat_q8_8` | 历史主线直跑 | `4469.36` | `-0.313` | `432.3` | `ROW_PAR=2` | `fa_attention_core` | 当前 RTL 未改，历史数据仍有效 |
+| `fa_exp_pwl_8seg_q1_15` | 历史主线直跑 | `1892.52` | `-0.507` | `398.9` | `0` | — | 当前主线 softmax 已改为 `ctx` 内建 `exp2` 近似，不再直接实例化 |
+
+其中当前默认参数为：`D=64`、`ROW_PAR=2`，因此上表中的 `2D=128`、`ROW_PAR=2` 都可以直接落到具体实例数。若后续参数化配置变化，这种写法也能更直观地保留“例化数量如何随参数缩放”的关系。
+
+从当前主线覆盖关系看，DMA、寄存器、perf、QK、normalize、倒数与乘法器都已经能找到对当前 RTL 直接有效或内容等价的 STA 数据。online softmax 的情况要更复杂一些：当前主线已经重新使用 `ctx` 家族，但由于 core 里采用的是按维复制接法，现有 `ctx/exp_d` 的单模块 STA 只能说明“leaf 可以过 500MHz”，不能说明“当前 softmax 子图整体已经闭环”。因此这里必须同时保留两层口径：一层是 leaf 频率能力，另一层是当前主线调度现实。
+
+#### 10.3.2 面向 500MHz 的下一步实验方向（QK / Norm）
+
+结合 [docs/20260309_softmax_qk_norm_followup_report.md](docs/20260309_softmax_qk_norm_followup_report.md) 与 [docs/20260310_qk_full_pipeline_experiments.md](docs/20260310_qk_full_pipeline_experiments.md) 的结论，可以把 QK 与 Norm 面向 500MHz 的下一步实验方向收敛到更具体的几类。
+
+<!-- 图10-3：QK 从 exp_e 到 exp_h 的关键路径迁移图 -->
+<!-- 图10-4：Norm 从 base 到 exp_d 的数据路径拆分图 -->
+<!-- 图10-5：建议下一轮实验矩阵（QK / Norm）占位 -->
+
+> 图10-5 更适合作为实验矩阵表或二维对照表，不使用 WaveDrom。
+
+首先看 QK。`exp_f/g/h` 已经证明“乘法首拍 + 全流水二叉树”是正确方向，且 `exp_h` 把最差端点收缩到 `mult*_r`，说明当前瓶颈已从宽加法树转移到**输入总线驱动乘法器阵列**与**单乘法器叶级路径**。因此下一轮最值得做的实验，不应再回到 `exp_e` 那类局部乘加块细修，而应围绕以下三类：
+
+1. **输入扇出继续收敛的 `exp_i` 类实验**：在 `exp_h` 的输入预寄存基础上，继续做输入寄存复制、按 `16+16` 子阵列分组、局部 bank 化布线友好组织，目标不是改变 `32-lane` 与 `II=1`，而是进一步降低“输入寄存到 32 个乘法器”的单拍扇出压力。
+2. **乘法叶级本体优化的 `exp_j` 类实验**：既然关键路径已经稳定落到 `mult*_r`，下一步应尝试 Booth/部分积型乘法 RTL、或把 `16×16` 乘法明确重写成更物理友好的两级部分积与 CSA 结构，验证是否能把 `442.5MHz` 再往上推近 500MHz。
+3. **带 tag 的流式回收原型**：独立模块已经是长流水，真正限制系统表现的是当前 core 没有把这条流水隐藏起来。因此应做一个带 `qpair/chunk` tag 的 QK slice 原型，让 `fa_attention_core` 可以连续发射多个 score-pair，再按 valid/tag 回收部分和。这类实验本身不一定改变 leaf STA，但对系统周期至关重要。
+
+其次看 Norm。`exp_d` 通过高低半字部分积，把频率从约 `264MHz` 提升到 `360.8MHz`，说明该路径仍有结构空间，但它和 QK 不同：Norm 的主问题不是单一超宽扇出，而是**64bit 累计量 × Q16.16 倒数**后在同一路径上完成重组、舍入与饱和。因此下一轮实验建议集中在：
+
+1. **更细粒度部分积 + carry-save 累加**：把当前 `pp_lo/pp_hi` 再细分为更规整的部分积树，并将最终 CPA 尽量后移，避免在单拍内同时完成过长的乘法重组。
+2. **符号/绝对值/饱和路径解耦**：将 sign handling、rounding 和 saturation 明确拆到独立末级，验证当前关键端点是否其实卡在“乘积重组 + 饱和判断”的混合逻辑上。
+3. **系统级 overlap 友好版本**：对 Norm 而言，未必一定要把 leaf 本身硬推到 500MHz 才有价值。若能把倒数请求更早发起、把 normalize chunk 与写回重叠，系统收益可能大于继续单独深挖 leaf STA。因此建议增加一类“保持 `exp_d` 叶结构、但改变 core 发射节奏”的系统实验。
+
+综合来看，QK 更适合继续沿“叶级继续压关键路径 + core 做流式 tag 回收”双线推进；Norm 则更适合做“适度继续拆 leaf + 更强调系统 overlap”的组合策略。若只按优先级排序，下一步仍应先做 QK，再做 Norm。
+
+#### 10.3.3 功耗分析
+
+当前流程尚未形成完整的向量驱动功耗报告，因此本节只能给出定性分析而不提供签核级数值。一般而言，QK 点积模块由于具有大量并行乘法器和较宽寄存器阵列，是最可能同时成为面积与功耗热点的单元。归一化模块虽然频率较低，但 64bit 数据路径同样会带来不低的切换活动。Online Softmax 模块的面积和切换范围都相对较小，因此在总功耗中的占比预计不会像其时序重要性那样突出。待后续引入更稳定的门级网表与活动文件后，可再补充 VCD/SAIF 驱动的动态功耗分析与静态泄漏分析。
+
+### 10.4 DRC \& LVS 验证
+
+基于 Cadence 的完整后端尚未开展，因此目前没有可报告的 DRC 与 LVS 结果。现阶段使用 Yosys+iEDA 的目的主要是进行中前端结构收敛，而不是替代完整签核流程。后续若项目进入版图阶段，应在统一工艺库和约束环境下补齐版图生成、DRC、LVS、IR drop 和功耗完整报告。
+
+### 10.5 总结
+
+基于 icsprout55 的当前工作已经足够支持一个明确判断：项目的中前端热点和优化方向已被较清晰地定位。倒数与 Online Softmax 路径已经证明能够通过适当流水化达到或超过 500MHz；Normalization 有改善但优先级次之；QK 路径在本轮通过全流水乘法—加法树重构后已经被显著推进到 400MHz 以上，但仍是距离 500MHz 最近却也最难完全闭合的关键瓶颈。基于 Cadence 的完整物理实现尚未启动，但这并不妨碍当前基于 pre-P\&R 的结果对主线架构演进产生直接指导价值。
+
+### 10.6 自评：`syn/` 覆盖完整性与自顶向下 PPA 估算
+
+本小节仅用于自评，不作为正式报告对外展示内容。与前一版报告相比，本轮最大的变化不是“又多做了几个实验”，而是把真正已经被主线实例化的实验结构整理回了当前 RTL 命名体系：`fa_qk_dotprod_slice` 与 `fa_o_normalize_block` 现在已经分别对应 `exp_h` 与 `exp_d`；online softmax 也已经从 archived `pair` 切回 `ctx` 家族；`fa_dma_reader`、`fa_dma_writer` 与 `fa_perf_counters` 也已经补齐当前主线的直接 STA 结果。因此，`syn/` 对当前有效 leaf RTL 的覆盖已经明显强于上一版审计时的状态。
+
+其次，从主线实例化关系看，当前 `fa_attention_ip_top` 直接例化 `1` 个 `fa_axi_lite_regs`、`1` 个 `fa_perf_counters`、`1` 个 `fa_dma_reader`、`1` 个 `fa_dma_writer` 与 `1` 个 `fa_attention_core`；`fa_attention_core` 内部再直接例化 `1` 个 `fa_qk_dotprod_slice`、`ROW_PAR=2` 个 `fa_mul_sat_q8_8`、`ROW_PAR×D=2D=128` 个 `fa_online_softmax_ctx`、`1` 个 `fa_recip_nr_q16_16` 与 `1` 个 `fa_o_normalize_block`。这里必须强调：`2D=128` 个 `ctx` 实例是本轮为了把 `ctx/exp_d` 功能恢复到主线而采用的**直接复制接法**，它不是最终 PPA 口径下希望长期保留的系统结构。
+
+为了得到可用的 top-down 粗估，本报告继续采用“逻辑功能块 × 当前最佳候选模块面积”的保守方法，对**未来真正调度闭环后的主线**做一个结构下界估计，而不是把当前临时 `128×ctx` 接法直接乘进面积。参与估算的单模块面积分别取：`fa_axi_lite_regs=4399.64`，`fa_mul_sat_q8_8=4469.36`，`fa_recip_nr_q16_16(exp_c)=60594.24`，`fa_online_softmax_ctx(exp_d)=27216.28`，`fa_o_normalize_block(exp_d)=238672.84`，`fa_qk_dotprod_slice(exp_h)=286906.48`。按 `1×AXI-Lite + 2×mul_sat + 1×recip + 1×softmax + 1×normalize + 1×QK` 相加，可得到一个“面向未来合理主线结构、只覆盖主要已知计算块”的面积下界：
+
+$$
+4399.64 + 2\times 4469.36 + 60594 + 27216.28 + 238672.84 + 286906.48 = 626727.96.
+$$
+
+这个 `626727.96` 只能视为**核心已知块的面积下界**，因为它还没有计入 `fa_attention_core` 本身的控制逻辑、`fa_dma_reader`、`fa_dma_writer`、`fa_perf_counters`、顶层 glue logic，以及更重要的片上 buffer / 寄存阵列在完整顶层中的真实物理代价。换言之，如果未来把 `exp_h + exp_d + exp_d + exp_c` 这组最佳候选真正集成进主线，那么完整顶层的面积只会比这个数字更高，不会更低。
+
+从时序角度看，这个自评揭示了一个更清晰的现实：当前主线最关键的“已吸收优化结构”已经从实验态转成了正式 RTL，而且 `QK` 与 softmax 的 system-level overlap 也已经兑现到当前 `main` 的实测周期上。具体来说，当前主线 full-run 已读回 `cycles=85928`、`cs_dp_run_cycles=66560`、`cs_softmax_prep_cycles=32768`；这说明问题已经不再是“高频候选模块是否被 core 以正确节奏使用”，因为这一点已经在当前主线中基本解决。因而后续若要把自评真正做扎实，优先级应转向：第一，补跑 `fa_attention_core` 与 `fa_attention_ip_top` 的直接综合，并重新核对 cycles / PPA；第二，针对当前 128 个 `ctx` 叶实例的面积与布线代价做更系统的 top-down 审计；第三，再把长序列、padding、multi-head 与 task queue 等 bonus 方向工程化落地。
+
+
+## 10.7 0324 PPA 阶段结论（跨分支）
+
+0310 的 PPA 结论主要针对 Q8.8 主线 leaf；0324 需要补充“哪些分支已进入可比 PPA 阶段，哪些仍是功能原型阶段”。
+
+### 10.7.1 Q8.8 主线（可比阶段）
+
+Q8.8 主线仍是当前唯一具备较完整系统口径的 PPA 参考：
+
+1. 周期、误差、DMA、perf counters 都已闭环；
+2. leaf STA 已有多轮结果；
+3. 具备明确的系统瓶颈解释。
+
+因此，若需要对外提供“当前 IP 的可信 PPA 数字”，仍应以该线为主。
+
+### 10.7.2 Bonus 分支（非同等级 PPA）
+
+- `exp/padding-mask-s512`：系统功能闭环成熟，但尚缺与 baseline 同深度的综合对照矩阵；
+- `exp/bonus2-mha`：周期线性可解释，但并行化前提下的面积/时序收益尚未展开；
+- `exp/bonus9-task-queue`：控制面扩展明显，PPA 影响主要在寄存器与控制逻辑，不在算术热路径；
+- `exp/bonus1-bf16` 与 `exp/int8-fp8-bootstrap`：当前重点仍在算法/结构可运行性，尚未进入与主线同口径的工艺级比较。
+
+结论：目前不能把低精度分支的“局部模块可跑”直接外推为主线等价 PPA 结论。
+
+## 10.8 吞吐、带宽与频点的统一工程口径
+
+为了跨分支比较，建议后续固定输出以下四项：
+
+1. `cycles`（统一问题规模）
+2. `GOPS/GHz`（算术吞吐）
+3. `bytes/cycle`（带宽压力）
+4. `bus_util`（相对理论总线利用率）
+
+以 baseline 为例：
+
+- `cycles=85928`
+- `GOPS/GHz=195.247`
+- `bytes/cycle=6.864`
+- `bus_util≈42.9%`
+
+以 `S=512` 为例：
+
+- `cycles=307024`
+- `GOPS/GHz=218.580`
+- `bytes/cycle=7.26`（按 top/IP 数据）
+
+该口径能同时体现“算得快不快”和“搬得重不重”，比单看 cycles 更有解释力。
+
+## 10.9 面向 500MHz 的下一阶段建议（系统视角）
+
+在 0310 版中，500MHz 讨论主要集中在 leaf；0324 阶段建议把目标拆成双层：
+
+1. leaf 层：继续压 QK/Norm 关键端点；
+2. system 层：避免把 leaf 频率收益被调度气泡和数据搬运抵消。
+
+重点动作：
+
+1. 对 `fa_attention_core` 和 `fa_attention_ip_top` 补跑直接综合，形成 top-down 时序证据；
+2. 量化 queue/multi-head/s512 分支对控制逻辑面积和关键路径的影响；
+3. 对 `valid_len` 场景补充 DMA 裁剪实验，观察 bytes/cycle 改善幅度。
+
+若不补这三项，下一轮 PPA 仍会停留在“leaf 很强，但系统收益不可量化”的阶段。
+
+## 10.10 0324 小结
+
+当前 PPA 可信度排序：
+
+1. Q8.8 baseline 主线：最高；
+2. `S=512/valid_len/multihead/queue` 系统扩展：中等（功能强，PPA 对照待补）；
+3. BF16/FP16 与 INT8/FP8：原型验证为主，PPA 结论暂不对外外推。
+
+这一定义有助于避免在报告中把“研究原型性能”误写成“可交付 IP 性能”。
+## 11. 总结
+
+### 11.1 已完成的题目要求功能性能指标
+
+若对照赛题要求逐项审视，当前项目已经完成 baseline 的主要功能与性能要求；并且与此前“稳定 baseline 主线”和“高频 leaf 恢复态”并存的时期不同，当前仓库 `main` 已经收敛为唯一活动主线。下面按题目要求逐项说明。
+
+<!-- 图11-1：题目要求到 RTL 模块的映射图 -->
+<!-- 图11-2：顶层结构图与 Q/K/V/O 数据流图 -->
+<!-- 图11-3：Q tile / K-V tile 时序示意图 -->
+<!-- 图11-4：online softmax 状态 `m/l/acc` 更新波形图 -->
+<!-- 图11-5：DMA 读写握手与 tile buffer 装载波形图 -->
+<!-- 图11-6：顶层 perf counters 读回截图占位 -->
+
+> 图11-1 建议保留为“题目要求 → RTL 模块”映射表或框图，不使用 WaveDrom。
+>
+> 图11-2 建议保留为顶层结构/数据流框图，不使用 WaveDrom。
+
+> 图11-6 应保留为真实 perf counters 读回截图或终端日志截图，不使用 WaveDrom。
+
+> **禁止显式存储完整注意力矩阵**
+
+这一要求已经完成，而且是当前 RTL 架构的核心前提。`fa_attention_core` 中只保存 `q_buf[TQ][D]`、双 bank `k_buf/v_buf[TK][D]`、按 query row 维护的 `row_m[TQ]`、`row_l[TQ]`、`row_acc[TQ][D]`，以及最终的 `o_buf[TQ][D]`。整个设计中都不存在 `score[S][S]` 或任何等价的完整注意力矩阵缓存。也就是说，对每个新得到的 score，设计会立刻做缩放、online softmax 状态更新和 PV 累加，而不是先把一整行或整个 `S\times S` 分数矩阵写到片上再统一处理。
+
+从数据流角度看，这一点和 FlashAttention 的原始动机一致：当前默认参数下，若显式缓存 `256\times256` 个 score，即使用 16bit 表示，也需要约 `128KB` 级别片上存储；而当前主线把片上主要存储压缩到 Q/K/V tile buffer 与 row context 上，主存储量约为 `56KB` 级别。换言之，本设计不是“没有做 attention matrix buffer 只是巧合”，而是**从存储组织一开始就排除了这条路线**。
+
+> **必须使用在线（online）softmax**
+
+这一要求已经完成。算法公式层面，主线始终按 online softmax 的递推更新 `m/l/acc`：当新 score 到来时，只基于上一拍的 `m/l/acc` 与当前 `(score, value)` 做状态推进。当前版本中，softmax 路径已切回 `fa_online_softmax_ctx` 家族；在 `fa_attention_core` 内部，当前不仅保留了按 lane 复制的 `ctx/exp_d` 叶模块，还通过 `SOFTMAX_CTXS=4`、batch 化 row-pair 调度与 tag 化回收把它真正纳入流式系统调度中。
+
+功能验证上，当前重新回归后，`fa_online_softmax_ctx` 单模块 cocotb 通过，`fa_attention_core` 通过，`fa_attention_ip_top` 也再次通过。这说明 online softmax 不只是“算法文档里写了”，而是已经在当前 RTL 与顶层系统回归中闭环。与此同时，本轮新建文档 [docs/20260310_online_softmax_ctx_pair_base2_comparison.md](docs/20260310_online_softmax_ctx_pair_base2_comparison.md) 已专门把 `ctx/pair/base2` 的实现差异与数据关系梳理清楚，避免后续再混淆“当前主线结构”和“历史实验候选”。
+
+> **必须分块（tiling）处理 K/V**
+
+这一要求已经完成。主线默认参数固定为 `TQ=32`、`TK=64`，因此 `SEQ_LEN=256` 会被拆成 `8` 个 Q tiles 和 `4` 个 K/V tiles。具体实现上，主状态机 `ms` 先读入一个 `Q tile`，随后对全部 `K/V tiles` 做内层遍历；每处理一个 `K tile` / `V tile`，就在 `S_COMPUTE` 中把 score、softmax 与 PV 累加流式完成。这样既限制了片上 buffer 规模，又保证了 K/V 以 tile 为单位被重复搬运和计算。
+
+选择 `TQ=32`、`TK=64` 的原因，也已经在 RTL 与理论分析里被量化：`Q tile` 为 `4KB`，`K tile` 或 `V tile` 各为 `8KB`，与当前 `128bit` 总线、每 beat `8` 个 Q8.8 元素的搬运粒度是匹配的。顶层 full-run perf 读回的 `DMA_RD_CMD_COUNT=136`、`DMA_RD_BEAT_COUNT=34816`、`DMA_WR_CMD_COUNT=8`、`DMA_WR_BEAT_COUNT=2048` 也与这套 tile 组织高度一致，说明 tiling 不是停留在结构图上的概念，而是已经在系统层真实发生。
+
+> **输入输出必须采用 Q8.8 定点格式，并保证内部有足够累计精度**
+
+这一要求已经完成。`Q/K/V/O` 都采用 Q8.8；QK 点积结果先在 Q16.16 域内累计，再通过 40bit 中间和送入缩放；row 级累计接口 `row_acc` 仍保留为 64bit；倒数模块使用 Q16.16。当前 streamed `ctx` 主线内部的 softmax leaf 使用 32bit `l/acc` 标量状态，随后由 core 写回 64bit `row_acc` 接口，并在 normalize 入口补齐当前主线所需的尺度对齐，因此整个数值链路已经在当前 `main` 上重新闭合。
+
+验证层面，这条数值路径已经在 core/top cocotb 中被 fixed-point 参考和 FP32 参考同时审计。当前主线在修正 `acc -> normalize` 尺度口径后，顶层 full-run 再次读回：RTL 相对 fixed-q8.8 参考 `mae_lsb=0`、`max_err_lsb=0`，相对 FP32 参考 `mae=0.002499`、`max_err=0.006583`，说明当前 `main` 已重新满足赛题精度门限，并且 fixed-point 参考也已与当前 RTL 主线对齐。
+
+> **必须提供 AXI-Lite 控制接口**
+
+这一要求已经完成。`fa_axi_lite_regs` 提供 `CTRL/STATUS/CFG/Q_BASE/K_BASE/V_BASE/O_BASE/STRIDE_BYTES/SCALE/NEG_LARGE/CYCLES/PERF_*` 等寄存器窗口。顶层寄存器回归已覆盖：
+
+1. 默认寄存器值；
+2. `CTRL` 启动脉冲；
+3. `STATUS` 中 busy / done-sticky / error 语义；
+4. 基地址与 stride 配置；
+5. perf counters 的读回窗口。
+
+这意味着 host 侧已经可以把本 IP 作为标准的“配置—启动—轮询完成—读结果/读统计”设备来使用。
+
+> **必须提供 AXI4 Master DMA 数据接口**
+
+这一要求已经完成。`fa_dma_reader` 负责从外部内存搬运 Q/K/V tile，`fa_dma_writer` 负责把 O tile 写回外部内存。主线核心通过 `dma_rd_cmd_*` / `dma_wr_cmd_*` 只下发逻辑命令，而不直接操纵 AXI 五通道细节，这使 tile 调度与总线协议保持了清晰边界。
+
+验证上，单模块 DMA 测试已经覆盖 burst、错误返回、长命令拆分等基本场景；顶层 full-run 中又进一步把命令数与 beat 数与行为级内存模型统计交叉校验。当前 full-run 再次读回的 `rd_cmd=136`、`rd_beat=34816`、`wr_cmd=8`、`wr_beat=2048` 与内存模型观测一致，说明 DMA 不仅“能搬”，而且其统计口径也可信。
+
+> **必须形成完整的端到端 attention 计算闭环**
+
+这一要求已经完成。当前主线顶层 `fa_attention_ip_top` 已经把寄存器配置、DMA 读写、tile 调度、QK 点积、online softmax、normalize 和写回全部连通。本轮在把 online softmax 切回 `ctx` 后，又重新完成了三层回归：
+
+1. `fa_online_softmax_ctx` 单模块 PASS；
+2. `fa_attention_core` PASS；
+3. `fa_attention_ip_top` PASS。
+
+因此，当前结构变化没有破坏主线功能闭环，这也是本轮先做恢复、再谈调度优化的前提。
+
+> **性能指标完成情况**
+
+在功能项上，以上要求都已经完成；在性能项上，当前 `main` 也已经形成统一口径。
+
+当前顶层 full-run perf 读回为：`cycles=85928`、`busy=85928`、`cs_dp_run_cycles=66560`、`cs_score_done_cycles=32768`、`cs_softmax_prep_cycles=32768`。其中：
+
+1. `QK` 的 `8` 拍流水延迟已不再对每个 score-pair 重复支付，而是按 batch 支付；
+2. `ctx` 的 `4-context` 交错能力已被当前主线调度真正利用；
+3. `score retire`、`softmax issue` 与 `QK issue` 已发生重叠；
+4. 最终总周期显著低于 baseline 要求的 `<300k cycles`。
+
+因此，当前项目在性能层面的结论已经从“高频 leaf 能工作，但 system 仍未闭环”，转变为：
+
+> **当前唯一活动主线 `main` 已经完成周期与精度双闭环，下一步工作的重点应从“主线达标”转向“bonus 扩展能力、分支管理与更完整 PPA 收敛”。**
+
+### 11.2 文件结构列表
+
+为便于后续复现与报告整理，当前仓库中最重要的目录与文件可概括如下。
+
+| 路径 | 作用 |
+|---|---|
+| `rtl/bus/` | AXI-Lite 寄存器与 DMA 模块 |
+| `rtl/core/` | attention 核心、QK 点积、online softmax、normalize 等主数据通路 |
+| `rtl/top/` | 顶层 IP 与性能计数器 |
+| `dv/cocotb/` | cocotb 回归框架 |
+| `dv/cocotb/tests/` | 各模块与顶层测试用例 |
+| `dv/verilator_cpp/` | Verilator C++ 直跑 testbench 与对照程序 |
+| `dv/python/` | Python 算法参考与审计脚本 |
+| `cmodel/` | C++ CModel、误差分解与吞吐模型 |
+| `experiments/` | 独立微架构实验、testbench 与实验 Makefile |
+| `syn/` | 历史综合与 STA 结果 |
+| `docs/` | 各阶段报告、数据 CSV 与图表 |
+| `docs/report_0310/report/` | 0310 报告配套工件、原始日志与最佳模块综合副本 |
+
+若以最短复现实验链路为目标，推荐优先阅读 `README.md`、`rtl/top/fa_attention_ip_top.sv`、`rtl/core/fa_attention_core.sv`、`dv/cocotb/tests/test_fa_attention_ip_top_regs.py`、`cmodel/csrc/attention_experiment.cpp` 和 `experiments/Makefile` 六个入口。这六处基本覆盖了主线结构、验证方法、建模逻辑和模块级 PPA 实验的完整图景。
+
+## 11.3 0324 阶段总评（相对 0310）
+
+若用一句话概括 0324 阶段：
+
+> baseline 没有回退，分支工作显著扩展，问题重心已从“达标”转向“多路线收敛与可交付治理”。
+
+与 0310 相比，项目成熟度提升体现在三点：
+
+1. **能力扩展真实落地**：`S=512`、`valid_len`、`Q6.10/Q4.12`、`task FIFO`、`MHA 顺序版`均已有代码与回归，不再停留在路线图。
+2. **推理接入进入实战阶段**：DPI/cmodel 后端已打通，问题定位已深入到 logits 分布与层头热点级别。
+3. **分支治理逐步清晰**：各 bonus 线的成熟度和风险边界可被量化描述，便于后续里程碑管理。
+
+## 11.4 当前最重要的“已知事实”
+
+1. baseline 核心指标稳定：`85928 cycles` 与既有精度口径保持不变。
+2. `S=512` top/IP 闭环已成立，但周期约 `307024`，不应与 baseline 目标混写。
+3. `Q6.10/Q4.12` 当前属于外部格式桥接，不代表内部全链路多精度。
+4. MHA 顺序版已展示良好线性缩放，但并行收益仍待架构重构。
+5. task queue 已完成 true FIFO 形态与异常语义，具备进一步系统化条件。
+6. mode14 已成为推理稳定参考；mode15/17 仍在“可读性改进但未替代”阶段。
+7. BF16/FP16 与 INT8/FP8 分支均有实质进展，但仍属并行研究线，暂不并入 baseline 口径。
+
+## 11.5 下一阶段里程碑建议（可执行）
+
+### M1（1 周）：收口与稳态
+
+1. 固化 `report_0324` 所有证据链接与复现命令；
+2. 补 `S=512/valid_len/data_fmt` 的最小覆盖矩阵；
+3. 统一 prompt 回归协议（chat/role 两类）。
+
+### M2（2~3 周）：系统扩展线
+
+1. 合并推进 `multihead + queue`，建立统一分支与统一计数口径；
+2. 在 `valid_len` 场景下引入 DMA 裁剪实验，补带宽收益曲线；
+3. 明确 queue 任务完成中断与 driver 协议。
+
+### M3（并行研究）：低精度线
+
+1. BF16/FP16：从实验 core 向 top/IP 语义对齐；
+2. INT8/FP8：先保持组件化验证，避免过早承诺系统级门限；
+3. mode15/17：以 mode14 为基准继续收敛 role 稳定性。
+
+## 11.6 结论
+
+当前项目已经跨过“baseline 是否可提交”的阶段，进入“多分支如何形成可交付产品路线”的阶段。若后续能够按本报告建议完成分支收口、覆盖矩阵、统一吞吐口径与推理质量门槛，那么 0324 之后的工作重点将不再是单点优化，而是面向系统级演进的工程化集成。
